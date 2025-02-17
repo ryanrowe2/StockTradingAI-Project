@@ -4,8 +4,8 @@ import pandas as pd
 import numpy as np
 import os
 import json
+import glob
 from sklearn.preprocessing import StandardScaler
-import kagglehub
 
 def load_data(filepath):
     """
@@ -129,46 +129,53 @@ def save_cpts(cpts, output_path):
     print(f"CPTs saved to {output_path}")
 
 def main():
-    # # Define file paths
-    # raw_data_path = os.path.join('data', 'raw', 'stock_data.csv')
-    # processed_data_path = os.path.join('data', 'processed', 'processed_stock_data.csv')
-    # cpts_path = os.path.join('data', 'processed', 'CPTs.json')
-    
-    # # Load raw data
-    # df = load_data(raw_data_path)
-    # print("Data loaded. Shape:", df.shape)
-    
-    # # Impute missing values
-    # df = impute_missing(df)
-    
-    # # Identify numerical columns for transformation and scaling
-    # numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    
-    # # Apply logarithmic transformation to reduce skewness
-    # df = log_transform(df, numerical_cols)
-    
-    # # Scale numerical features
-    # df, scaler = scale_features(df, numerical_cols)
-    
-    # # Discretize numerical features for CPT generation
-    # df, bin_edges = discretize_features(df, numerical_cols, bins=5)
-    
-    # # Generate Conditional Probability Tables (CPTs)
-    # cpts = generate_cpts(df, numerical_cols)
-    
-    # # Ensure the output directory exists
-    # os.makedirs(os.path.join('data', 'processed'), exist_ok=True)
-    
-    # # Save processed data and CPTs
-    # save_processed_data(df, processed_data_path)
-    # save_cpts(cpts, cpts_path)
+    # Define the source and destination folders
+    raw_folder = os.path.join('..', 'data', 'raw')
+    processed_folder = os.path.join('..', 'data', 'processed')
 
-    import kagglehub
-
-    # Download latest version
-    path = kagglehub.dataset_download("szrlee/stock-time-series-20050101-to-20171231")
     
-    print("Path to dataset files:", path)
+    # Ensure the processed folder exists
+    os.makedirs(processed_folder, exist_ok=True)
+    
+    # Get a list of all CSV files in the raw folder
+    csv_files = glob.glob(os.path.join(raw_folder, "*.csv"))
+    
+    if not csv_files:
+        print("No CSV files found in the raw folder.")
+        return
+    
+    # Process each CSV file individually
+    for file in csv_files:
+        print(f"\nProcessing file: {file}")
+        df = load_data(file)
+        print("Data loaded. Shape:", df.shape)
+        
+        # Impute missing values
+        df = impute_missing(df)
+        
+        # Identify numerical columns for transformation and scaling
+        numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        # Apply log transformation to reduce skewness
+        df = log_transform(df, numerical_cols)
+        
+        # Scale numerical features
+        df, scaler = scale_features(df, numerical_cols)
+        
+        # Discretize numerical features for CPT generation
+        df, bin_edges = discretize_features(df, numerical_cols, bins=5)
+        
+        # Generate Conditional Probability Tables (CPTs)
+        cpts = generate_cpts(df, numerical_cols)
+        
+        # Define output paths
+        filename = os.path.basename(file)
+        processed_file_path = os.path.join(processed_folder, filename)
+        cpts_file_path = os.path.join(processed_folder, filename.replace(".csv", "_CPTs.json"))
+        
+        # Save the processed data and CPTs
+        save_processed_data(df, processed_file_path)
+        save_cpts(cpts, cpts_file_path)
 
 if __name__ == '__main__':
     main()
