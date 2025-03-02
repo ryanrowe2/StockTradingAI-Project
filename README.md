@@ -33,7 +33,7 @@ Our agent is goal-based; it uses probabilistic predictions to inform trading act
 - **Description:** Over a decade of daily stock market data for various stocks (fields include Date, Open, High, Low, Close, Volume, Name).
 - **Observations:** Approximately 93,612 observations.
 
-### Exploratory Data Analysis (EDA)
+### Update: Exploratory Data Analysis (EDA)
 In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone2/notebooks/EDA_Preprocessing.ipynb) notebook, we computed:
 - **Summary Statistics:**
   - The "Close" price showed a mean of 85.64, median of 60.05, and standard deviation of 108.12.
@@ -49,7 +49,7 @@ In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Pro
 - **Missing Data:**  
   - We identified and imputed missing numerical values using column means.
 
-### Preprocessing Steps
+### Update: Preprocessing Steps
 - **Normalization & Transformation:**  
   - **Normalization:** We applied StandardScaler to standardize features (mean=0, std=1).  
   - **Log Transformation:** A log transformation was used to reduce skewness in price and volume data.
@@ -64,7 +64,7 @@ In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Pro
 
 ## Baseline Model
 
-### Bayesian Network Structure
+### Update: Bayesian Network Structure
 Our baseline model is a Bayesian network where each discretized feature is assumed to influence the target variable, `Trend`. The structure is as follows:
 
       Open_binned    High_binned    Low_binned
@@ -80,7 +80,7 @@ Our baseline model is a Bayesian network where each discretized feature is assum
 - **Learning:**  
   The network learns the conditional probability P(Trend | Open_binned, High_binned, Low_binned) via Maximum Likelihood Estimation (MLE). The learned CPDs (logged in our code) provide insight into how each discretized feature affects the trend.
 
-### External Libraries
+### Update: External Libraries
 - **pgmpy:** Used to model Bayesian networks, perform parameter estimation (MLE), and run inference (Variable Elimination).  
 - **scikit-learn:** Employed for splitting data into training and testing sets and for calculating evaluation metrics (precision, recall, F1, confusion matrix, ROC curve, AUC).  
 - **matplotlib:** Utilized to plot diagnostic visualizations, such as confusion matrices and ROC curves.  
@@ -127,7 +127,7 @@ Our baseline model is a Bayesian network where each discretized feature is assum
 
 ## Conclusion & Future Work
 
-### Conclusion
+### Update: Conclusion
 The baseline Bayesian network model demonstrates a fundamental approach to predicting whether the next day's Close price will be higher (`Trend` = 1). With an accuracy of around 51.1%, the model is only marginally better than random guessing. Several factors may contribute to this result:
 - **Data Noise:** Stock market data is inherently noisy, and simple historical indicators may not capture the full complexity of market behavior.
 - **Feature Discretization:** While discretizing continuous features simplifies probabilistic modeling, it may also lead to loss of nuanced information.
@@ -145,7 +145,7 @@ The baseline Bayesian network model demonstrates a fundamental approach to predi
 
 ---
 
-## Links to Code and Notebooks
+## Update: Links to Code and Notebooks
 - [Data Exploration & Preprocessing Notebook](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone2/notebooks/EDA_Preprocessing.ipynb)
 - [Model Training Script (model_training.py)](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone2/scripts/model_training.py)
 
