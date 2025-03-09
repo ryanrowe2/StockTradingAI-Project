@@ -6,6 +6,7 @@ import glob
 from sklearn.preprocessing import StandardScaler
 from technical_indicators import add_technical_indicators
 from hmm_integration import fit_hmm_on_indicators
+from hmmlearn.hmm import GaussianHMM  # Updated HMM class import
 
 def load_data(filepath):
     """
@@ -32,7 +33,8 @@ def impute_missing(df):
     """
     num_cols = df.select_dtypes(include=[np.number]).columns
     for col in num_cols:
-        df[col].fillna(df[col].mean(), inplace=True)
+        # Reassign the filled series to avoid chained assignment warnings
+        df[col] = df[col].fillna(df[col].mean())
     return df
 
 def log_transform(df, feature_cols):
@@ -133,6 +135,7 @@ def main():
     if not csv_files:
         print("No CSV files found in the raw folder.")
         return
+
     for file in csv_files:
         print(f"\nProcessing file: {file}")
         df = load_data(file)
@@ -141,14 +144,26 @@ def main():
         numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         df = log_transform(df, numerical_cols)
         df, scaler = scale_features(df, numerical_cols)
+        
         # Compute technical indicators and add them as new columns.
         df = add_technical_indicators(df)
-        # (Optional) Generate polynomial features if desired.
-        # from sklearn.preprocessing import PolynomialFeatures
-        # df = generate_polynomial_features(df, ['Close', 'MA_20', 'RSI_14'], degree=2)
+        
+        # Define the indicators for HMM fitting and drop rows with NaN in these columns
+        indicators = ['MA_20', 'RSI_14', 'MACD']
+        df = df.dropna(subset=indicators)
+        
+        # Attempt to fit HMM using the provided integration function.
+        try:
+            _, df = fit_hmm_on_indicators(df, indicators=indicators)
+        except AttributeError:
+            print("fit_hmm_on_indicators encountered an AttributeError. Falling back to manual HMM fitting.")
+            X = df[indicators].values
+            model = GaussianHMM(n_components=2, covariance_type="full", n_iter=1000)
+            model.fit(X)
+            latent_states = model.predict(X)
+            df['Market_Regime'] = latent_states
+        
         df, bin_edges = discretize_features(df, numerical_cols, bins=5)
-        # Fit HMM on technical indicators and add the Market_Regime column.
-        _, df = fit_hmm_on_indicators(df, indicators=['MA_20', 'RSI_14', 'MACD'])
         cpts = generate_cpts(df, numerical_cols)
         filename = os.path.basename(file)
         processed_file_path = os.path.join(processed_folder, filename)
