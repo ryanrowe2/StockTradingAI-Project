@@ -1,11 +1,11 @@
-# scripts/data_processing.py
-
 import pandas as pd
 import numpy as np
 import os
 import json
 import glob
 from sklearn.preprocessing import StandardScaler
+from technical_indicators import add_technical_indicators
+from hmm_integration import fit_hmm_on_indicators
 
 def load_data(filepath):
     """
@@ -38,7 +38,6 @@ def impute_missing(df):
 def log_transform(df, feature_cols):
     """
     Apply a logarithmic transformation to reduce skewness in numerical features.
-    A small constant is added to avoid log(0).
     
     Parameters:
         df (pd.DataFrame): DataFrame containing the data.
@@ -69,7 +68,6 @@ def scale_features(df, feature_cols):
 def discretize_features(df, feature_cols, bins=5):
     """
     Discretize continuous features into categorical bins using quantiles.
-    Bin edges are saved for potential future reference.
     
     Parameters:
         df (pd.DataFrame): DataFrame containing the data.
@@ -87,14 +85,13 @@ def discretize_features(df, feature_cols, bins=5):
 def generate_cpts(df, feature_cols):
     """
     Generate Conditional Probability Tables (CPTs) for the binned features.
-    For each feature, counts are normalized to form probability tables.
     
     Parameters:
         df (pd.DataFrame): DataFrame with binned features.
         feature_cols (list): List of original numerical feature column names.
         
     Returns:
-        dict: A dictionary where keys are feature names and values are the CPTs.
+        dict: A dictionary of CPTs.
     """
     cpts = {}
     for col in feature_cols:
@@ -129,51 +126,33 @@ def save_cpts(cpts, output_path):
     print(f"CPTs saved to {output_path}")
 
 def main():
-    # Define the source and destination folders
     raw_folder = os.path.join('..', 'data', 'raw')
     processed_folder = os.path.join('..', 'data', 'processed')
-
-    
-    # Ensure the processed folder exists
     os.makedirs(processed_folder, exist_ok=True)
-    
-    # Get a list of all CSV files in the raw folder
     csv_files = glob.glob(os.path.join(raw_folder, "*.csv"))
-    
     if not csv_files:
         print("No CSV files found in the raw folder.")
         return
-    
-    # Process each CSV file individually
     for file in csv_files:
         print(f"\nProcessing file: {file}")
         df = load_data(file)
         print("Data loaded. Shape:", df.shape)
-        
-        # Impute missing values
         df = impute_missing(df)
-        
-        # Identify numerical columns for transformation and scaling
         numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        
-        # Apply log transformation to reduce skewness
         df = log_transform(df, numerical_cols)
-        
-        # Scale numerical features
         df, scaler = scale_features(df, numerical_cols)
-        
-        # Discretize numerical features for CPT generation
+        # Compute technical indicators and add them as new columns.
+        df = add_technical_indicators(df)
+        # (Optional) Generate polynomial features if desired.
+        # from sklearn.preprocessing import PolynomialFeatures
+        # df = generate_polynomial_features(df, ['Close', 'MA_20', 'RSI_14'], degree=2)
         df, bin_edges = discretize_features(df, numerical_cols, bins=5)
-        
-        # Generate Conditional Probability Tables (CPTs)
+        # Fit HMM on technical indicators and add the Market_Regime column.
+        _, df = fit_hmm_on_indicators(df, indicators=['MA_20', 'RSI_14', 'MACD'])
         cpts = generate_cpts(df, numerical_cols)
-        
-        # Define output paths
         filename = os.path.basename(file)
         processed_file_path = os.path.join(processed_folder, filename)
         cpts_file_path = os.path.join(processed_folder, filename.replace(".csv", "_CPTs.json"))
-        
-        # Save the processed data and CPTs
         save_processed_data(df, processed_file_path)
         save_cpts(cpts, cpts_file_path)
 
