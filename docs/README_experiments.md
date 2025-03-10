@@ -38,7 +38,6 @@ The required Python packages are listed in the `requirements.txt` file at the ro
 - `matplotlib`
 - `pgmpy`
 - `hmmlearn`
-- (Optional) Additional packages for RL experiments if needed
 
 ---
 
@@ -52,6 +51,7 @@ Probabilistic-Stock-Trading-Agent/
 │   ├── raw/
 │   └── processed/
 ├── docs/
+|   ├── design_nodes.md
 │   └── README_experiments.md    <-- (This file)
 ├── notebooks/
 │   ├── EDA_Preprocessing.ipynb
