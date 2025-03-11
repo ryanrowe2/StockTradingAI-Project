@@ -326,7 +326,7 @@ This RL prototype offers a path toward developing adaptive trading strategies th
 4. **Incorporation of Latent Market Regimes (via HMM):**  
    The additional market regime feature further refines the model’s understanding of market states, enabling more context-aware predictions.
 
-*Illustrative Code Snippet from `model_training.py`:*
+*Illustrative Training Code Snippet from `model_training.py`:*
 
 ```python
 # Enhanced feature set
@@ -406,12 +406,52 @@ Our project demonstrates that by combining advanced feature engineering, probabi
    - `Model_Training_Evaluation.ipynb`
    - `HMM_and_RL_Experiments.ipynb`
 
+Below is a perfect section that addresses these requirements. You can insert this section after the "RL Integration" subsection and before the "Results & Comparative Analysis" section in your README. This section covers library explanations, detailed descriptions of core and non‑core model components, and includes a code snippet that demonstrates how the model is trained.
+
+---
+
+## Technical Details and Library Explanations
+
+### Library Explanations
+
+- **pgmpy:**  
+  pgmpy is a Python library for Probabilistic Graphical Models. It provides tools for creating, learning, and performing inference on Bayesian networks and other graphical models. In our project, we use it to build and optimize our Bayesian networks, including structure learning and parameter estimation.  
+  *Source: [pgmpy Documentation](https://pgmpy.org)*
+
+- **hmmlearn:**  
+  hmmlearn is a Python library designed for Hidden Markov Models. Our core model uses a Gaussian HMM, which assumes that the observed data are generated from a mixture of Gaussian distributions rather than discrete states. This allows us to model continuous market indicators directly. Inference in a Gaussian HMM is performed using algorithms such as the Forward-Backward algorithm for state estimation and the Viterbi algorithm to find the most likely sequence of hidden states.  
+  *Source: [hmmlearn Documentation](https://hmmlearn.readthedocs.io)*
+
+- **scikit-learn & matplotlib:**  
+  These libraries are used for data preprocessing, statistical analysis, and visualization throughout the project.
+
+### Core Model: Gaussian HMM
+
+Our project uses a Gaussian Hidden Markov Model (Gaussian HMM) as a core component for inferring latent market regimes. This model differs from discrete Bayesian networks in several ways:
+
+- **Continuous Observations:**  
+  Instead of categorizing data into discrete bins, the Gaussian HMM models continuous data by assuming each hidden state emits observations following a Gaussian distribution.
+
+- **State Transitions:**  
+  The model defines a set of hidden states with transition probabilities between them. The inference process involves:
+  - **Forward-Backward Algorithm:** Computes the probability P(z<sub>t</sub> | X) for each state at time t.
+  - **Viterbi Algorithm:** Determines the most likely sequence of hidden states given the observed data.
+  
+This continuous approach allows us to capture the subtleties of market behavior that may be lost in discretization.
+
+Source: [hmmlearn's GaussianHMM Documentation](https://hmmlearn.readthedocs.io/en/latest/api.html#gaussianhmm)
+
+### Non-Core Component: HillClimbSearch for Structure Learning
+
+For learning the structure of our Enhanced Bayesian Network, we use HillClimbSearch—a search algorithm that iteratively adds, removes, or reverses edges in the network to optimize a scoring metric (such as the BDeu score). This algorithm is implemented in pgmpy and helps identify a network structure that better captures the conditional dependencies among variables.
+
+Source: [pgmpy's HillClimbSearch Documentation](https://pgmpy.org/structure_estimator/hill.html)
+
 ---
 
 ## References
 
-- [pgmpy Documentation](https://pgmpy.org/)
-- [scikit-learn Documentation](https://scikit-learn.org/)
-- [hmmlearn Documentation](https://hmmlearn.readthedocs.io/)
-- [OpenAI Gym](https://gym.openai.com/)
-- [Matplotlib Documentation](https://matplotlib.org/)
+- [pgmpy Documentation](https://pgmpy.org)
+- [scikit-learn Documentation](https://scikit-learn.org)
+- [hmmlearn Documentation](https://hmmlearn.readthedocs.io)
+- [Matplotlib Documentation](https://matplotlib.org)
