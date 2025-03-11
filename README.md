@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project develops a **goal-based probabilistic stock trading agent** designed to predict whether the next day’s stock *Close* price will exceed today’s. Our primary objective is to maximize profit while managing risk by combining advanced probabilistic models, state-of-the-art feature engineering, and reinforcement learning techniques.
+This project develops a **goal-based probabilistic stock trading agent** designed to predict whether the next day’s stock *Close* price will exceed today’s. Our primary objective is to maximize profit while managing risk by combining advanced probabilistic models, feature engineering, and reinforcement learning techniques.
 
 Over the evolution of this project, we have achieved several key milestones:
 
@@ -22,7 +22,24 @@ Over the evolution of this project, we have achieved several key milestones:
 
 ## Project Achievements & Optimization Details
 
-### 1. Advanced Data Processing & Feature Engineering
+### 1. PEAS/Agent Analysis
+
+**Performance Measure:**  
+- **Maximize Profit:** Accurately predict whether the next day’s *Close* price will exceed today’s to maximize trading gains.  
+- **Risk Management:** Incorporate market regime analysis and reinforcement learning to adapt to changing market conditions.
+
+**Environment:**  
+- **Stock Market Data:** Historical data with raw price information and technical indicators.  
+- **Simulated Trading Environment:** A simplified simulation (`SimpleTradingEnv`) that uses our discretized features and HMM-derived market regimes.
+
+**Actuators:**  
+- **Trading Actions:** The agent chooses among `buy`, `sell`, or `hold`.
+
+**Sensors:**  
+- **Market Features:** Inputs include discretized variables (e.g., `Open_binned`, `High_binned`, `Low_binned`), engineered features (e.g., `ATR_binned`, `Return_binned`), and the inferred `Market_Regime`.  
+- **Technical Indicators:** Computed values such as ATR, Bollinger Bands, RSI, and MACD capture market dynamics.
+
+### 2. Advanced Data Processing & Feature Engineering
 
 Before model training, the raw stock data undergoes a series of sophisticated preprocessing steps:
 
@@ -33,7 +50,6 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
   df = apply_winsorization(df, ['Close', 'High', 'Low'])
   ```
   
-  *Why?*  
   Winsorization caps extreme values, ensuring that the subsequent discretization is not skewed by outliers, leading to more stable conditional probability estimates in our Bayesian networks.
 
 - **Technical Indicators and Lagged Features**  
@@ -47,7 +63,7 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
   df = add_technical_indicators(df)
   ```
   
-  *Impact:* These features provide a richer representation of market conditions, which, when discretized, yield more informative states for the network.
+  These features provide a richer representation of market conditions, which, when discretized, yield more informative states for the network.
 
 - **Discretization**  
   Continuous features are converted into categorical bins:
@@ -57,7 +73,6 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
   df = discretize_features(df, continuous_features, num_bins=config['num_bins'], method=config['discretization_method'])
   ```
   
-  *Why?*  
   Bayesian networks perform better with discrete states; using quantile-based binning preserves the distribution and ensures balanced bin frequencies.
 
 - **Feature Selection with Preservation**  
@@ -68,13 +83,67 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
                    'BB_Middle_binned', 'BB_Upper_binned', 'BB_Lower_binned', 'Close_Lag1_binned', 'Return_Lag1_binned', 'Trend']
   df = feature_selection(df, target='Trend', threshold=0.95, preserve=preserve_cols)
   ```
-  
-  *Mathematical Rationale:*  
+    
   Removing redundancy avoids overfitting and ensures that the network’s conditional probability tables (CPTs) are estimated from non-redundant, high-quality data.
 
 ---
 
-### 2. Baseline vs. Enhanced Bayesian Network
+#### 3. Bayesian Network Structures
+
+To further clarify, here are the distinct structural characteristics of our two Bayesian networks:
+
+- **Baseline BN Structure:**
+  - **Structure:**
+
+<br>
+
+<img src="image.png" alt="alt text" width="400" style="display: block; margin: auto;"/>
+
+
+<br>
+
+  - **Assumption:**  
+    Each predictor independently influences the trend without any mutual interaction.
+  - **Modeling Implication:**  
+    This simplified architecture may fail to capture complex interdependencies, limiting its ability to reflect true market dynamics.
+
+- **Enhanced BN Structure:**
+  - **Structure:**  
+    The enhanced network starts with an extended feature set:
+    ```
+    [Open_binned, High_binned, Low_binned, ATR_binned, Return_binned]
+    ```
+    Structure learning via HillClimbSearch enables the model to add edges not only from each predictor to `Trend` but also between predictors. For example, a potential learned structure might look like:
+
+    <br>
+
+    <img src="image-1.png" alt="alt text" width="500" style="display: block; margin: auto;"/>
+
+    <br>
+
+  - **Assumption:**  
+    The structure is data-driven; it reflects both the direct influences of predictors on `Trend` and the interdependencies among predictors (e.g., volatility influencing returns).
+  - **Optimization Impact:**  
+    This more complex structure allows the Enhanced BN to capture underlying causal relationships and conditional dependencies that are crucial for predicting market trends more accurately.
+    
+*Example Code Snippet Illustrating Structure Learning:*
+
+```python
+# Using HillClimbSearch to learn the structure for the enhanced model:
+for i in range(bn_trainer.num_restarts):
+    structure_model = bn_trainer.learn_structure(df, enhanced_features + ['Trend'], seed=i)
+    # Evaluate this learned structure on a validation split...
+    if acc > best_structure_score:
+        best_structure_score = acc
+        best_structure = structure_model
+logging.warning(f"Best structure validation accuracy: {best_structure_score:.4f}")
+```
+
+In summary, the enhanced network's flexibility to learn and represent complex relationships directly translates to better model performance, as it effectively captures the inherent uncertainty and interactions within stock market data.
+
+---
+
+### 4. Baseline vs. Enhanced Bayesian Network
 
 Our project’s capstone is the optimization of the Bayesian network model. We build two models for comparison:
 
@@ -94,8 +163,7 @@ Our project’s capstone is the optimization of the Bayesian network model. We b
   model.fit(df[baseline_features + ['Trend']], estimator=BayesianEstimator, prior_type='BDeu', equivalent_sample_size=15)
   ```
   
-  *Limitations:*  
-  This fixed structure may miss important market signals present in additional features.
+This fixed structure may miss important market signals present in additional features.
 
 - **Enhanced Bayesian Network:**  
   Our enhanced model extends the feature set:
@@ -114,7 +182,6 @@ Our project’s capstone is the optimization of the Bayesian network model. We b
      best_params = bn_trainer.grid_search_estimator(df, enhanced_features, 'Trend', cv_splits=config['cv_splits'])
      ```
      
-     *Mathematical Insight:*  
      - **Equivalent Sample Size (ESS):** Balances the strength of the prior against the data evidence.
      - **Prior Type (BDeu):** Sets a uniform prior that smooths the CPTs.
      
@@ -135,7 +202,6 @@ Our project’s capstone is the optimization of the Bayesian network model. We b
          # Evaluate on a validation split...
      ```
      
-     *Why It Works:*  
      A learned structure can capture conditional dependencies between features (e.g., how volatility influences returns), leading to a more accurate and robust model.
   
   3. **Final Evaluation:**  
@@ -145,13 +211,12 @@ Our project’s capstone is the optimization of the Bayesian network model. We b
      _, _, bn_accuracy, _ = bn_trainer.evaluate_model(enhanced_bn_model, test_df, enhanced_features, 'Trend')
      print(f"Final Holdout Accuracy -> Enhanced BN: {bn_accuracy:.4f}")
      ```
-     
-     *Outcome:*  
+      
      The Enhanced BN outperforms the baseline by capturing additional market dynamics, as evidenced by a higher holdout accuracy.
 
 ---
 
-### 3. Hidden Markov Model (HMM) for Market Regime Detection
+### 5. Hidden Markov Model (HMM) for Market Regime Detection
 
 The HMM integration further enriches our dataset by identifying latent market regimes:
 
@@ -187,12 +252,11 @@ def fit_hmm_on_indicators(df, indicators=['MA_20', 'RSI_14', 'MACD'], n_componen
     return model, df
 ```
 
-*Mathematical Impact:*  
 Incorporating the HMM state into the feature set allows the Enhanced Bayesian Network to condition its predictions on latent market conditions, leading to better differentiation between market phases and improved accuracy.
 
 ---
 
-### 4. Reinforcement Learning (RL) Integration
+### 6. Reinforcement Learning (RL) Integration
 
 We have also prototyped a Q-learning agent to explore RL-based trading strategies. Although this README focuses on the Bayesian network optimization, our RL component demonstrates another frontier of decision-making in our system.
 
@@ -233,13 +297,12 @@ class QLearningAgent:
 - **Q-table Update:** Uses the Bellman equation to iteratively refine Q-values based on received rewards.
 - **Integration with Trading Environment:**  
   The `SimpleTradingEnv` class simulates the market, and the agent’s performance is evaluated by its cumulative reward over episodes.
-
-*Impact:*  
+ 
 This RL prototype offers a path toward developing adaptive trading strategies that could be integrated with our probabilistic models in future iterations.
 
 ---
 
-## 5. Results & Comparative Analysis
+## 7. Results & Comparative Analysis
 
 ### Performance Metrics
 
@@ -292,7 +355,6 @@ enhanced_bn_model.fit(df[enhanced_features + ['Trend']],
                       equivalent_sample_size=best_params.get('equivalent_sample_size', 15))
 ```
 
-*Mathematical Takeaway:*  
 Each enhancement—whether through additional features, careful parameter tuning, or dynamic structure learning—works to refine the conditional probability distributions the network uses to predict trends. The improved accuracy is a direct result of better representing the uncertainty and complex relationships inherent in stock market data.
 
 ---
@@ -307,12 +369,12 @@ Probabilistic-Stock-Trading-Agent/
 ├── docs/
 │   └── README_experiments.md    # Detailed experiment reproducibility guide
 ├── notebooks/
-│   ├── EDA_Preprocessing.ipynb  # Exploratory data analysis and technical indicator visualizations
-│   ├── Model_Training_Evaluation.ipynb  # Baseline vs. Enhanced Bayesian Network training and evaluation
+│   ├── EDA_Preprocessing.ipynb  # Exploratory data analysis from Milestone 2
+│   ├── Model_Training_Evaluation.ipynb  # Bayesian Network training and evaluation from Milestone 2
 │   └── HMM_and_RL_Experiments.ipynb       # HMM integration and RL experiments with learning curves and regime plots
 ├── scripts/
 │   ├── data_processing.py         # Data cleaning, transformation, feature engineering, HMM integration, and CPT generation
-│   ├── model_training.py          # Bayesian network training and evaluation (capstone: Enhanced BN optimization)
+│   ├── model_training.py          # Bayesian network training and evaluation (Enhanced BN optimization)
 │   ├── technical_indicators.py    # Computation of technical indicators (MA, RSI, MACD)
 │   ├── hmm_integration.py         # Fitting Gaussian HMM on technical indicators for market regime detection
 │   └── rl_agent.py                # Q-learning RL agent and simple trading environment prototype
@@ -322,20 +384,9 @@ Probabilistic-Stock-Trading-Agent/
 
 ---
 
-## Conclusion & Future Directions
+## Conclusion
 
-Our project demonstrates that by combining advanced feature engineering, probabilistic modeling, and optimization techniques, we can significantly improve the predictive performance of a stock trading agent. The Enhanced Bayesian Network—optimized through hyperparameter tuning and structure learning—outperforms its baseline counterpart by better capturing the complexities of market behavior. The integration of HMM-derived market regimes and preliminary reinforcement learning prototypes further expands the horizons of our trading strategy, setting the stage for even more sophisticated models in the future.
-
-### Future Work
-
-- **Deep Reinforcement Learning:**  
-  Extend the Q-learning prototype to Deep Q-Networks (DQNs) for more complex decision-making.
-  
-- **Dynamic HMM Transitions:**  
-  Investigate time-varying transition probabilities in the HMM for adaptive market regime detection.
-  
-- **Ensemble Methods:**  
-  Combine probabilistic and RL models for improved robustness and performance.
+Our project demonstrates that by combining advanced feature engineering, probabilistic modeling, and optimization techniques, we can significantly improve the predictive performance of a stock trading agent. The Enhanced Bayesian Network—optimized through hyperparameter tuning and structure learning—outperforms its baseline counterpart by better capturing the complexities of market behavior. The integration of HMM-derived market regimes and preliminary reinforcement learning prototypes further expands the horizons of our trading strategy.
 
 ---
 
