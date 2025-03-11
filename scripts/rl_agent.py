@@ -107,34 +107,50 @@ class SimpleTradingEnv:
         market_regime = row.get('Market_Regime', 0)
         return (open_bin, high_bin, low_bin, market_regime)
 
-# Example usage for testing the RL agent
+# Enhanced testing code for the RL agent.
 if __name__ == '__main__':
     import pandas as pd
     import matplotlib.pyplot as plt
-    
+    import numpy as np
+
     # Create a dummy DataFrame for demonstration purposes.
+    # In practice, replace this with your actual processed data.
     data = {
-        'Close': [100, 102, 101, 103, 105, 104, 106, 108, 107, 109],
-        'Open_binned': [2] * 10,
-        'High_binned': [2] * 10,
-        'Low_binned': [2] * 10,
-        'Market_Regime': [1] * 10
+        'Close': [100, 102, 101, 103, 105, 104, 106, 108, 107, 109, 110, 108, 111, 113, 112],
+        'Open_binned': [2] * 15,
+        'High_binned': [2] * 15,
+        'Low_binned': [2] * 15,
+        'Market_Regime': [1] * 15
     }
     df_dummy = pd.DataFrame(data)
     
+    # Initialize the simple trading environment and Q-learning agent.
     env = SimpleTradingEnv(df_dummy)
-    agent = QLearningAgent()
+    agent = QLearningAgent(alpha=0.1, gamma=0.95, epsilon=0.1)
     
-    episodes = 20
-    rewards = []
+    # Define the number of episodes and maximum steps per episode.
+    episodes = 50
+    max_steps = len(df_dummy)  # Use the full length of the data for each episode.
+    
+    # Lists to store episode rewards.
+    episode_rewards = []
+    
+    # Run episodes and collect rewards.
     for ep in range(episodes):
-        total_reward = agent.simulate_episode(env, max_steps=10)
-        rewards.append(total_reward)
-        print(f"Episode {ep+1}: Total Reward = {total_reward}")
+        total_reward = agent.simulate_episode(env, max_steps=max_steps)
+        episode_rewards.append(total_reward)
+        print(f"Episode {ep+1}/{episodes}: Total Reward = {total_reward:.2f}")
+    
+    # Calculate summary statistics.
+    avg_reward = np.mean(episode_rewards)
+    std_reward = np.std(episode_rewards)
+    print(f"\nAverage Reward over {episodes} episodes: {avg_reward:.2f} ± {std_reward:.2f}")
     
     # Plot the learning curve.
-    plt.plot(range(1, episodes+1), rewards, marker='o')
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(1, episodes + 1), episode_rewards, marker='o', linestyle='-', color='b')
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
-    plt.title('RL Agent Learning Curve')
+    plt.title('Q-Learning Agent Performance')
+    plt.grid(True)
     plt.show()
