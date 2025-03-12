@@ -17,7 +17,6 @@ This document provides detailed instructions for reproducing the experiments in 
 - [HMM Integration Experiment](#hmm-integration-experiment)
 - [RL Q-Learning Experiment](#rl-q-learning-experiment)
 - [Evaluation and Results](#evaluation-and-results)
-- [Troubleshooting](#troubleshooting)
 
 ---
 
