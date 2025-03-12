@@ -39,7 +39,41 @@ Over the evolution of this project, we have achieved several key milestones:
 - **Market Features:** Inputs include discretized variables (e.g., `Open_binned`, `High_binned`, `Low_binned`), engineered features (e.g., `ATR_binned`, `Return_binned`), and the inferred `Market_Regime`.  
 - **Technical Indicators:** Computed values such as ATR, Bollinger Bands, RSI, and MACD capture market dynamics.
 
-### 2. Advanced Data Processing & Feature Engineering
+### 2. Data Exploration & Preprocessing
+
+#### Data Source
+- **Dataset:** [Stock Time Series 20050101 to 20171231](https://www.kaggle.com/datasets/szrlee/stock-time-series-20050101-to-20171231)
+- **Description:** Over a decade of daily stock market data for various stocks (fields include Date, Open, High, Low, Close, Volume, Name).
+- **Observations:** Approximately 93,612 observations.
+
+#### Exploratory Data Analysis (EDA)
+In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone2/notebooks/EDA_Preprocessing.ipynb) notebook, we computed:
+- **Summary Statistics:**
+  - The "Close" price showed a mean of 85.64, median of 60.05, and standard deviation of 108.12.
+- **Visualizations:**  
+  - Histograms for the "Close" price revealed a right-skewed distribution:
+    
+    ![image](https://github.com/user-attachments/assets/5de81488-608b-45f9-a4a4-fecf751d48c3)
+
+  - Box plots helped identify outliers:
+ 
+    ![image](https://github.com/user-attachments/assets/7d61d571-2b48-46ce-a7c3-765244f31d12)
+    
+- **Missing Data:**  
+  - We identified and imputed missing numerical values using column means.
+
+#### Preprocessing Steps
+- **Normalization & Transformation:**  
+  - **Normalization:** We applied StandardScaler to standardize features (mean=0, std=1).  
+  - **Log Transformation:** A log transformation was used to reduce skewness in price and volume data.
+- **Discretization:**  
+  Continuous features such as **Open**, **High**, and **Low** were discretized into quantile-based bins (5 bins by default).  
+  - **Mathematically:** If `X` is a continuous variable (e.g., the Open price), then its binned version `X_binned` is defined by partitioning the range of `X` into 5 intervals (quantiles). If the data is uniformly distributed, each bin will contain roughly 20% of the data, leading to conditional probabilities of about 0.2 for each bin.
+  - **Result:** New features `Open_binned`, `High_binned`, and `Low_binned` represent categorical approximations of the original values.
+- **CPT Generation:**  
+  Frequency counts for each bin were normalized to create Conditional Probability Tables (CPTs). These CPTs capture the probability distribution of the discretized features and are used for probabilistic inference in our Bayesian network.
+
+### 3. Advanced Data Processing & Feature Engineering
 
 Before model training, the raw stock data undergoes a series of sophisticated preprocessing steps:
 
@@ -88,7 +122,7 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
 
 ---
 
-#### 3. Bayesian Network Structures
+#### 4. Bayesian Network Structures
 
 - **Baseline BN Structure:**
   - **Structure:**
@@ -141,7 +175,7 @@ The enhanced network's flexibility to learn and represent complex relationships 
 
 ---
 
-### 4. Baseline vs. Enhanced Bayesian Network
+### 5. Baseline vs. Enhanced Bayesian Network
 
 Our project’s capstone is the optimization of the Bayesian network model. We build two models for comparison:
 
@@ -214,7 +248,7 @@ This fixed structure may miss important market signals present in additional fea
 
 ---
 
-### 5. Hidden Markov Model (HMM) for Market Regime Detection
+### 6. Hidden Markov Model (HMM) for Market Regime Detection
 
 The HMM integration further enriches our dataset by identifying latent market regimes:
 
@@ -254,7 +288,7 @@ Incorporating the HMM state into the feature set allows the Enhanced Bayesian Ne
 
 ---
 
-### 6. Reinforcement Learning (RL) Integration
+### 7. Reinforcement Learning (RL) Integration
 
 We have also prototyped a Q-learning agent to explore RL-based trading strategies. Our RL component demonstrates another frontier of decision-making in our system.
 
@@ -298,7 +332,7 @@ class QLearningAgent:
 
 ---
 
-## 7. Results & Comparative Analysis
+## 8. Results & Comparative Analysis
 
 ### Performance Metrics
 
