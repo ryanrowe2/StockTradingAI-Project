@@ -73,7 +73,7 @@ In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Pro
 - **CPT Generation:**  
   Frequency counts for each bin were normalized to create Conditional Probability Tables (CPTs). These CPTs capture the probability distribution of the discretized features and are used for probabilistic inference in our Bayesian network.
 
-### 3. Advanced Data Processing & Feature Engineering
+### 3. Enhanced Data Processing & Feature Engineering
 
 Before model training, the raw stock data undergoes a series of sophisticated preprocessing steps:
 
