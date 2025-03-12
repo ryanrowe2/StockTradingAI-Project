@@ -68,7 +68,7 @@ In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Pro
   - **Log Transformation:** A log transformation was used to reduce skewness in price and volume data.
 - **Discretization:**  
   Continuous features such as **Open**, **High**, and **Low** were discretized into quantile-based bins (5 bins by default).  
-  - **Mathematically:** If `X` is a continuous variable (e.g., the Open price), then its binned version `X_binned` is defined by partitioning the range of `X` into 5 intervals (quantiles). If the data is uniformly distributed, each bin will contain roughly 20% of the data, leading to conditional probabilities of about 0.2 for each bin.
+  - If `X` is a continuous variable (e.g., the Open price), then its binned version `X_binned` is defined by partitioning the range of `X` into 5 intervals (quantiles). If the data is uniformly distributed, each bin will contain roughly 20% of the data, leading to conditional probabilities of about 0.2 for each bin.
   - **Result:** New features `Open_binned`, `High_binned`, and `Low_binned` represent categorical approximations of the original values.
 - **CPT Generation:**  
   Frequency counts for each bin were normalized to create Conditional Probability Tables (CPTs). These CPTs capture the probability distribution of the discretized features and are used for probabilistic inference in our Bayesian network.
@@ -155,8 +155,7 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
 
   - **Assumption:**  
     The structure is data-driven; it reflects both the direct influences of predictors on `Trend` and the interdependencies among predictors (e.g., volatility influencing returns).
-  - **Optimization Impact:**  
-    This more complex structure allows the Enhanced BN to capture underlying causal relationships and conditional dependencies that are crucial for predicting market trends more accurately.
+  - This more complex structure allows the Enhanced BN to capture underlying causal relationships and conditional dependencies that are crucial for predicting market trends more accurately.
     
 *Example Code Snippet Illustrating Structure Learning:*
 
