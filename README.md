@@ -90,8 +90,6 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
 
 #### 3. Bayesian Network Structures
 
-To further clarify, here are the distinct structural characteristics of our two Bayesian networks:
-
 - **Baseline BN Structure:**
   - **Structure:**
 
@@ -139,7 +137,7 @@ for i in range(bn_trainer.num_restarts):
 logging.warning(f"Best structure validation accuracy: {best_structure_score:.4f}")
 ```
 
-In summary, the enhanced network's flexibility to learn and represent complex relationships directly translates to better model performance, as it effectively captures the inherent uncertainty and interactions within stock market data.
+The enhanced network's flexibility to learn and represent complex relationships directly translates to better model performance, as it effectively captures the inherent uncertainty and interactions within stock market data.
 
 ---
 
@@ -258,7 +256,7 @@ Incorporating the HMM state into the feature set allows the Enhanced Bayesian Ne
 
 ### 6. Reinforcement Learning (RL) Integration
 
-We have also prototyped a Q-learning agent to explore RL-based trading strategies. Although this README focuses on the Bayesian network optimization, our RL component demonstrates another frontier of decision-making in our system.
+We have also prototyped a Q-learning agent to explore RL-based trading strategies. Our RL component demonstrates another frontier of decision-making in our system.
 
 *Key Snippet from `rl_agent.py`:*
 
@@ -297,8 +295,6 @@ class QLearningAgent:
 - **Q-table Update:** Uses the Bellman equation to iteratively refine Q-values based on received rewards.
 - **Integration with Trading Environment:**  
   The `SimpleTradingEnv` class simulates the market, and the agent’s performance is evaluated by its cumulative reward over episodes.
- 
-This RL prototype offers a path toward developing adaptive trading strategies that could be integrated with our probabilistic models in future iterations.
 
 ---
 
