@@ -121,7 +121,47 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
 
 ---
 
-#### 4. Bayesian Network Structures
+### 4. Hidden Markov Model (HMM) for Market Regime Detection
+
+The HMM integration further enriches our dataset by identifying latent market regimes:
+
+```python
+from hmmlearn.hmm import GaussianHMM
+model = GaussianHMM(n_components=3, covariance_type="diag", n_iter=100, random_state=42)
+latent_states = model.fit_predict(df[indicators].values)
+df['Market_Regime'] = latent_states
+```
+
+**Explanation:**
+
+- **Technical Indicators for HMM:**  
+  Indicators such as `MA_20`, `RSI_14`, and `MACD` are used as features to fit the HMM.
+  
+- **Latent Market Regimes:**  
+  The HMM clusters the data into 3 latent states, representing different market conditions (e.g., bull, bear, and stagnant).
+  
+- **Impact on the Model:**  
+  These regimes are later added as a feature, further improving the predictive power of our Bayesian network.
+
+*Code Snippet from `hmm_integration.py`:*
+
+```python
+def fit_hmm_on_indicators(df, indicators=['MA_20', 'RSI_14', 'MACD'], n_components=3):
+    df_ind = df[indicators].dropna()
+    X = df_ind.values
+    model = hmm.GaussianHMM(n_components=n_components, covariance_type="diag", n_iter=100, random_state=42)
+    latent_states = model.fit_predict(X)
+    states_series = pd.Series(latent_states, index=df_ind.index, name='Market_Regime')
+    df = df.join(states_series)
+    df['Market_Regime'].fillna(method='ffill', inplace=True)
+    return model, df
+```
+
+Incorporating the HMM state into the feature set allows the Enhanced Bayesian Network to condition its predictions on latent market conditions, leading to better differentiation between market phases and improved accuracy.
+
+---
+
+#### 5. Bayesian Network Structures
 
 - **Baseline BN Structure:**
   - **Structure:**
@@ -173,7 +213,7 @@ The enhanced network's flexibility to learn and represent complex relationships 
 
 ---
 
-### 5. Baseline vs. Enhanced Bayesian Network
+### 6. Baseline vs. Enhanced Bayesian Network
 
 Our project’s capstone is the optimization of the Bayesian network model. We build two models for comparison:
 
@@ -243,46 +283,6 @@ This fixed structure may miss important market signals present in additional fea
      ```
       
      The Enhanced BN outperforms the baseline by capturing additional market dynamics, as evidenced by a higher holdout accuracy.
-
----
-
-### 6. Hidden Markov Model (HMM) for Market Regime Detection
-
-The HMM integration further enriches our dataset by identifying latent market regimes:
-
-```python
-from hmmlearn.hmm import GaussianHMM
-model = GaussianHMM(n_components=3, covariance_type="diag", n_iter=100, random_state=42)
-latent_states = model.fit_predict(df[indicators].values)
-df['Market_Regime'] = latent_states
-```
-
-**Explanation:**
-
-- **Technical Indicators for HMM:**  
-  Indicators such as `MA_20`, `RSI_14`, and `MACD` are used as features to fit the HMM.
-  
-- **Latent Market Regimes:**  
-  The HMM clusters the data into 3 latent states, representing different market conditions (e.g., bull, bear, and stagnant).
-  
-- **Impact on the Model:**  
-  These regimes are later added as a feature, further improving the predictive power of our Bayesian network.
-
-*Code Snippet from `hmm_integration.py`:*
-
-```python
-def fit_hmm_on_indicators(df, indicators=['MA_20', 'RSI_14', 'MACD'], n_components=3):
-    df_ind = df[indicators].dropna()
-    X = df_ind.values
-    model = hmm.GaussianHMM(n_components=n_components, covariance_type="diag", n_iter=100, random_state=42)
-    latent_states = model.fit_predict(X)
-    states_series = pd.Series(latent_states, index=df_ind.index, name='Market_Regime')
-    df = df.join(states_series)
-    df['Market_Regime'].fillna(method='ffill', inplace=True)
-    return model, df
-```
-
-Incorporating the HMM state into the feature set allows the Enhanced Bayesian Network to condition its predictions on latent market conditions, leading to better differentiation between market phases and improved accuracy.
 
 ---
 
@@ -434,7 +434,7 @@ Our project demonstrates that by combining advanced feature engineering, probabi
    Open the Jupyter notebooks in the `notebooks/` directory:
    - `EDA_Preprocessing.ipynb`
    - `Model_Training_Evaluation.ipynb`
-   - `HMM_and_RL_Experiments.ipynb`
+   - `HMM_and_RL_Experiments.ipynb` (see [docs/README_experiments.md](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone3/docs/README_experiments.md) for more detail)
 
 ## Parameter Calculation for Conditional Probability Tables (CPTs)
 
