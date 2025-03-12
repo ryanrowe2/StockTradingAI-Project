@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project develops a **goal-based probabilistic stock trading agent** designed to predict whether the next day’s stock *Close* price will exceed today’s. Our primary objective is to maximize profit while managing risk by combining advanced probabilistic models, feature engineering, and reinforcement learning techniques.
+This project develops a **goal-based probabilistic stock trading agent** designed to predict whether the next day’s stock *Close* price (closing price of the day) will exceed today’s. Our primary objective is to maximize profit while managing risk by combining advanced probabilistic models, feature engineering, and reinforcement learning techniques.
 
 Over the evolution of this project, we have achieved several key milestones:
 
@@ -66,7 +66,7 @@ In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Pro
 - **Normalization & Transformation:**  
   - **Normalization:** We applied StandardScaler to standardize features (mean=0, std=1).  
   - **Log Transformation:** A log transformation was used to reduce skewness in price and volume data.
-- **Discretization:** Continuous features such as **Open**, **High**, and **Low** were discretized into quantile-based bins (5 bins by default).  
+- **Discretization:** Continuous features such as **Open** (opening price of the day), **High** (daily highest price), and **Low** (daily lowest price) were discretized into quantile-based bins (5 bins by default).  
 - If `X` is a continuous variable (e.g., the Open price), then its binned version `X_binned` is defined by partitioning the range of `X` into 5 intervals (quantiles). If the data is uniformly distributed, each bin will contain roughly 20% of the data, leading to conditional probabilities of about 0.2 for each bin.
   - **Result:** New features `Open_binned`, `High_binned`, and `Low_binned` represent categorical approximations of the original values.
 - **CPT Generation:**  
@@ -368,6 +368,8 @@ The performance of the RL prototype using the inferred HMM regimes is explored i
 
 4. **Incorporation of Latent Market Regimes (via HMM):**  
    The additional market regime feature further refines the model’s understanding of market states, enabling more context-aware predictions.
+
+## Training Code Snippet
 
 *Illustrative Training Code Snippet from `model_training.py`:*
 
