@@ -402,10 +402,6 @@ Our project demonstrates that by combining advanced feature engineering, probabi
    - `Model_Training_Evaluation.ipynb`
    - `HMM_and_RL_Experiments.ipynb`
 
-Below is a perfect section that addresses these requirements. You can insert this section after the "RL Integration" subsection and before the "Results & Comparative Analysis" section in your README. This section covers library explanations, detailed descriptions of core and non‑core model components, and includes a code snippet that demonstrates how the model is trained.
-
----
-
 ## Technical Details and Library Explanations
 
 ### Library Explanations
