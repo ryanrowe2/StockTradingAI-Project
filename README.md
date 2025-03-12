@@ -39,7 +39,7 @@ Over the evolution of this project, we have achieved several key milestones:
 - **Market Features:** Inputs include discretized variables (e.g., `Open_binned`, `High_binned`, `Low_binned`), engineered features (e.g., `ATR_binned`, `Return_binned`), and the inferred `Market_Regime`.  
 - **Technical Indicators:** Computed values such as ATR, Bollinger Bands, RSI, and MACD capture market dynamics.
 
-### 2. Data Exploration & Preprocessing
+### 2. Baseline Data Exploration & Preprocessing
 
 #### Data Source
 - **Dataset:** [Stock Time Series 20050101 to 20171231](https://www.kaggle.com/datasets/szrlee/stock-time-series-20050101-to-20171231)
