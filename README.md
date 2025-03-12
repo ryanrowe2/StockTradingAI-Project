@@ -184,6 +184,19 @@ Incorporating the HMM state into the feature set allows the Enhanced Bayesian Ne
     ```
     [Open_binned, High_binned, Low_binned, ATR_binned, Return_binned]
     ```
+
+    - **Open_binned:** Discretized version of the stock’s opening price, partitioned into quantile-based bins to capture relative price levels.
+
+    - **High_binned:** Discretized version of the stock’s highest price during the day, representing price extremes in a categorical format.
+
+    - **Low_binned:** Discretized version of the stock’s lowest price during the day, used to indicate minimum price levels in a simplified form.
+
+    - **ATR_binned:** Discretized version of the Average True Range (ATR), a technical indicator that measures market volatility, grouped into categorical levels.
+
+    - **Return_binned:** Discretized version of the daily return (percentage change in closing price), categorizing market performance into distinct bins.
+
+    - **Trend**: The target variable indicating whether the next day’s closing price is higher than today’s, effectively representing the direction of the market (upward trend vs. no upward movement).
+  
     Structure learning via HillClimbSearch enables the model to add edges not only from each predictor to `Trend` but also between predictors. For example, a potential learned structure might look like:
 
     <br>
