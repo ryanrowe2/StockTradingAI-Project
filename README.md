@@ -434,27 +434,76 @@ Probabilistic-Stock-Trading-Agent/
 
 ## Conclusion
 
-Our project demonstrates that by combining advanced feature engineering, probabilistic modeling, and optimization techniques, we can significantly improve the predictive performance of a stock trading agent. The Enhanced Bayesian Network—optimized through hyperparameter tuning and structure learning—outperforms its baseline counterpart by better capturing the complexities of market behavior. The integration of HMM-derived market regimes and preliminary reinforcement learning prototypes further expands the horizons of our trading strategy.
+### Dataset Exploration and Variable Roles
+
+Our dataset is drawn from the [Stock Time Series 20050101 to 20171231](https://www.kaggle.com/datasets/szrlee/stock-time-series-20050101-to-20171231) collection. It contains over 93,600 daily observations for various stocks and includes the following raw variables:
+
+- **Date:** The trading date.
+- **Open:** The opening price of the stock.
+- **High:** The highest price reached during the day.
+- **Low:** The lowest price reached during the day.
+- **Close:** The closing price, which is our primary variable of interest.
+- **Volume:** The number of shares traded.
+- **Name:** The stock ticker symbol.
+
+These raw variables are subsequently enriched with additional features through our preprocessing pipeline:
+
+- **Technical Indicators:**  
+  - **ATR (Average True Range):** Captures market volatility.
+  - **Bollinger Bands:** Provides a statistical range around the moving average.
+  - **RSI (Relative Strength Index) & MACD:** Offer momentum and trend strength insights.
+- **Lagged Features:**  
+  - **Close_Lag1 and Return_Lag1:** Introduce temporal dependencies by including prior-day values.
+- **Discretized Variables:**  
+  - Variables such as `Open_binned`, `High_binned`, and `Low_binned` are derived by partitioning continuous values into quantile-based bins.
+- **Market_Regime:**  
+  - Derived from a Gaussian HMM (using indicators like MA_20, RSI_14, and MACD), this variable represents latent market states (bull, bear, stagnant).
+
+An illustrative diagram (using Mermaid syntax) to visualize our preprocessing and feature transformation is provided below:
+
+```mermaid
+graph LR
+    A[Raw Stock Data<br/>(Date, Open, High, Low, Close, Volume, Name)]
+    B[Technical Indicators<br/>(ATR, Bollinger Bands, RSI, MACD)]
+    C[Lagged Features<br/>(Close_Lag1, Return_Lag1)]
+    D[Winsorization & Discretization<br/>(e.g., Open_binned, High_binned, Low_binned)]
+    E[Feature Selection<br/>(Remove Redundancy)]
+    F[Bayesian Network Modeling]
+    G[Gaussian HMM<br/>(Market_Regime)]
+    H[Reinforcement Learning<br/>(Q-Learning Agent)]
+    
+    A --> B
+    A --> C
+    B --> D
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+```
+
+*Figure: Overview of data transformation and modeling steps.*
+
+### Variable Interactions and Model Structure
+
+Our model relies on two principal probabilistic structures:
+
+1. **Baseline Bayesian Network:**  
+   - **Structure:** Assumes each discretized raw feature (e.g., `Open_binned`, `High_binned`, `Low_binned`) directly influences the target variable `Trend` (i.e., whether tomorrow’s *Close* exceeds today’s).  
+   - **Limitation:** This simplified structure does not account for potential interactions between features such as the effect of market volatility (ATR) on returns.
+
+2. **Enhanced Bayesian Network:**  
+   - **Structure:** Expands the feature set to include additional engineered variables like `ATR_binned` and `Return_binned`.  
+   - **Structure Learning:** We use HillClimbSearch (a non-core algorithm implemented in pgmpy) to learn an optimal structure that captures not only the direct influences of each predictor on `Trend` but also the interdependencies among predictors (e.g., how volatility might affect returns).  
+   - **Rationale:** This data-driven structure better represents the complex interactions in market behavior, leading to improved inference accuracy.
+
+**Conclusion**
+
+Our project demonstrates that the integration of advanced feature engineering, probabilistic modeling, and optimization techniques can significantly enhance the predictive performance of a stock trading agent. By leveraging a comprehensive preprocessing pipeline—including winsorization, discretization, and feature selection—we effectively capture the underlying market dynamics. The Enhanced Bayesian Network, refined through hyperparameter tuning and dynamic structure learning via HillClimbSearch, outperforms the baseline model by robustly modeling complex interdependencies among market indicators. Furthermore, incorporating latent market regimes through a Gaussian Hidden Markov Model has improved context-awareness, enabling more accurate trend predictions. Our preliminary reinforcement learning prototype, using a Q-learning agent, shows promising potential for developing adaptive trading strategies. Collectively, these advancements lead to superior model performance—as evidenced by a holdout accuracy increase from approximately 55.7% to 64.4%.
 
 ---
 
-## How to Run the Project
-
-1. **Data Processing:**  
-   ```bash
-   python scripts/data_processing.py
-   ```
-2. **Bayesian Network Training & Evaluation:**  
-   ```bash
-   python scripts/model_training.py
-   ```
-3. **RL Agent Simulation & HMM Experiments:**  
-   Open the Jupyter notebooks in the `notebooks/` directory:
-   - `EDA_Preprocessing.ipynb`
-   - `Model_Training_Evaluation.ipynb`
-   - `HMM_and_RL_Experiments.ipynb` (see [docs/README_experiments.md](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone3/docs/README_experiments.md) for more detail)
-
-## Parameter Calculation for Conditional Probability Tables (CPTs)
+### Parameter Calculation for Conditional Probability Tables (CPTs)
 
 Our Bayesian network requires estimation of the conditional probability distributions (CPTs) for each node given its parent nodes. We compute these parameters using two common approaches:
 
@@ -497,9 +546,9 @@ enhanced_bn_model.fit(
 
 This approach allows us to robustly estimate the conditional probability tables, accounting for both the data and our prior knowledge, and ultimately supports better inference in our probabilistic stock trading agent.
 
-## Technical Details and Library Explanations
+### Technical Details and Library Explanations
 
-### Library Explanations
+#### Library Explanations
 
 - **pgmpy:**  
   pgmpy is a Python library for Probabilistic Graphical Models. It provides tools for creating, learning, and performing inference on Bayesian networks and other graphical models. In our project, we use it to build and optimize our Bayesian networks, including structure learning and parameter estimation.  
@@ -512,7 +561,7 @@ This approach allows us to robustly estimate the conditional probability tables,
 - **scikit-learn & matplotlib:**  
   These libraries are used for data preprocessing, statistical analysis, and visualization throughout the project.
 
-### Core Model: Gaussian HMM
+#### Core Model: Gaussian HMM
 
 Our project uses a Gaussian Hidden Markov Model (Gaussian HMM) as a core component for inferring latent market regimes. This model differs from discrete Bayesian networks in several ways:
 
@@ -528,11 +577,27 @@ This continuous approach allows us to capture the subtleties of market behavior 
 
 Source: [hmmlearn's GaussianHMM Documentation](https://hmmlearn.readthedocs.io/en/latest/api.html#gaussianhmm)
 
-### Non-Core Component: HillClimbSearch for Structure Learning
+#### Non-Core Component: HillClimbSearch for Structure Learning
 
 For learning the structure of our Enhanced Bayesian Network, we use HillClimbSearch—a search algorithm that iteratively adds, removes, or reverses edges in the network to optimize a scoring metric (such as the BDeu score). This algorithm is implemented in pgmpy and helps identify a network structure that better captures the conditional dependencies among variables.
 
 Source: [pgmpy's HillClimbSearch Documentation](https://pgmpy.org/structure_estimator/hill.html)
+
+### How to Run the Project
+
+1. **Data Processing:**  
+   ```bash
+   python scripts/data_processing.py
+   ```
+2. **Bayesian Network Training & Evaluation:**  
+   ```bash
+   python scripts/model_training.py
+   ```
+3. **RL Agent Simulation & HMM Experiments:**  
+   Open the Jupyter notebooks in the `notebooks/` directory:
+   - `EDA_Preprocessing.ipynb`
+   - `Model_Training_Evaluation.ipynb`
+   - `HMM_and_RL_Experiments.ipynb` (see [docs/README_experiments.md](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone3/docs/README_experiments.md) for more detail)
 
 ---
 
