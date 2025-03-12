@@ -328,6 +328,8 @@ class QLearningAgent:
 - **Integration with Trading Environment:**  
   The `SimpleTradingEnv` class simulates the market, and the agent’s performance is evaluated by its cumulative reward over episodes.
 
+The performance of the RL prototype using the inferred HMM regimes is explored in [HMM_and_RL_Experiments.ipynb](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone3/notebooks/HMM_and_RL_Experiments.ipynb)
+
 ---
 
 ## 8. Results & Comparative Analysis
