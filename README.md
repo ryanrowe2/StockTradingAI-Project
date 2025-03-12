@@ -168,7 +168,7 @@ Incorporating the HMM state into the feature set allows the Enhanced Bayesian Ne
 
 <br>
 
-<img src="image.png" alt="alt text" width="400" style="display: block; margin: auto;"/>
+<img src="images/image.png" alt="alt text" width="400" style="display: block; margin: auto;"/>
 
 
 <br>
@@ -201,7 +201,7 @@ Incorporating the HMM state into the feature set allows the Enhanced Bayesian Ne
 
     <br>
 
-    <img src="image-1.png" alt="alt text" width="500" style="display: block; margin: auto;"/>
+    <img src="images/image-1.png" alt="alt text" width="500" style="display: block; margin: auto;"/>
 
     <br>
 
@@ -409,22 +409,25 @@ Each enhancement—whether through additional features, careful parameter tuning
 ```
 Probabilistic-Stock-Trading-Agent/
 ├── data/
-│   ├── raw/                # Original stock market datasets
-│   └── processed/          # Processed data with enriched features, HMM regimes, and CPTs
+│   ├── raw/                             # Original stock market datasets
+│   └── processed/                       # Processed data with enriched features, HMM regimes, and CPTs
 ├── docs/
-│   └── README_experiments.md    # Detailed experiment reproducibility guide
+│   └── README_experiments.md            # Detailed experiment reproducibility guide
+├── images/                              # Images included in the README.md file.
+│   ├── image.png
+│   └── image-1.png
 ├── notebooks/
-│   ├── EDA_Preprocessing.ipynb  # Exploratory data analysis from Milestone 2
+│   ├── EDA_Preprocessing.ipynb          # Exploratory data analysis from Milestone 2
 │   ├── Model_Training_Evaluation.ipynb  # Bayesian Network training and evaluation from Milestone 2
-│   └── HMM_and_RL_Experiments.ipynb       # HMM integration and RL experiments with learning curves and regime plots
+│   └── HMM_and_RL_Experiments.ipynb     # HMM integration and RL experiments with learning curves and regime plots
 ├── scripts/
-│   ├── data_processing.py         # Data cleaning, transformation, feature engineering, HMM integration, and CPT generation
-│   ├── model_training.py          # Bayesian network training and evaluation (Enhanced BN optimization)
-│   ├── technical_indicators.py    # Computation of technical indicators (MA, RSI, MACD)
-│   ├── hmm_integration.py         # Fitting Gaussian HMM on technical indicators for market regime detection
-│   └── rl_agent.py                # Q-learning RL agent and simple trading environment prototype
-├── requirements.txt               # Dependencies (e.g., pgmpy, hmmlearn, scikit-learn)
-└── README.md                      # This comprehensive project document
+│   ├── data_processing.py               # Data cleaning, transformation, feature engineering, HMM integration, and CPT generation
+│   ├── model_training.py                # Bayesian network training and evaluation (Enhanced BN optimization)
+│   ├── technical_indicators.py          # Computation of technical indicators (MA, RSI, MACD)
+│   ├── hmm_integration.py               # Fitting Gaussian HMM on technical indicators for market regime detection
+│   └── rl_agent.py                      # Q-learning RL agent and simple trading environment prototype
+├── requirements.txt                     # Dependencies (e.g., pgmpy, hmmlearn, scikit-learn)
+└── README.md                            # This comprehensive project document
 ```
 
 ---
