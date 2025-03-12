@@ -66,9 +66,8 @@ In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Pro
 - **Normalization & Transformation:**  
   - **Normalization:** We applied StandardScaler to standardize features (mean=0, std=1).  
   - **Log Transformation:** A log transformation was used to reduce skewness in price and volume data.
-- **Discretization:**  
-  Continuous features such as **Open**, **High**, and **Low** were discretized into quantile-based bins (5 bins by default).  
-  - If `X` is a continuous variable (e.g., the Open price), then its binned version `X_binned` is defined by partitioning the range of `X` into 5 intervals (quantiles). If the data is uniformly distributed, each bin will contain roughly 20% of the data, leading to conditional probabilities of about 0.2 for each bin.
+- **Discretization:** Continuous features such as **Open**, **High**, and **Low** were discretized into quantile-based bins (5 bins by default).  
+- If `X` is a continuous variable (e.g., the Open price), then its binned version `X_binned` is defined by partitioning the range of `X` into 5 intervals (quantiles). If the data is uniformly distributed, each bin will contain roughly 20% of the data, leading to conditional probabilities of about 0.2 for each bin.
   - **Result:** New features `Open_binned`, `High_binned`, and `Low_binned` represent categorical approximations of the original values.
 - **CPT Generation:**  
   Frequency counts for each bin were normalized to create Conditional Probability Tables (CPTs). These CPTs capture the probability distribution of the discretized features and are used for probabilistic inference in our Bayesian network.
