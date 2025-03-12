@@ -436,6 +436,49 @@ Our project demonstrates that by combining advanced feature engineering, probabi
    - `Model_Training_Evaluation.ipynb`
    - `HMM_and_RL_Experiments.ipynb`
 
+## Parameter Calculation for Conditional Probability Tables (CPTs)
+
+Our Bayesian network requires estimation of the conditional probability distributions (CPTs) for each node given its parent nodes. We compute these parameters using two common approaches:
+
+1. **Maximum Likelihood Estimation (MLE):**
+
+   For a given node X with a set of parent variables Pa(X), the probability P(X=x | Pa(X)=p) is estimated by:
+   
+   P(X=x | Pa(X)=p) = N(x, p) / N(p)
+   
+   - N(x, p) is the count of occurrences where X=x and Pa(X)=p in the dataset.
+   - N(p) is the total count of occurrences for the parent configuration p.
+
+2. **Bayesian Estimation:**
+
+   To smooth the estimates and handle cases where counts may be low (or even zero), we use a Dirichlet prior. Specifically, we employ the Bayesian estimator (using a BDeu prior) implemented in pgmpy. The conditional probability is then given by:
+   
+   P(X=x | Pa(X)=p) = (N(x, p) + α) / (N(p) + α ⋅ |*X*|)
+   
+   - α is the equivalent sample size (a hyperparameter that controls the strength of the prior).
+   - |*X*| is the number of discrete states that X can take.
+   - This formula ensures that even when N(x, p) = 0, the probability is nonzero, thus preventing issues in subsequent probabilistic inference.
+
+*Note:* In our implementation, the grid search over the Bayesian estimator parameters (i.e., α and the choice of prior type) helps in finding an optimal balance between the observed data and our prior assumptions.
+
+Below is a brief code snippet illustrating how we integrate these estimations within our model training process:
+
+```python
+# Example: Using Bayesian Estimation to compute CPTs
+# For a node X with parent configuration p, the conditional probability is:
+# P(X=x | Pa(X)=p) = (N(x, p) + α) / (N(p) + α * |X|)
+# This is implemented via pgmpy's BayesianEstimator as follows:
+
+enhanced_bn_model.fit(
+    df[enhanced_features + ['Trend']],
+    estimator=BayesianEstimator,
+    prior_type=best_params.get('prior_type', 'BDeu'),
+    equivalent_sample_size=best_params.get('equivalent_sample_size', 15)
+)
+```
+
+This approach allows us to robustly estimate the conditional probability tables, accounting for both the data and our prior knowledge, and ultimately supports better inference in our probabilistic stock trading agent.
+
 ## Technical Details and Library Explanations
 
 ### Library Explanations
