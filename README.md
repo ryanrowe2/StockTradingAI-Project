@@ -68,7 +68,7 @@ In our [EDA_Preprocessing.ipynb](https://github.com/ryanrowe2/StockTradingAI-Pro
   - **Log Transformation:** A log transformation was used to reduce skewness in price and volume data.
 - **Discretization:** Continuous features such as **Open** (opening price of the day), **High** (daily highest price), and **Low** (daily lowest price) were discretized into quantile-based bins (5 bins by default).  
 - If `X` is a continuous variable (e.g., the Open price), then its binned version `X_binned` is defined by partitioning the range of `X` into 5 intervals (quantiles). If the data is uniformly distributed, each bin will contain roughly 20% of the data, leading to conditional probabilities of about 0.2 for each bin.
-  - **Result:** New features `Open_binned`, `High_binned`, and `Low_binned` represent categorical approximations of the original values.
+  - New features `Open_binned`, `High_binned`, and `Low_binned` represent categorical approximations of the original values.
 - **CPT Generation:**  
   Frequency counts for each bin were normalized to create Conditional Probability Tables (CPTs). These CPTs capture the probability distribution of the discretized features and are used for probabilistic inference in our Bayesian network.
 
@@ -463,14 +463,14 @@ An illustrative diagram (using Mermaid syntax) to visualize our preprocessing an
 
 ```mermaid
 graph LR
-    A[Raw Stock Data<br/>(Date, Open, High, Low, Close, Volume, Name)]
-    B[Technical Indicators<br/>(ATR, Bollinger Bands, RSI, MACD)]
-    C[Lagged Features<br/>(Close_Lag1, Return_Lag1)]
-    D[Winsorization & Discretization<br/>(e.g., Open_binned, High_binned, Low_binned)]
-    E[Feature Selection<br/>(Remove Redundancy)]
-    F[Bayesian Network Modeling]
-    G[Gaussian HMM<br/>(Market_Regime)]
-    H[Reinforcement Learning<br/>(Q-Learning Agent)]
+    A["Raw Stock Data (Date, Open, High, Low, Close, Volume, Name)"]
+    B["Technical Indicators (ATR, Bollinger Bands, RSI, MACD)"]
+    C["Lagged Features (Close_Lag1, Return_Lag1)"]
+    D["Winsorization & Discretization (e.g., Open_binned, High_binned, Low_binned)"]
+    E["Feature Selection (Remove Redundancy)"]
+    F["Bayesian Network Modeling"]
+    G["Gaussian HMM (Market_Regime)"]
+    H["Reinforcement Learning (Q-Learning Agent)"]
     
     A --> B
     A --> C
@@ -480,6 +480,7 @@ graph LR
     E --> F
     F --> G
     G --> H
+
 ```
 
 *Figure: Overview of data transformation and modeling steps.*
@@ -495,13 +496,15 @@ Our model relies on two principal probabilistic structures:
 2. **Enhanced Bayesian Network:**  
    - **Structure:** Expands the feature set to include additional engineered variables like `ATR_binned` and `Return_binned`.  
    - **Structure Learning:** We use HillClimbSearch (a non-core algorithm implemented in pgmpy) to learn an optimal structure that captures not only the direct influences of each predictor on `Trend` but also the interdependencies among predictors (e.g., how volatility might affect returns).  
-   - **Rationale:** This data-driven structure better represents the complex interactions in market behavior, leading to improved inference accuracy.
+   - This data-driven structure better represents the complex interactions in market behavior, leading to improved inference accuracy.
 
 **Conclusion**
 
 Our project demonstrates that the integration of advanced feature engineering, probabilistic modeling, and optimization techniques can significantly enhance the predictive performance of a stock trading agent. By leveraging a comprehensive preprocessing pipeline—including winsorization, discretization, and feature selection—we effectively capture the underlying market dynamics. The Enhanced Bayesian Network, refined through hyperparameter tuning and dynamic structure learning via HillClimbSearch, outperforms the baseline model by robustly modeling complex interdependencies among market indicators. Furthermore, incorporating latent market regimes through a Gaussian Hidden Markov Model has improved context-awareness, enabling more accurate trend predictions. Our preliminary reinforcement learning prototype, using a Q-learning agent, shows promising potential for developing adaptive trading strategies. Collectively, these advancements lead to superior model performance—as evidenced by a holdout accuracy increase from approximately 55.7% to 64.4%.
 
 ---
+
+## Appendix
 
 ### Parameter Calculation for Conditional Probability Tables (CPTs)
 
