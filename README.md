@@ -119,8 +119,6 @@ Before model training, the raw stock data undergoes a series of sophisticated pr
     
   Removing redundancy avoids overfitting and ensures that the network’s conditional probability tables (CPTs) are estimated from non-redundant, high-quality data.
 
----
-
 ### 4. Hidden Markov Model (HMM) for Market Regime Detection
 
 The HMM integration further enriches our dataset by identifying latent market regimes:
@@ -159,9 +157,7 @@ def fit_hmm_on_indicators(df, indicators=['MA_20', 'RSI_14', 'MACD'], n_componen
 
 Incorporating the HMM state into the feature set allows the Enhanced Bayesian Network to condition its predictions on latent market conditions, leading to better differentiation between market phases and improved accuracy.
 
----
-
-#### 5. Bayesian Network Structures
+### 5. Bayesian Network Structures
 
 - **Baseline BN Structure:**
   - **Structure:**
@@ -223,8 +219,6 @@ logging.warning(f"Best structure validation accuracy: {best_structure_score:.4f}
 ```
 
 The enhanced network's flexibility to learn and represent complex relationships directly translates to better model performance, as it effectively captures the inherent uncertainty and interactions within stock market data.
-
----
 
 ### 6. Baseline vs. Enhanced Bayesian Network
 
@@ -297,8 +291,6 @@ This fixed structure may miss important market signals present in additional fea
       
      The Enhanced BN outperforms the baseline by capturing additional market dynamics, as evidenced by a higher holdout accuracy.
 
----
-
 ### 7. Reinforcement Learning (RL) Integration
 
 We have also prototyped a Q-learning agent to explore RL-based trading strategies. Our RL component demonstrates another frontier of decision-making in our system.
@@ -343,11 +335,9 @@ class QLearningAgent:
 
 The performance of the RL prototype using the inferred HMM regimes is explored in [HMM_and_RL_Experiments.ipynb](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone3/notebooks/HMM_and_RL_Experiments.ipynb)
 
----
+### 8. Results & Comparative Analysis
 
-## 8. Results & Comparative Analysis
-
-### Performance Metrics
+#### Performance Metrics
 
 - **Baseline BN Accuracy:**  
   The baseline Bayesian network, which only uses basic discretized features (e.g., `Open_binned`, `High_binned`, `Low_binned`), achieved a cross-validation accuracy of approximately **55.7%**.
@@ -355,7 +345,7 @@ The performance of the RL prototype using the inferred HMM regimes is explored i
 - **Enhanced BN Accuracy:**  
   By incorporating additional features (like `ATR_binned` and `Return_binned`), tuning hyperparameters via grid search, and optimizing the network structure with HillClimbSearch, our Enhanced Bayesian Network achieved a holdout accuracy of approximately **64.4%**.
 
-### Why the Enhanced BN Outperforms the Baseline
+#### Why the Enhanced BN Outperforms the Baseline
 
 1. **Richer Feature Set:**  
    Including indicators of volatility and returns provides the network with deeper insights into market dynamics.
@@ -369,7 +359,7 @@ The performance of the RL prototype using the inferred HMM regimes is explored i
 4. **Incorporation of Latent Market Regimes (via HMM):**  
    The additional market regime feature further refines the model’s understanding of market states, enabling more context-aware predictions.
 
-## Training Code Snippet
+### Training Code Snippet
 
 *Illustrative Training Code Snippet from `model_training.py`:*
 
@@ -404,7 +394,7 @@ Each enhancement—whether through additional features, careful parameter tuning
 
 ---
 
-## Repository Structure
+### Repository Structure
 
 ```
 Probabilistic-Stock-Trading-Agent/
@@ -430,11 +420,9 @@ Probabilistic-Stock-Trading-Agent/
 └── README.md                            # This comprehensive project document
 ```
 
----
+### Conclusion
 
-## Conclusion
-
-### Dataset Exploration and Variable Roles
+#### Dataset Exploration and Variable Roles
 
 Our dataset is drawn from the [Stock Time Series 20050101 to 20171231](https://www.kaggle.com/datasets/szrlee/stock-time-series-20050101-to-20171231) collection. It contains over 93,600 daily observations for various stocks and includes the following raw variables:
 
@@ -485,7 +473,7 @@ graph LR
 
 *Figure: Overview of data transformation and modeling steps.*
 
-### Variable Interactions and Model Structure
+#### Variable Interactions and Model Structure
 
 Our model relies on two principal probabilistic structures:
 
@@ -498,7 +486,7 @@ Our model relies on two principal probabilistic structures:
    - **Structure Learning:** We use HillClimbSearch (a non-core algorithm implemented in pgmpy) to learn an optimal structure that captures not only the direct influences of each predictor on `Trend` but also the interdependencies among predictors (e.g., how volatility might affect returns).  
    - This data-driven structure better represents the complex interactions in market behavior, leading to improved inference accuracy.
 
-**Conclusion**
+#### **Conclusion**
 
 Our project demonstrates that the integration of advanced feature engineering, probabilistic modeling, and optimization techniques can significantly enhance the predictive performance of a stock trading agent. By leveraging a comprehensive preprocessing pipeline—including winsorization, discretization, and feature selection—we effectively capture the underlying market dynamics. The Enhanced Bayesian Network, refined through hyperparameter tuning and dynamic structure learning via HillClimbSearch, outperforms the baseline model by robustly modeling complex interdependencies among market indicators. Furthermore, incorporating latent market regimes through a Gaussian Hidden Markov Model has improved context-awareness, enabling more accurate trend predictions. Our preliminary reinforcement learning prototype, using a Q-learning agent, shows promising potential for developing adaptive trading strategies. Collectively, these advancements lead to superior model performance—as evidenced by a holdout accuracy increase from approximately 55.7% to 64.4%.
 
@@ -602,9 +590,7 @@ Source: [pgmpy's HillClimbSearch Documentation](https://pgmpy.org/structure_esti
    - `Model_Training_Evaluation.ipynb`
    - `HMM_and_RL_Experiments.ipynb` (see [docs/README_experiments.md](https://github.com/ryanrowe2/StockTradingAI-Project/blob/Milestone3/docs/README_experiments.md) for more detail)
 
----
-
-## References
+### References
 
 - [pgmpy Documentation](https://pgmpy.org)
 - [scikit-learn Documentation](https://scikit-learn.org)
