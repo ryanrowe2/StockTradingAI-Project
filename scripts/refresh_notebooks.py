@@ -38,20 +38,30 @@ def _display(value: object) -> None:
 
 def _verify_outputs(previous: list, current: list, path: Path, cell_number: int) -> None:
     """Check numerical text and integrity/visual consistency of saved charts."""
-    def text_results(outputs):
-        return [(output.get("output_type"), output.get("name"),
-                 str(output.get("text", "")).strip())
-                for output in outputs if output.get("output_type") == "stream"]
+    def non_image_results(outputs):
+        """Check every output, including rich text, errors, and output ordering."""
+        comparable = []
+        for output in outputs:
+            saved = dict(output)
+            saved.pop("execution_count", None)
+            if "text" in saved:
+                saved["text"] = str(saved["text"]).strip()
+            if "data" in saved:
+                data = dict(saved["data"])
+                data.pop("image/png", None)  # Compare PNG pixels separately.
+                saved["data"] = data
+            comparable.append(saved)
+        return comparable
 
     def figures(outputs):
         return [output["data"]["image/png"] for output in outputs
                 if "image/png" in output.get("data", {})]
 
-    if text_results(previous) != text_results(current):
-        raise RuntimeError(f"Published results differ in {path.name}, cell {cell_number}")
     old_figures, new_figures = figures(previous), figures(current)
     if len(old_figures) != len(new_figures):
         raise RuntimeError(f"Published chart count differs in {path.name}, cell {cell_number}")
+    if non_image_results(previous) != non_image_results(current):
+        raise RuntimeError(f"Published results differ in {path.name}, cell {cell_number}")
     def decoded_chart(encoded: str) -> tuple[tuple[int, int], np.ndarray]:
         try:
             binary = base64.b64decode(encoded, validate=True)
@@ -60,7 +70,7 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
                     raise ValueError("Chart is not a PNG image")
                 chart.load()  # Force decoding; checking the PNG header alone is insufficient.
                 pixels = np.asarray(
-                    chart.convert("RGB").resize((128, 96), Image.Resampling.LANCZOS),
+                    chart.convert("RGB").resize((384, 288), Image.Resampling.LANCZOS),
                     dtype=np.int16,
                 )
                 return chart.size, pixels
@@ -72,8 +82,12 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
     for old, new in zip(old_figures, new_figures):
         old_size, old_pixels = decoded_chart(old)
         new_size, new_pixels = decoded_chart(new)
+        difference = np.abs(old_pixels - new_pixels)
+        # A mean-only check misses a thin graph line that moves dramatically
+        # across a mostly blank chart. Also count strongly changed pixels.
+        significant_fraction = np.mean(difference.max(axis=2) > 40)
         if (max(abs(a - b) for a, b in zip(old_size, new_size)) > 3
-                or np.abs(old_pixels - new_pixels).mean() > 3.0):
+                or difference.mean() > 3.0 or significant_fraction > 0.001):
             raise RuntimeError(f"Published chart differs in {path.name}, cell {cell_number}")
 
 

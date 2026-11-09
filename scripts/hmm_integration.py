@@ -44,7 +44,8 @@ def _gaussian_log_emissions(model: GaussianHMM, observations: np.ndarray) -> np.
     ])
 
 
-def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...]) -> pd.DataFrame:
+def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
+                          *, keep_missing: bool = False) -> pd.DataFrame:
     absent = set(indicators) - set(frame.columns)
     if absent:
         raise ValueError(f"Missing HMM indicators: {sorted(absent)}")
@@ -62,7 +63,7 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...]) -> p
     clean = ordered.dropna(subset=list(indicators)).copy()
     if not np.isfinite(clean[list(indicators)].to_numpy(dtype=float)).all():
         raise ValueError("Indicator values must be finite")
-    return clean
+    return ordered if keep_missing else clean
 
 
 def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
@@ -76,25 +77,38 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
     # Work with positional row identifiers: concatenated training/holdout
     # frames can have repeated index labels, which are unsafe for .loc writes.
     rows = df.reset_index(drop=True)
-    clean = _validated_indicators(rows, indicators)
+    ordered = _validated_indicators(rows, indicators, keep_missing=True)
     output = rows.copy()
     output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
-    if clean.empty:
+    complete = ordered[list(indicators)].notna().all(axis=1)
+    if not complete.any():
         output.index = df.index
         return output
-    observations = clean[list(indicators)].to_numpy(dtype=float)
+    observations = ordered.loc[complete, list(indicators)].to_numpy(dtype=float)
     emissions = _gaussian_log_emissions(model, observations)
-    transition = np.log(np.clip(model.transmat_, 1e-300, 1))
-    log_alpha = np.log(np.clip(model.startprob_, 1e-300, 1))
+    # A zero prior or transition is impossible, not merely very unlikely.
+    # Keep it at -inf in log space instead of assigning artificial mass.
+    with np.errstate(divide="ignore"):
+        transition = np.log(model.transmat_)
+        log_alpha = np.log(model.startprob_)
     regimes = []
-    for likelihood in emissions:
-        # One forward filtering update; state t uses observations <= t.
-        if regimes:
+    emission_index = 0
+    for step, (row_index, has_observation) in enumerate(complete.items()):
+        # Each dated row advances the latent state, even when its indicators
+        # are missing. A missing observation contributes no emission term.
+        if step:
             log_alpha = logsumexp(log_alpha[:, None] + transition, axis=0)
-        log_alpha = log_alpha + likelihood
-        log_alpha = log_alpha - logsumexp(log_alpha)
-        regimes.append(int(np.argmax(log_alpha)))
-    output.loc[clean.index, "Market_Regime"] = pd.array(regimes, dtype="Int64")
+        if has_observation:
+            log_alpha = log_alpha + emissions[emission_index]
+            emission_index += 1
+        normalization = logsumexp(log_alpha)
+        if not np.isfinite(normalization):
+            raise ValueError("HMM filtering produced no finite state probabilities")
+        log_alpha = log_alpha - normalization
+        if has_observation:
+            regimes.append((row_index, int(np.argmax(log_alpha))))
+    for row_index, regime in regimes:
+        output.loc[row_index, "Market_Regime"] = regime
     output.index = df.index
     return output
 

@@ -100,6 +100,13 @@ def test_direct_indicator_api_rejects_missing_symbols_and_duplicate_dates():
         add_technical_indicators(bars.assign(Date=[bars.loc[0, "Date"]] * len(bars)))
 
 
+def test_single_ticker_indicators_reject_duplicate_dates_without_name_column():
+    bars = synthetic_bars(3).query("Name == 'AAA'").drop(columns="Name").reset_index(drop=True)
+    bars.loc[1, "Date"] = bars.loc[0, "Date"]
+    with pytest.raises(ValueError, match="Duplicate trading dates"):
+        add_technical_indicators(bars)
+
+
 def test_model_features_are_invariant_to_ticker_price_scale():
     bars = synthetic_bars()
     original = prepare_features(bars).query("Name == 'AAA'")
@@ -291,6 +298,43 @@ def test_gaussian_log_emissions_use_public_model_parameters():
     np.testing.assert_allclose(
         _gaussian_log_emissions(GaussianParameters(), observations), expected, atol=1e-12
     )
+
+
+def test_hmm_filtering_respects_impossible_initial_states_and_transitions():
+    class DeterministicModel:
+        covariance_type = "diag"
+        means_ = np.array([[0.], [40.]])
+        covars_ = np.array([[[1.]], [[1.]]])
+        startprob_ = np.array([1., 0.])
+        transmat_ = np.eye(2)
+
+    # State 1 has an overwhelmingly better emission likelihood, but both
+    # its initial probability and its transition from state 0 are zero.
+    frame = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-03"],
+        "MA_20": [40., 40.],
+    })
+    filtered = infer_filtered_regimes(DeterministicModel(), frame, ("MA_20",))
+    assert filtered["Market_Regime"].tolist() == [0, 0]
+
+
+def test_hmm_filtering_advances_through_missing_indicator_observations():
+    class AlternatingModel:
+        covariance_type = "diag"
+        means_ = np.array([[0.], [0.]])
+        covars_ = np.array([[[1.]], [[1.]]])
+        startprob_ = np.array([0.99, 0.01])
+        transmat_ = np.array([[0.1, 0.9], [0.9, 0.1]])
+
+    frame = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-03", "2020-01-06"],
+        "MA_20": [0., np.nan, 0.],
+    })
+    filtered = infer_filtered_regimes(AlternatingModel(), frame, ("MA_20",))
+    assert filtered.loc[0, "Market_Regime"] == 0
+    assert pd.isna(filtered.loc[1, "Market_Regime"])
+    # Two transitions from the first day's prior yield [0.8136, 0.1864].
+    assert filtered.loc[2, "Market_Regime"] == 0
 
 
 def test_hmm_filtering_preserves_duplicate_input_index_labels():
@@ -579,3 +623,30 @@ def test_notebook_check_rejects_corrupted_or_materially_changed_pngs():
     }}
     with pytest.raises(RuntimeError, match="Invalid published chart"):
         _verify_outputs([white], [corrupt], Path("example.ipynb"), 1)
+
+
+def test_notebook_check_catches_moved_thin_plot_lines():
+    from PIL import Image, ImageDraw
+    from scripts.refresh_notebooks import _verify_outputs
+
+    def line_chart(y_position):
+        chart = Image.new("RGB", (1000, 750), "white")
+        ImageDraw.Draw(chart).line((30, y_position, 970, y_position),
+                                   fill="black", width=3)
+        buffer = io.BytesIO()
+        chart.save(buffer, format="PNG")
+        return {"output_type": "display_data", "data": {
+            "image/png": base64.b64encode(buffer.getvalue()).decode("ascii")
+        }}
+
+    with pytest.raises(RuntimeError, match="Published chart differs"):
+        _verify_outputs([line_chart(200)], [line_chart(500)], Path("chart.ipynb"), 2)
+
+
+def test_notebook_check_catches_changed_rich_text_results():
+    from scripts.refresh_notebooks import _verify_outputs
+
+    before = [{"output_type": "execute_result", "data": {"text/plain": "accuracy: 0.70"}}]
+    after = [{"output_type": "execute_result", "data": {"text/plain": "accuracy: 0.10"}}]
+    with pytest.raises(RuntimeError, match="Published results differ"):
+        _verify_outputs(before, after, Path("results.ipynb"), 2)

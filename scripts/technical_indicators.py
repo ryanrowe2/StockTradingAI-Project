@@ -74,6 +74,8 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if "Date" in df:
         df["Date"] = parse_daily_dates(df["Date"], context="Indicator dates")
     if "Name" not in df.columns:
+        if "Date" in df and df["Date"].duplicated().any():
+            raise ValueError("Duplicate trading dates in indicator input")
         return _one_symbol_indicators(df.sort_values("Date") if "Date" in df else df)
     if "Date" not in df:
         raise ValueError("Date is required for multi-ticker indicators")

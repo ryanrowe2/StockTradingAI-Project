@@ -107,6 +107,9 @@ $$
 Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Holdout filtering uses the preceding training and validation observations as historical context while keeping the HMM parameters fitted exclusively on training data. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
 Gaussian emission likelihoods are calculated from the fitted model's public
 mean and covariance parameters, without relying on internal hmmlearn methods.
+Impossible initial states and transitions retain zero probability. When an
+indicator observation is missing, the filter advances the latent state using
+the transition matrix without assigning a regime to that incomplete row.
 
 ## 4. Q-learning experiment
 
@@ -149,7 +152,7 @@ The same checks run automatically through [GitHub Actions](../.github/workflows/
 python -m scripts.refresh_notebooks
 ```
 
-`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them, compares numerical text results, fully decodes the saved PNGs, and checks for material visual differences against the newly generated charts.
+`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them, compares all saved output types (including numerical text and rich results), fully decodes the saved PNGs, and checks for both broad and localized visual changes against the newly generated charts.
 
 ## References
 
