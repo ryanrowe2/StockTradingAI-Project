@@ -12,7 +12,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from technical_indicators import add_technical_indicators
+if __package__:
+    from .technical_indicators import add_technical_indicators
+else:
+    from technical_indicators import add_technical_indicators
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,38 +25,49 @@ REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
 MODEL_FEATURES = ("Open", "High", "Low", "ATR", "Return")
 
 
-def load_data(filepath: str | Path) -> pd.DataFrame:
-    """Validate raw observations; retain their actual, positive price units."""
-    df = pd.read_csv(filepath, parse_dates=["Date"])
+def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
+    """Retain complete, coherent daily price bars with verified dates and symbols.
+
+    A contradictory OHLC record cannot be repaired reliably without an
+    independent price source, so it is excluded from reproducible experiments.
+    """
     missing = set(REQUIRED_COLUMNS) - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
-    if df[["Date", "Name"]].isna().any().any():
-        raise ValueError("Date and Name must be present for every observation")
-    for name in ("Open", "High", "Low", "Close", "Volume"):
-        df[name] = pd.to_numeric(df[name], errors="coerce")
-    # Dropping a handful of incomplete bars is safer than imputing from future
-    # observations or inventing a price for the current trading day.
-    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).copy()
-    df = df.loc[
-        (df[["Open", "High", "Low", "Close"]] > 0).all(axis=1)
-        & df["Volume"].ge(0)
-    ]
+    df = df.copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    if df["Date"].isna().any():
+        raise ValueError("Every Date must be present and parseable")
+    if df["Name"].isna().any() or df["Name"].astype(str).str.strip().eq("").any():
+        raise ValueError("Every observation must have a ticker symbol")
+    df["Name"] = df["Name"].astype(str).str.strip().str.upper()
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
+    for name in ("Open", "High", "Low", "Close", "Volume"):
+        df[name] = pd.to_numeric(df[name], errors="coerce")
+    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).copy()
+    positive = (
+        (df[["Open", "High", "Low", "Close"]] > 0).all(axis=1)
+        & df["Volume"].ge(0)
+    )
+    coherent = (
+        df["High"].ge(df[["Open", "Low", "Close"]].max(axis=1))
+        & df["Low"].le(df[["Open", "High", "Close"]].min(axis=1))
+    )
+    df = df.loc[positive & coherent].copy()
+    if df.empty:
+        raise ValueError("No valid OHLCV observations remain")
     return df.sort_values(["Name", "Date"]).reset_index(drop=True)
+
+
+def load_data(filepath: str | Path) -> pd.DataFrame:
+    """Read and validate raw stock observations in their actual price units."""
+    return validate_bars(pd.read_csv(filepath))
 
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     """Produce one next-observed-day target per symbol, with causal indicators."""
-    missing = set(REQUIRED_COLUMNS) - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-    source = df.copy()
-    source["Date"] = pd.to_datetime(source["Date"])
-    source = source.sort_values(["Name", "Date"]).reset_index(drop=True)
-    if source.duplicated(["Name", "Date"]).any():
-        raise ValueError("Duplicate ticker/date observations")
+    source = validate_bars(df)
     source = add_technical_indicators(source)
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
     source["Target_Date"] = source.groupby("Name", sort=False)["Date"].shift(-1)

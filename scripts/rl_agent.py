@@ -1,7 +1,8 @@
 """Single-symbol, long-or-flat Q-learning trading research environment.
 
-The agent can buy one share, sell its existing share, or hold. Every step is
-marked to market, with configurable transaction costs and terminal handling.
+The agent can buy one share, sell its existing share, or hold. Decisions based
+on a completed daily bar execute at the following session's opening price.
+Every step is marked to market, with transaction costs and terminal handling.
 This is an experimental simulator, not an execution or profitability claim.
 """
 
@@ -14,11 +15,11 @@ import pandas as pd
 
 
 class SimpleTradingEnv:
-    """Sequential one-share close-to-close simulation with no leverage."""
+    """Sequential one-share simulator with next-session-open execution."""
 
     def __init__(self, data: pd.DataFrame, transaction_cost: float = 0.001):
-        if "Close" not in data or len(data) < 2:
-            raise ValueError("The trading environment needs at least two close prices")
+        if not {"Open", "Close"}.issubset(data.columns) or len(data) < 2:
+            raise ValueError("The trading environment needs at least two daily open/close bars")
         if "Name" in data and data["Name"].nunique() != 1:
             raise ValueError("A trading episode must contain exactly one ticker")
         if not 0 <= transaction_cost < 1:
@@ -26,9 +27,9 @@ class SimpleTradingEnv:
         self.data = data.sort_values("Date").reset_index(drop=True) if "Date" in data else data.reset_index(drop=True)
         if "Date" in self.data and self.data["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates")
-        prices = self.data["Close"].to_numpy(dtype=float)
+        prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
         if not np.isfinite(prices).all() or np.any(prices <= 0):
-            raise ValueError("Close prices must be finite and positive")
+            raise ValueError("Open/close prices must be finite and positive")
         self.transaction_cost = transaction_cost
         self.reset()
 
@@ -49,19 +50,26 @@ class SimpleTradingEnv:
             raise RuntimeError("Episode finished. Call reset() before stepping again")
         if action not in {"buy", "sell", "hold"}:
             raise ValueError(f"Unrecognized action: {action}")
-        price = float(self.data.iloc[self.index]["Close"])
+        decision_close = float(self.data.iloc[self.index]["Close"])
+        next_bar = self.data.iloc[self.index + 1]
+        execution_price = float(next_bar["Open"])
+        next_close = float(next_bar["Close"])
+        # Existing holdings remain exposed to the overnight price change.
+        overnight_pnl = self.position * (execution_price - decision_close)
         fee = 0.0
         if action == "buy" and self.position == 0:
             self.position = 1
-            fee = price * self.transaction_cost
+            fee = execution_price * self.transaction_cost
         elif action == "sell" and self.position == 1:
             self.position = 0
-            fee = price * self.transaction_cost
-        next_price = float(self.data.iloc[self.index + 1]["Close"])
-        reward = self.position * (next_price - price) - fee
+            fee = execution_price * self.transaction_cost
+        intraday_pnl = self.position * (next_close - execution_price)
+        reward = overnight_pnl + intraday_pnl - fee
         self.index += 1
         self.done = self.index == len(self.data) - 1
-        return self.get_state(), float(reward), self.done, {"position": self.position, "fee": fee}
+        return self.get_state(), float(reward), self.done, {
+            "position": self.position, "fee": fee, "execution_price": execution_price,
+        }
 
 
 class QLearningAgent:
@@ -89,7 +97,11 @@ class QLearningAgent:
         state = self.get_state(state_features)
         if explore and self.rng.random() < self.epsilon:
             return self.rng.choice(self.actions)
-        estimates = self._values(state)
+        # Holdout evaluation must not alter the learned Q-table. A state never
+        # observed during training takes the conservative no-trade action.
+        if not explore and state not in self.q_table:
+            return "hold" if "hold" in self.actions else self.actions[0]
+        estimates = self._values(state) if explore else self.q_table[state]
         return max(self.actions, key=estimates.__getitem__)
 
     def update_q_value(self, state_features, action: str, reward: float,
@@ -119,7 +131,10 @@ class QLearningAgent:
 
 
 if __name__ == "__main__":
-    demonstration = pd.DataFrame({"Close": [100, 102, 101, 103, 105, 104, 106]})
+    demonstration = pd.DataFrame({
+        "Open": [99, 101, 102, 102, 103, 105, 105],
+        "Close": [100, 102, 101, 103, 105, 104, 106],
+    })
     env = SimpleTradingEnv(demonstration)
     agent = QLearningAgent()
     for _ in range(50):

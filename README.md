@@ -10,11 +10,11 @@ The project emphasizes **reproducible experiments, chronological evaluation, and
 
 | Component | Implementation |
 | --- | --- |
-| Historical data | 93,612 daily observations across 31 stocks, 2006–2017 |
+| Historical data | 93,612 source observations across 31 stocks, 2006–2017 |
 | Feature engineering | ATR, RSI, MACD, moving averages, Bollinger Bands, and lagged returns |
 | Probabilistic prediction | Baseline and enhanced discrete Bayesian networks with BDeu smoothing |
 | Regime analysis | Gaussian HMM with forward-filtered state inference |
-| Trading experiment | Long-or-flat Q-learning agent with transaction costs and position-aware rewards |
+| Trading experiment | Long-or-flat Q-learning agent with next-open execution and transaction costs |
 | Evaluation | Chronological training/validation/test periods and classification metrics |
 
 ### System architecture
@@ -24,10 +24,14 @@ flowchart TD
     A["Raw daily OHLCV data"] --> B["Validate and sort by ticker and date"]
     B --> C["Causal technical indicators and next-day labels"]
     C --> D["Chronological train / validation / test split"]
-    D --> E["Train-fitted quantile bins and Bayesian networks"]
-    E --> F["Validation-based parameter selection"]
-    F --> G["Final fit on train + validation"]
-    G --> H["Untouched test-period evaluation"]
+    D --> E["Training-fitted quantile bins"]
+    E --> F["Bayesian network model selection"]
+    F --> G["Final fit and test evaluation"]
+    D --> H["Single-ticker HMM fitting"]
+    H --> I["Forward-filtered market regimes"]
+    E --> J["Q-learning training"]
+    I --> J
+    J --> K["Frozen-policy historical evaluation"]
 ```
 
 Each ticker's indicators and next-day labels are computed independently. Date boundaries are shared across tickers, so the partitions correspond to actual historical market periods.
@@ -38,9 +42,9 @@ Each ticker's indicators and next-day labels are computed independently. Date bo
 
 The supervised target is whether the **next observed trading day's closing price** is higher than the current day's close:
 
-\[
+$$
 \mathrm{Trend}_t = \mathbf{1}\left[\mathrm{Close}_{t+1} > \mathrm{Close}_t\right].
-\]
+$$
 
 Two discrete Bayesian networks support a controlled feature-set comparison:
 
@@ -65,9 +69,9 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 
 ### 3. Q-learning trading simulator
 
-The tabular Q-learning agent explores three actions: **buy, sell, and hold**. A single-symbol simulation tracks a long-or-flat position, applies transaction costs on executions, and computes the daily change in marked-to-market position value.
+The tabular Q-learning agent explores three actions: **buy, sell, and hold**. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs.
 
-The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share buy-and-hold comparison.
+The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
 
 **Implementation:** [`scripts/rl_agent.py`](scripts/rl_agent.py)
 
@@ -114,7 +118,7 @@ python -m pytest tests -q
 | [Model Training & Evaluation](notebooks/Model_Training_Evaluation.ipynb) | Reproduce the chronological Bayesian-network comparison |
 | [HMM & Q-learning Experiments](notebooks/HMM_and_RL_Experiments.ipynb) | Visualize filtered regimes and compare an experimental trading policy with buy-and-hold |
 
-Open the notebooks from the `notebooks/` folder in Jupyter with the project environment selected. See the [experiment reproduction guide](docs/README_experiments.md) for technical details and exact experiment settings.
+The notebooks include saved output tables and plots for immediate viewing on GitHub. Open them from the `notebooks/` folder in Jupyter with the project environment selected. Reproduce their outputs with `python -m scripts.refresh_notebooks`. See the [experiment reproduction guide](docs/README_experiments.md) for technical details and exact experiment settings.
 
 ## Repository structure
 
@@ -122,7 +126,6 @@ Open the notebooks from the `notebooks/` folder in Jupyter with the project envi
 StockTradingAI-Project/
 ├── data/
 │   ├── raw/                       # Historical source CSVs
-│   ├── processed/                 # Historical project data artifacts
 │   └── generated/                 # Regenerable outputs (ignored by Git)
 ├── docs/
 │   └── README_experiments.md      # Reproduction and methodology guide
@@ -132,8 +135,10 @@ StockTradingAI-Project/
 │   ├── technical_indicators.py    # Per-symbol technical indicators
 │   ├── model_training.py          # Bayesian networks and time-based evaluation
 │   ├── hmm_integration.py         # Gaussian HMM and forward filtering
-│   └── rl_agent.py                # Position-aware trading environment / Q-learning
+│   ├── rl_agent.py                # Position-aware trading environment / Q-learning
+│   └── refresh_notebooks.py       # Reproducible notebook tables and charts
 ├── tests/                         # Automated pipeline regression tests
+├── .github/workflows/             # Automated verification on pushes / PRs
 ├── requirements.txt
 └── requirements-dev.txt
 ```

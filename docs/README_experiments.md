@@ -22,7 +22,7 @@ python scripts/data_processing.py
 python scripts/data_processing.py --ticker AAPL
 ```
 
-The source CSV is validated for required columns, numeric values, positive OHLC prices, and unique `(Name, Date)` observations. Incomplete bars are excluded. The pipeline computes indicators on each ticker's chronological series independently:
+The source CSV is validated for required columns, parseable dates, numeric values, positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)` observations. Incomplete or contradictory bars are excluded without guessing replacement prices. The pipeline computes indicators on each ticker's chronological series independently:
 
 | Indicator | Definition / implementation |
 | --- | --- |
@@ -71,9 +71,9 @@ For the included combined source, the evaluation periods are:
 
 | Partition | Observations | Date boundary |
 | --- | ---: | --- |
-| Training | 55,480 | Through 2013-04-03 |
-| Validation | 18,476 | 2013-04-04 through 2015-08-14 |
-| Test | 18,514 | 2015-08-17 through 2017-12-28 |
+| Training | 55,334 | Through 2013-04-03 |
+| Validation | 18,472 | 2013-04-04 through 2015-08-14 |
+| Test | 18,513 | 2015-08-17 through 2017-12-28 |
 
 The [model evaluation notebook](../notebooks/Model_Training_Evaluation.ipynb) runs the same experiment and displays both models' metrics side by side.
 
@@ -85,10 +85,10 @@ The notebook selects **AAPL** for a contiguous trading sequence, computes indica
 
 `infer_filtered_regimes` computes forward probabilities from the fitted HMM emission and transition parameters:
 
-\[
+$$
 P(z_t\mid x_{1:t}) \propto P(x_t\mid z_t)\sum_{z_{t-1}}
 P(z_t\mid z_{t-1})P(z_{t-1}\mid x_{1:t-1}).
-\]
+$$
 
 Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
 
@@ -102,14 +102,15 @@ The `SimpleTradingEnv` has three actions:
 - **Sell:** exit the position when long.
 - **Hold:** leave the position unchanged.
 
-For a step from current price `p_t` to next observed close `p_(t+1)`, the reward is:
+Decisions made after observing a daily close are filled at the next trading session's open. Holdings existing before an action remain exposed to the overnight price change. The reward for a step is:
 
-\[
-r_t = \mathrm{position}_{t+1}(p_{t+1}-p_t)
-- \mathrm{transaction\_cost}\times p_t\times\mathbf{1}[\mathrm{trade}].
-\]
+$$
+r_t = \mathrm{position}_{t}(\mathrm{Open}_{t+1}-\mathrm{Close}_t)
++ \mathrm{position}_{t+1}(\mathrm{Close}_{t+1}-\mathrm{Open}_{t+1})
+- \mathrm{transaction\_cost}\times\mathrm{Open}_{t+1}\times\mathbf{1}[\mathrm{trade}].
+$$
 
-Q-values are updated using the discounted next-state value for non-terminal steps. At the final step, the next-state bootstrap value is zero. To score the holdout period, the notebook disables both exploration and Q-table updates and compares one-share dollar profit/loss with buy-and-hold.
+Q-values are updated using the discounted next-state value for non-terminal steps. At the final step, the next-state bootstrap value is zero. To score the holdout period, the notebook disables both exploration and Q-table updates and compares one-share dollar profit/loss with a next-open buy-and-hold entry.
 
 The implementation is intentionally a transparent research simulator; it can be extended with portfolio sizing, risk controls, and realistic order execution.
 
@@ -121,7 +122,13 @@ Run the regression tests:
 python -m pytest tests -q
 ```
 
-The test suite covers per-ticker labels and indicators, chronological target boundaries, training-only binning, Bayesian CPT predictions, prefix-invariant HMM state filtering, long-or-flat rewards and transaction costs, terminal Q-learning updates, a complete synthetic-data experiment, and notebook format validity.
+The test suite covers OHLC and date validation, per-ticker labels and indicators, chronological target boundaries, training-only binning, Bayesian CPT predictions, package imports, prefix-invariant HMM state filtering, next-open rewards and transaction costs, immutable holdout evaluation, terminal Q-learning updates, complete synthetic-data experiments, and saved notebook outputs.
+
+The same checks run automatically through [GitHub Actions](../.github/workflows/python-checks.yml) on pushes and pull requests. To regenerate the GitHub-visible notebook tables and figures, run:
+
+```bash
+python -m scripts.refresh_notebooks
+```
 
 ## References
 

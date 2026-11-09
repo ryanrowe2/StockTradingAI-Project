@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import json
+import copy
+import base64
+import io
+import importlib
 import sys
 from pathlib import Path
 
@@ -14,7 +17,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from data_processing import load_data, prepare_features  # noqa: E402
+from data_processing import DEFAULT_RAW_DATA, load_data, prepare_features  # noqa: E402
 from hmm_integration import fit_hmm_on_indicators, infer_filtered_regimes  # noqa: E402
 from model_training import (  # noqa: E402
     BASELINE_FEATURES, QuantileBinner, chronological_split,
@@ -77,6 +80,27 @@ def test_load_data_validates_and_removes_incomplete_rows(tmp_path: Path):
     assert not loaded.duplicated(["Name", "Date"]).any()
 
 
+def test_loader_excludes_inconsistent_prices_and_rejects_invalid_dates(tmp_path: Path):
+    data = synthetic_bars(70)
+    data.loc[0, "Open"] = 2000.0
+    csv = tmp_path / "invalid.csv"
+    data.to_csv(csv, index=False)
+    # The contradictory bar is excluded rather than being silently altered.
+    remaining = load_data(csv)
+    assert len(remaining) == len(data) - 1
+    assert not ((remaining["High"] < remaining[["Open", "Close", "Low"]].max(axis=1)) |
+                (remaining["Low"] > remaining[["Open", "Close", "High"]].min(axis=1))).any()
+    with pytest.raises(ValueError, match="Date"):
+        load_data(io.StringIO("Date,Name,Open,High,Low,Close,Volume\nnot-a-date,AAA,10,11,9,10,100\n"))
+
+
+def test_historical_source_contains_only_consistent_bars_after_validation():
+    cleaned = load_data(DEFAULT_RAW_DATA)
+    assert len(cleaned) == 93435
+    assert (cleaned["High"] >= cleaned[["Open", "Close", "Low"]].max(axis=1)).all()
+    assert (cleaned["Low"] <= cleaned[["Open", "Close", "High"]].min(axis=1)).all()
+
+
 def test_chronological_split_purges_future_labels_and_symbols_remain_aligned():
     split = chronological_split(prepare_features(synthetic_bars()))
     assert split.train["Target_Date"].max() <= split.train_end
@@ -125,15 +149,18 @@ def test_hmm_filtering_is_prefix_invariant():
 
 
 def test_rl_positions_reward_terminal_and_transaction_costs():
-    data = pd.DataFrame({"Close": [100.0, 120.0, 110.0]})
+    data = pd.DataFrame({"Open": [99.0, 110.0, 100.0], "Close": [100.0, 120.0, 110.0]})
     env = SimpleTradingEnv(data, transaction_cost=0.01)
     state = env.reset()
     assert state[-1] == 0
     state, reward, done, info = env.step("buy")
-    assert reward == pytest.approx(19.0)
+    # Buy after day 0 closes; execute at the following 110 open.
+    assert reward == pytest.approx(8.9)
+    assert info["execution_price"] == 110
     assert state[-1] == 1 and not done
     state, reward, done, info = env.step("sell")
-    assert reward == pytest.approx(-1.2)
+    # The overnight gap from 120 to 100 belongs to the existing long.
+    assert reward == pytest.approx(-21.0)
     assert state[-1] == 0 and done
     with pytest.raises(RuntimeError):
         env.step("hold")
@@ -144,6 +171,25 @@ def test_rl_terminal_update_does_not_bootstrap():
     agent.q_table[(1,)] = {"buy": 100.0, "sell": 20.0, "hold": 1.0}
     agent.update_q_value((0,), "buy", 7.0, (1,), done=True)
     assert agent.q_table[(0,)]["buy"] == 7.0
+
+
+def test_policy_evaluation_never_modifies_q_table():
+    agent = QLearningAgent(epsilon=0.0)
+    agent.q_table[(1, 2, 3, 4, 0)] = {"buy": 1.0, "sell": 0.0, "hold": 0.0}
+    snapshot = copy.deepcopy(agent.q_table)
+    unseen = (5, 5, 5, 5, 0)
+    assert agent.choose_action(unseen, explore=False) == "hold"
+    assert agent.q_table == snapshot
+    env = SimpleTradingEnv(pd.DataFrame({"Open": [99, 100, 101], "Close": [100, 101, 102]}))
+    agent.simulate_episode(env, train=False)
+    assert agent.q_table == snapshot
+
+
+def test_project_modules_support_package_imports():
+    module = importlib.import_module("scripts.model_training")
+    assert callable(module.run_experiment)
+    preprocessing = importlib.import_module("scripts.data_processing")
+    assert callable(preprocessing.load_data)
 
 
 def test_hmm_and_rl_reject_multi_ticker_episodes():
@@ -165,4 +211,22 @@ def test_end_to_end_on_independent_dates_and_valid_notebooks(tmp_path: Path):
         assert 0 <= output[model]["validation"]["accuracy"] <= 1
     import nbformat
     for notebook in sorted((ROOT / "notebooks").glob("*.ipynb")):
-        nbformat.validate(nbformat.read(notebook, as_version=4))
+        document = nbformat.read(notebook, as_version=4)
+        nbformat.validate(document)
+        executable = [cell for cell in document.cells if cell.cell_type == "code"]
+        assert executable and all(cell.execution_count is not None for cell in executable)
+        assert all(cell.outputs for cell in executable[1:])
+        for cell in executable:
+            for output in cell.outputs:
+                if "image/png" in output.get("data", {}):
+                    assert base64.b64decode(output.data["image/png"], validate=True).startswith(b"\x89PNG")
+
+
+def test_saved_experiment_notebooks_contain_visual_evidence():
+    import nbformat
+    visualization = nbformat.read(ROOT / "notebooks/HMM_and_RL_Experiments.ipynb", as_version=4)
+    assert sum("image/png" in output.get("data", {})
+               for cell in visualization.cells for output in cell.get("outputs", [])) >= 2
+    evaluation = nbformat.read(ROOT / "notebooks/Model_Training_Evaluation.ipynb", as_version=4)
+    assert any("accuracy" in output.get("text", "")
+               for cell in evaluation.cells for output in cell.get("outputs", []))

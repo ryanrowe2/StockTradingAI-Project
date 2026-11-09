@@ -25,7 +25,10 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
+if __package__:
+    from .data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
+else:
+    from data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
 
 
 BASELINE_FEATURES = ("Open", "High", "Low")
