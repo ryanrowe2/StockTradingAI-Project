@@ -65,8 +65,15 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Rows are sorted chronologically within each symbol. No rolling window,
     shift, or exponential average crosses a symbol boundary.
     """
+    df = df.copy()
+    if "Date" in df:
+        df["Date"] = pd.to_datetime(df["Date"], format="mixed", errors="coerce")
+        if df["Date"].isna().any():
+            raise ValueError("Indicator dates must be present and parseable")
     if "Name" not in df.columns:
         return _one_symbol_indicators(df.sort_values("Date") if "Date" in df else df)
+    if "Date" not in df:
+        raise ValueError("Date is required for multi-ticker indicators")
     return pd.concat(
         [
             _one_symbol_indicators(group.sort_values("Date"))

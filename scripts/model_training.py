@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
+from numbers import Integral
 from pathlib import Path
 
 import numpy as np
@@ -76,9 +77,10 @@ class QuantileBinner:
     """Train-fitted discretizer. No quantile is estimated from held-out rows."""
 
     def __init__(self, num_bins: int = 4):
-        if not 2 <= num_bins <= 20:
-            raise ValueError("num_bins must be between 2 and 20")
-        self.num_bins = num_bins
+        integer_count = isinstance(num_bins, Integral) and not isinstance(num_bins, (bool, np.bool_))
+        if not integer_count or not 2 <= num_bins <= 20:
+            raise ValueError("num_bins must be an integer between 2 and 20")
+        self.num_bins = int(num_bins)
         self.edges: dict[str, np.ndarray] = {}
 
     def fit(self, df: pd.DataFrame, features: tuple[str, ...]) -> "QuantileBinner":

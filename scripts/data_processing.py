@@ -35,7 +35,7 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
     df = df.copy()
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Date"] = pd.to_datetime(df["Date"], format="mixed", errors="coerce")
     if df["Date"].isna().any():
         raise ValueError("Every Date must be present and parseable")
     if df["Name"].isna().any() or df["Name"].astype(str).str.strip().eq("").any():

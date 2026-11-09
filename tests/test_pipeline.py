@@ -69,6 +69,22 @@ def test_technical_indicators_do_not_change_when_future_is_modified():
     pd.testing.assert_frame_equal(original.loc[subset, columns], changed.loc[subset, columns])
 
 
+def test_direct_indicator_api_orders_parsed_dates():
+    bars = pd.DataFrame({
+        "Date": ["2020-1-10", "2020-1-2", "2020-1-3"],
+        "Name": ["AAA", "AAA", "AAA"],
+        "Open": [110.0, 90.0, 100.0], "High": [120.0, 95.0, 105.0],
+        "Low": [100.0, 85.0, 95.0], "Close": [115.0, 90.0, 100.0],
+    })
+    result = add_technical_indicators(bars)
+    assert result["Date"].dt.day.tolist() == [2, 3, 10]
+    assert result["Close_Lag1"].iloc[1:].tolist() == [90.0, 100.0]
+    with pytest.raises(ValueError, match="Date is required"):
+        add_technical_indicators(bars.drop(columns="Date"))
+    with pytest.raises(ValueError, match="parseable"):
+        add_technical_indicators(bars.assign(Date=["invalid", "2020-1-2", "2020-1-3"]))
+
+
 def test_model_features_are_invariant_to_ticker_price_scale():
     bars = synthetic_bars()
     original = prepare_features(bars).query("Name == 'AAA'")
@@ -102,6 +118,16 @@ def test_loader_excludes_inconsistent_prices_and_rejects_invalid_dates(tmp_path:
                 (remaining["Low"] > remaining[["Open", "Close", "High"]].min(axis=1))).any()
     with pytest.raises(ValueError, match="Date"):
         load_data(io.StringIO("Date,Name,Open,High,Low,Close,Volume\nnot-a-date,AAA,10,11,9,10,100\n"))
+
+
+def test_loader_parses_valid_mixed_date_formats_without_lexical_ordering():
+    raw = io.StringIO(
+        "Date,Name,Open,High,Low,Close,Volume\n"
+        "2020-1-10,AAA,10,11,9,10,100\n"
+        "2020-01-02,AAA,10,11,9,10,100\n"
+        "2020-1-3,AAA,10,11,9,10,100\n"
+    )
+    assert load_data(raw)["Date"].dt.day.tolist() == [2, 3, 10]
 
 
 def test_loader_excludes_nonfinite_prices_and_volume(tmp_path: Path):
@@ -143,6 +169,16 @@ def test_binner_learns_thresholds_only_from_training_data():
     np.testing.assert_array_equal(binner.edges["A"], edges)
 
 
+@pytest.mark.parametrize("value", [2.5, 4.0, True, "4", 0, 21])
+def test_binner_rejects_invalid_bin_counts_at_construction(value):
+    with pytest.raises(ValueError, match="integer between 2 and 20"):
+        QuantileBinner(value)
+
+
+def test_binner_accepts_numpy_integer_counts():
+    assert QuantileBinner(np.int64(3)).num_bins == 3
+
+
 def test_network_predictions_and_metrics_are_finite():
     examples = pd.DataFrame({
         **{name: [0, 0, 1, 1, 0, 1] * 10 for name in BASELINE_FEATURES},
@@ -166,6 +202,33 @@ def test_hmm_filtering_is_prefix_invariant():
     assert train_regimes["Market_Regime"].notna().all()
     assert full["Market_Regime"].notna().all()
     assert prefix["Market_Regime"].tolist() == full["Market_Regime"].iloc[:72].tolist()
+
+
+def test_hmm_uses_chronological_dates_even_when_strings_are_not_zero_padded():
+    frame = pd.DataFrame({
+        "Date": ["2020-1-10", "2020-1-2", "2020-1-3"],
+        "MA_20": [3.0, 1.0, 2.0], "RSI_14": [1.0, 2.0, 3.0],
+        "MACD": [1.0, 2.0, 3.0],
+    })
+    from hmm_integration import _validated_indicators
+    dates = _validated_indicators(frame, ("MA_20", "RSI_14", "MACD"))["Date"]
+    assert dates.dt.day.tolist() == [2, 3, 10]
+    with pytest.raises(ValueError, match="parseable"):
+        _validated_indicators(frame.assign(Date=["invalid", "2020-1-2", "2020-1-3"]), ("MA_20",))
+
+
+def test_hmm_fit_completes_without_exhausting_iteration_limit():
+    data = prepare_features(synthetic_bars()).query("Name == 'AAA'")
+    model, _ = fit_hmm_on_indicators(data.iloc[:65], n_components=2)
+    assert model.monitor_.iter < model.n_iter
+
+
+def test_historical_hmm_fit_reaches_configured_tolerance():
+    data = load_data(DEFAULT_RAW_DATA)
+    stock = prepare_features(data.loc[data["Name"] == "AAPL"])
+    model, _ = fit_hmm_on_indicators(chronological_split(stock).train, n_components=3)
+    assert model.monitor_.iter < model.n_iter
+    assert abs(model.monitor_.history[-1] - model.monitor_.history[-2]) < model.tol
 
 
 def test_rl_positions_reward_terminal_and_transaction_costs():
@@ -199,6 +262,37 @@ def test_trading_disallows_actions_that_cannot_execute():
     invalid_states = bars.assign(Return_binned=pd.Series([0, pd.NA, 1], dtype="Int64"))
     with pytest.raises(ValueError, match="finite integer states"):
         SimpleTradingEnv(invalid_states, state_columns=("Return_binned",))
+
+
+def test_trading_sorts_parsed_dates_and_rejects_invalid_or_duplicate_dates():
+    bars = pd.DataFrame({
+        "Date": ["2020-1-10", "2020-1-2", "2020-1-3"],
+        "Open": [110.0, 90.0, 100.0], "Close": [115.0, 95.0, 105.0],
+    })
+    original_dates = bars["Date"].tolist()
+    env = SimpleTradingEnv(bars)
+    assert env.data["Date"].dt.day.tolist() == [2, 3, 10]
+    assert bars["Date"].tolist() == original_dates
+    with pytest.raises(ValueError, match="parseable"):
+        SimpleTradingEnv(bars.assign(Date=["invalid", "2020-1-2", "2020-1-3"]))
+    with pytest.raises(ValueError, match="Duplicate trading dates"):
+        SimpleTradingEnv(bars.assign(Date=["2020-1-2", "2020-01-02", "2020-1-3"]))
+
+
+@pytest.mark.parametrize("actions", [
+    ("dance",), ("buy", "hold", "dance"), ("buy", "buy", "hold"),
+    ("buy",), ("sell",), (),
+])
+def test_qlearning_rejects_invalid_or_unusable_action_sets(actions):
+    with pytest.raises(ValueError, match="Invalid Q-learning parameters"):
+        QLearningAgent(actions=actions)
+
+
+def test_qlearning_allows_legal_custom_action_sets():
+    assert QLearningAgent(actions=("hold",)).choose_action((0,), explore=False) == "hold"
+    agent = QLearningAgent(actions=("buy", "sell"), epsilon=0)
+    assert agent.choose_action((0,), explore=False) == "buy"
+    assert agent.choose_action((1,), explore=False) == "sell"
 
 
 def test_policy_masks_invalid_actions_and_bootstrapping():

@@ -17,7 +17,12 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...]) -> p
         raise ValueError(f"Missing HMM indicators: {sorted(absent)}")
     if "Name" in frame and frame["Name"].nunique() > 1:
         raise ValueError("Fit/infer HMM regimes for one ticker at a time")
-    ordered = frame.sort_values("Date") if "Date" in frame else frame.copy()
+    ordered = frame.copy()
+    if "Date" in ordered:
+        ordered["Date"] = pd.to_datetime(ordered["Date"], format="mixed", errors="coerce")
+        if ordered["Date"].isna().any():
+            raise ValueError("HMM dates must be present and parseable")
+        ordered = ordered.sort_values("Date", kind="stable")
     if "Date" in ordered and ordered["Date"].duplicated().any():
         raise ValueError("Duplicate dates for a single ticker")
     clean = ordered.dropna(subset=list(indicators)).copy()
@@ -70,8 +75,11 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
         raise ValueError("Insufficient training observations for the HMM")
     X = clean[list(indicators)].to_numpy(dtype=float)
     model = GaussianHMM(
-        n_components=n_components, covariance_type="diag", n_iter=150,
+        n_components=n_components, covariance_type="diag", n_iter=500,
         tol=1e-4, random_state=random_state, min_covar=1e-4,
     )
     model.fit(X)
+    history = model.monitor_.history
+    if len(history) >= 2 and abs(history[-1] - history[-2]) >= model.tol:
+        raise RuntimeError("HMM fitting did not reach the specified tolerance")
     return model, infer_filtered_regimes(model, df, indicators)

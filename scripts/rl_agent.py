@@ -27,7 +27,13 @@ class SimpleTradingEnv:
             raise ValueError("A trading episode must contain exactly one ticker")
         if not 0 <= transaction_cost < 1:
             raise ValueError("transaction_cost must be a fraction between 0 and 1")
-        self.data = data.sort_values("Date").reset_index(drop=True) if "Date" in data else data.reset_index(drop=True)
+        self.data = data.copy()
+        if "Date" in self.data:
+            self.data["Date"] = pd.to_datetime(self.data["Date"], format="mixed", errors="coerce")
+            if self.data["Date"].isna().any():
+                raise ValueError("Trading dates must be present and parseable")
+            self.data = self.data.sort_values("Date", kind="stable")
+        self.data = self.data.reset_index(drop=True)
         if "Date" in self.data and self.data["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates")
         prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
@@ -99,9 +105,15 @@ class QLearningAgent:
     def __init__(self, actions: tuple[str, ...] = ("buy", "sell", "hold"),
                  alpha: float = 0.1, gamma: float = 0.95,
                  epsilon: float = 0.1, seed: int = 42):
-        if not actions or not 0 < alpha <= 1 or not 0 <= gamma <= 1 or not 0 <= epsilon <= 1:
+        actions = tuple(actions)
+        supported = {"buy", "sell", "hold"}
+        if (not actions or any(not isinstance(action, str) for action in actions)
+                or len(set(actions)) != len(actions)
+                or any(action not in supported for action in actions)
+                or ("hold" not in actions and not {"buy", "sell"}.issubset(actions))
+                or not 0 < alpha <= 1 or not 0 <= gamma <= 1 or not 0 <= epsilon <= 1):
             raise ValueError("Invalid Q-learning parameters")
-        self.actions = tuple(actions)
+        self.actions = actions
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
