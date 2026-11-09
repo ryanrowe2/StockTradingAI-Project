@@ -52,6 +52,9 @@ def _one_symbol_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     frame["BB_Lower"] = frame["BB_Middle"] - 2 * std
     frame["Close_Lag1"] = previous_close
     frame["Return"] = frame["Close"].pct_change(fill_method=None)
+    frame["Intraday_Return"] = (frame["Close"] - frame["Open"]) / frame["Open"]
+    frame["Daily_Range"] = (frame["High"] - frame["Low"]) / frame["Open"]
+    frame["MACD_Pct"] = frame["MACD"] / frame["Close"]
     frame["Return_Lag1"] = frame["Return"].shift(1)
     return frame
 

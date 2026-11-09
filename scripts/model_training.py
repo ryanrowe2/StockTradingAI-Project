@@ -31,7 +31,7 @@ else:
     from data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
 
 
-BASELINE_FEATURES = ("Open", "High", "Low")
+BASELINE_FEATURES = ("Return", "Intraday_Return", "Daily_Range")
 ENHANCED_FEATURES = MODEL_FEATURES
 DEFAULT_METRICS = Path(__file__).resolve().parents[1] / "data/generated/model_metrics.json"
 

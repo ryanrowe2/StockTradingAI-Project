@@ -34,7 +34,29 @@ def _display(value: object) -> None:
         print(value)
 
 
-def reproduce_notebook(path: Path, *, save: bool = True) -> nbformat.NotebookNode:
+def _verify_outputs(previous: list, current: list, path: Path, cell_number: int) -> None:
+    """Check published text results and the number and validity of charts."""
+    def text_results(outputs):
+        return [(output.get("output_type"), output.get("name"),
+                 str(output.get("text", "")).strip())
+                for output in outputs if output.get("output_type") == "stream"]
+
+    def figures(outputs):
+        return [output["data"]["image/png"] for output in outputs
+                if "image/png" in output.get("data", {})]
+
+    if text_results(previous) != text_results(current):
+        raise RuntimeError(f"Published results differ in {path.name}, cell {cell_number}")
+    old_figures, new_figures = figures(previous), figures(current)
+    if len(old_figures) != len(new_figures):
+        raise RuntimeError(f"Published chart count differs in {path.name}, cell {cell_number}")
+    for encoded in (*old_figures, *new_figures):
+        if not base64.b64decode(encoded, validate=True).startswith(b"\x89PNG\r\n\x1a\n"):
+            raise RuntimeError(f"Invalid published chart in {path.name}, cell {cell_number}")
+
+
+def reproduce_notebook(path: Path, *, save: bool = True,
+                       check: bool = False) -> nbformat.NotebookNode:
     notebook = nbformat.read(path, as_version=4)
     variables = {"__name__": "__main__", "display": _display}
     execution_count = 0
@@ -42,6 +64,7 @@ def reproduce_notebook(path: Path, *, save: bool = True) -> nbformat.NotebookNod
         if cell.cell_type != "code":
             continue
         execution_count += 1
+        original_outputs = list(cell.outputs)
         source = cell.source.replace("%matplotlib inline", "")
         text_output = io.StringIO()
         try:
@@ -65,6 +88,8 @@ def reproduce_notebook(path: Path, *, save: bool = True) -> nbformat.NotebookNod
                 }, metadata={},
             ))
             plt.close(figure)
+        if check:
+            _verify_outputs(original_outputs, outputs, path, execution_count)
         cell.outputs = outputs
         cell.execution_count = execution_count
     nbformat.validate(notebook)
@@ -82,7 +107,7 @@ def main() -> None:
     sys.path.insert(0, str(ROOT))
     os.chdir(NOTEBOOKS)
     for path in sorted(NOTEBOOKS.glob("*.ipynb")):
-        reproduce_notebook(path, save=not args.check)
+        reproduce_notebook(path, save=not args.check, check=args.check)
 
 
 if __name__ == "__main__":

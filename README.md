@@ -11,7 +11,7 @@ The project emphasizes **reproducible experiments, chronological evaluation, and
 | Component | Implementation |
 | --- | --- |
 | Historical data | 93,612 source observations across 31 stocks, 2006–2017 |
-| Feature engineering | ATR, RSI, MACD, moving averages, Bollinger Bands, and lagged returns |
+| Feature engineering | ATR, RSI, MACD, moving averages, Bollinger Bands, and price-normalized returns and ranges |
 | Probabilistic prediction | Baseline and enhanced discrete Bayesian networks with BDeu smoothing |
 | Regime analysis | Gaussian HMM with forward-filtered state inference |
 | Trading experiment | Long-or-flat Q-learning agent with next-open execution and transaction costs |
@@ -50,10 +50,10 @@ Two discrete Bayesian networks support a controlled feature-set comparison:
 
 | Model | Features |
 | --- | --- |
-| Baseline | Open, High, Low |
-| Enhanced | Open, High, Low, Average True Range, daily return |
+| Baseline | Daily close-to-close return, intraday return, daily high-low range (normalized by opening price) |
+| Enhanced | Baseline features plus MACD normalized by closing price |
 
-Both use an explicit feature-to-target directed graph. The training workflow estimates conditional probability tables with a **Bayesian Dirichlet equivalent uniform (BDeu) prior** and selects equivalent sample size using validation data.
+Both use an explicit feature-to-target directed graph. Price-relative features allow observations from differently priced stocks to share meaningful bins. The training workflow estimates conditional probability tables with a **Bayesian Dirichlet equivalent uniform (BDeu) prior** and selects equivalent sample size using validation data.
 
 To make the comparison reproducible, the same chronological partitions and training-fitted discretization are used throughout. The final report includes accuracy, balanced accuracy, precision, recall, F1, ROC AUC, and a majority-class benchmark.
 
@@ -69,7 +69,7 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 
 ### 3. Q-learning trading simulator
 
-The tabular Q-learning agent explores three actions: **buy, sell, and hold**. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs.
+The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs.
 
 The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
 

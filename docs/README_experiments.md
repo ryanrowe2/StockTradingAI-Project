@@ -22,7 +22,7 @@ python scripts/data_processing.py
 python scripts/data_processing.py --ticker AAPL
 ```
 
-The source CSV is validated for required columns, parseable dates, numeric values, positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)` observations. Incomplete or contradictory bars are excluded without guessing replacement prices. The pipeline computes indicators on each ticker's chronological series independently:
+The source CSV is validated for required columns, parseable dates, finite numeric values, positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)` observations. Incomplete or contradictory bars are excluded without guessing replacement prices. The pipeline computes indicators on each ticker's chronological series independently:
 
 | Indicator | Definition / implementation |
 | --- | --- |
@@ -33,6 +33,9 @@ The source CSV is validated for required columns, parseable dates, numeric value
 | Bollinger Bands | Twenty-period mean ± two rolling standard deviations |
 | Return / Return_Lag1 | Daily fractional close-to-close change and its previous value |
 | Close_Lag1 | Previous observed closing price for the same ticker |
+| Intraday_Return | (Close − Open) / Open |
+| Daily_Range | (High − Low) / Open |
+| MACD_Pct | MACD divided by current Close |
 
 `Target_Date` is the date of that ticker's next available observation. `Trend=1` when its closing price exceeds the current close, otherwise `Trend=0`. A final row without a subsequent observation is excluded, along with indicator warm-up rows.
 
@@ -58,10 +61,10 @@ The experiment proceeds as follows:
 
 **Model feature sets**
 
-- Baseline: `Open`, `High`, `Low`
-- Enhanced: `Open`, `High`, `Low`, `ATR`, `Return`
+- Baseline: `Return`, `Intraday_Return`, `Daily_Range`
+- Enhanced: `Return`, `Intraday_Return`, `Daily_Range`, `MACD_Pct`
 
-These are fixed, interpretable directed graphs. Every feature is a parent of `Trend`; the CPT for `Trend` represents the conditional probability of next-observation upward movement given the binned feature values.
+These are fixed, interpretable directed graphs. The scale-independent price features avoid treating a higher nominal stock price as a different price-pattern regime. Every feature is a parent of `Trend`; the CPT for `Trend` represents the conditional probability of next-observation upward movement given the binned feature values.
 
 **Metrics and outputs**
 
@@ -90,16 +93,16 @@ P(z_t\mid x_{1:t}) \propto P(x_t\mid z_t)\sum_{z_{t-1}}
 P(z_t\mid z_{t-1})P(z_{t-1}\mid x_{1:t-1}).
 $$
 
-Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
+Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Holdout filtering uses the preceding training and validation observations as historical context while keeping the HMM parameters fitted exclusively on training data. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
 
 ## 4. Q-learning experiment
 
-The same notebook fits quantile bins on training-period prices, forms states from three binned price features, the filtered HMM regime, and the current position, and trains the tabular policy on an earlier single-ticker sequence.
+The same notebook fits three-bin quantiles on the training period's daily return and RSI, combines those two binned features with the filtered HMM regime and the current position, and trains the tabular policy on the earlier single-ticker training sequence for 75 episodes.
 
 The `SimpleTradingEnv` has three actions:
 
-- **Buy:** enter one-share long position when flat.
-- **Sell:** exit the position when long.
+- **Buy:** enter one-share long position when flat; unavailable while already long.
+- **Sell:** exit the position when long; unavailable while flat.
 - **Hold:** leave the position unchanged.
 
 Decisions made after observing a daily close are filled at the next trading session's open. Holdings existing before an action remain exposed to the overnight price change. The reward for a step is:
@@ -122,13 +125,15 @@ Run the regression tests:
 python -m pytest tests -q
 ```
 
-The test suite covers OHLC and date validation, per-ticker labels and indicators, chronological target boundaries, training-only binning, Bayesian CPT predictions, package imports, prefix-invariant HMM state filtering, next-open rewards and transaction costs, immutable holdout evaluation, terminal Q-learning updates, complete synthetic-data experiments, and saved notebook outputs.
+The test suite covers finite OHLCV and date validation, per-ticker labels and indicators, price-scale invariance, chronological target boundaries, training-only binning, Bayesian CPT predictions, package imports, prefix-invariant HMM state filtering, legal trading actions, next-open rewards and transaction costs, immutable holdout evaluation, terminal Q-learning updates, complete synthetic-data experiments, and saved notebook outputs.
 
 The same checks run automatically through [GitHub Actions](../.github/workflows/python-checks.yml) on pushes and pull requests. To regenerate the GitHub-visible notebook tables and figures, run:
 
 ```bash
 python -m scripts.refresh_notebooks
 ```
+
+`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them and checks the committed numerical text results and presence of valid chart images against the newly generated outputs.
 
 ## References
 

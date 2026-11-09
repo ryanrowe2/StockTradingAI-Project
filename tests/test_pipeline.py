@@ -69,6 +69,16 @@ def test_technical_indicators_do_not_change_when_future_is_modified():
     pd.testing.assert_frame_equal(original.loc[subset, columns], changed.loc[subset, columns])
 
 
+def test_model_features_are_invariant_to_ticker_price_scale():
+    bars = synthetic_bars()
+    original = prepare_features(bars).query("Name == 'AAA'")
+    scaled = bars.copy()
+    scaled.loc[scaled.Name == "AAA", ["Open", "High", "Low", "Close"]] *= 5
+    transformed = prepare_features(scaled).query("Name == 'AAA'")
+    features = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
+    np.testing.assert_allclose(original[list(features)], transformed[list(features)], rtol=1e-10)
+
+
 def test_load_data_validates_and_removes_incomplete_rows(tmp_path: Path):
     source = synthetic_bars(60)
     source.loc[0, "High"] = np.nan
@@ -92,6 +102,18 @@ def test_loader_excludes_inconsistent_prices_and_rejects_invalid_dates(tmp_path:
                 (remaining["Low"] > remaining[["Open", "Close", "High"]].min(axis=1))).any()
     with pytest.raises(ValueError, match="Date"):
         load_data(io.StringIO("Date,Name,Open,High,Low,Close,Volume\nnot-a-date,AAA,10,11,9,10,100\n"))
+
+
+def test_loader_excludes_nonfinite_prices_and_volume(tmp_path: Path):
+    data = synthetic_bars(70)
+    data["Volume"] = data["Volume"].astype(float)
+    data.loc[0, "High"] = np.inf
+    data.loc[1, "Volume"] = np.inf
+    csv = tmp_path / "nonfinite.csv"
+    data.to_csv(csv, index=False)
+    cleaned = load_data(csv)
+    assert len(cleaned) == len(data) - 2
+    assert np.isfinite(cleaned[["Open", "High", "Low", "Close", "Volume"]].to_numpy()).all()
 
 
 def test_historical_source_contains_only_consistent_bars_after_validation():
@@ -123,9 +145,7 @@ def test_binner_learns_thresholds_only_from_training_data():
 
 def test_network_predictions_and_metrics_are_finite():
     examples = pd.DataFrame({
-        "Open": [0, 0, 1, 1, 0, 1] * 10,
-        "High": [0, 0, 1, 1, 0, 1] * 10,
-        "Low": [0, 0, 1, 1, 0, 1] * 10,
+        **{name: [0, 0, 1, 1, 0, 1] * 10 for name in BASELINE_FEATURES},
         "Trend": [0, 0, 1, 1, 0, 1] * 10,
     })
     network = fit_network(examples, BASELINE_FEATURES, 2, 5)
@@ -164,6 +184,36 @@ def test_rl_positions_reward_terminal_and_transaction_costs():
     assert state[-1] == 0 and done
     with pytest.raises(RuntimeError):
         env.step("hold")
+
+
+def test_trading_disallows_actions_that_cannot_execute():
+    bars = pd.DataFrame({"Open": [99.0, 101.0, 102.0], "Close": [100.0, 102.0, 103.0]})
+    env = SimpleTradingEnv(bars)
+    with pytest.raises(ValueError, match="Cannot sell"):
+        env.step("sell")
+    env.step("buy")
+    with pytest.raises(ValueError, match="Cannot buy"):
+        env.step("buy")
+    with pytest.raises(ValueError, match="Missing trading state columns"):
+        SimpleTradingEnv(bars, state_columns=("Return_binned",))
+    invalid_states = bars.assign(Return_binned=pd.Series([0, pd.NA, 1], dtype="Int64"))
+    with pytest.raises(ValueError, match="finite integer states"):
+        SimpleTradingEnv(invalid_states, state_columns=("Return_binned",))
+
+
+def test_policy_masks_invalid_actions_and_bootstrapping():
+    agent = QLearningAgent(alpha=1, gamma=0.95, epsilon=0)
+    agent.q_table[(0,)] = {"buy": 3.0, "sell": 1000.0, "hold": 1.0}
+    agent.q_table[(1,)] = {"buy": 1000.0, "sell": 2.0, "hold": 1.0}
+    assert agent.choose_action((0,), explore=False) == "buy"
+    assert agent.choose_action((1,), explore=False) == "sell"
+    with pytest.raises(ValueError, match="Unrecognized action"):
+        agent.update_q_value((0,), "sell", 1.0, (1,))
+    agent.update_q_value((0,), "buy", 0.0, (1,))
+    assert agent.q_table[(0,)]["buy"] == pytest.approx(0.95 * 2.0)
+    exploratory = QLearningAgent(epsilon=1.0)
+    assert {exploratory.choose_action((0,)) for _ in range(50)} <= {"buy", "hold"}
+    assert {exploratory.choose_action((1,)) for _ in range(50)} <= {"sell", "hold"}
 
 
 def test_rl_terminal_update_does_not_bootstrap():
@@ -230,3 +280,15 @@ def test_saved_experiment_notebooks_contain_visual_evidence():
     evaluation = nbformat.read(ROOT / "notebooks/Model_Training_Evaluation.ipynb", as_version=4)
     assert any("accuracy" in output.get("text", "")
                for cell in evaluation.cells for output in cell.get("outputs", []))
+
+
+def test_notebook_check_detects_stale_published_text():
+    from scripts.refresh_notebooks import _verify_outputs
+
+    expected = [dict(output_type="stream", name="stdout", text="Old result\n")]
+    current = [dict(output_type="stream", name="stdout", text="New result\n")]
+    with pytest.raises(RuntimeError, match="Published results differ"):
+        _verify_outputs(expected, current, Path("example.ipynb"), 1)
+    with pytest.raises(RuntimeError, match="Published chart count differs"):
+        _verify_outputs([dict(output_type="display_data", data={"image/png": "unused"})],
+                        [], Path("example.ipynb"), 1)

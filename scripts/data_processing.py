@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RAW_DATA = PROJECT_ROOT / "data/raw/all_stocks_2006-01-01_to_2018-01-01.csv"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
 REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
-MODEL_FEATURES = ("Open", "High", "Low", "ATR", "Return")
+MODEL_FEATURES = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
 
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -43,9 +43,14 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     df["Name"] = df["Name"].astype(str).str.strip().str.upper()
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
-    for name in ("Open", "High", "Low", "Close", "Volume"):
+    numeric_columns = ("Open", "High", "Low", "Close", "Volume")
+    for name in numeric_columns:
         df[name] = pd.to_numeric(df[name], errors="coerce")
-    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).copy()
+    df = df.dropna(subset=numeric_columns).copy()
+    finite = pd.Series(
+        np.isfinite(df[list(numeric_columns)].to_numpy(dtype=float)).all(axis=1),
+        index=df.index,
+    )
     positive = (
         (df[["Open", "High", "Low", "Close"]] > 0).all(axis=1)
         & df["Volume"].ge(0)
@@ -54,7 +59,7 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
         df["High"].ge(df[["Open", "Low", "Close"]].max(axis=1))
         & df["Low"].le(df[["Open", "High", "Close"]].min(axis=1))
     )
-    df = df.loc[positive & coherent].copy()
+    df = df.loc[finite & positive & coherent].copy()
     if df.empty:
         raise ValueError("No valid OHLCV observations remain")
     return df.sort_values(["Name", "Date"]).reset_index(drop=True)

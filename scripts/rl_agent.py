@@ -17,7 +17,10 @@ import pandas as pd
 class SimpleTradingEnv:
     """Sequential one-share simulator with next-session-open execution."""
 
-    def __init__(self, data: pd.DataFrame, transaction_cost: float = 0.001):
+    DEFAULT_STATE_COLUMNS = ("Open_binned", "High_binned", "Low_binned", "Market_Regime")
+
+    def __init__(self, data: pd.DataFrame, transaction_cost: float = 0.001,
+                 state_columns: tuple[str, ...] | None = None):
         if not {"Open", "Close"}.issubset(data.columns) or len(data) < 2:
             raise ValueError("The trading environment needs at least two daily open/close bars")
         if "Name" in data and data["Name"].nunique() != 1:
@@ -30,6 +33,24 @@ class SimpleTradingEnv:
         prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
         if not np.isfinite(prices).all() or np.any(prices <= 0):
             raise ValueError("Open/close prices must be finite and positive")
+        if state_columns is None:
+            provided = set(self.DEFAULT_STATE_COLUMNS).intersection(self.data.columns)
+            if provided and len(provided) != len(self.DEFAULT_STATE_COLUMNS):
+                raise ValueError("Supply all default state columns, or specify state_columns")
+            state_columns = self.DEFAULT_STATE_COLUMNS if provided else ()
+        if len(set(state_columns)) != len(state_columns):
+            raise ValueError("State columns must be unique")
+        missing = set(state_columns) - set(self.data.columns)
+        if missing:
+            raise ValueError(f"Missing trading state columns: {sorted(missing)}")
+        if state_columns:
+            try:
+                state_values = self.data[list(state_columns)].to_numpy(dtype=float, na_value=np.nan)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Trading state columns must be numeric") from exc
+            if not np.isfinite(state_values).all() or not np.equal(state_values, np.floor(state_values)).all():
+                raise ValueError("Trading state columns must contain finite integer states")
+        self.state_columns = tuple(state_columns)
         self.transaction_cost = transaction_cost
         self.reset()
 
@@ -41,15 +62,15 @@ class SimpleTradingEnv:
 
     def get_state(self) -> tuple[int, ...]:
         row = self.data.iloc[self.index]
-        fields = ("Open_binned", "High_binned", "Low_binned", "Market_Regime")
-        return tuple(int(row[field]) if field in row and pd.notna(row[field]) else 0
-                     for field in fields) + (self.position,)
+        return tuple(int(row[field]) for field in self.state_columns) + (self.position,)
 
     def step(self, action: str) -> tuple[tuple[int, ...], float, bool, dict]:
         if self.done:
             raise RuntimeError("Episode finished. Call reset() before stepping again")
         if action not in {"buy", "sell", "hold"}:
             raise ValueError(f"Unrecognized action: {action}")
+        if (action == "buy" and self.position == 1) or (action == "sell" and self.position == 0):
+            raise ValueError(f"Cannot {action} when position is {self.position}")
         decision_close = float(self.data.iloc[self.index]["Close"])
         next_bar = self.data.iloc[self.index + 1]
         execution_price = float(next_bar["Open"])
@@ -57,10 +78,10 @@ class SimpleTradingEnv:
         # Existing holdings remain exposed to the overnight price change.
         overnight_pnl = self.position * (execution_price - decision_close)
         fee = 0.0
-        if action == "buy" and self.position == 0:
+        if action == "buy":
             self.position = 1
             fee = execution_price * self.transaction_cost
-        elif action == "sell" and self.position == 1:
+        elif action == "sell":
             self.position = 0
             fee = execution_price * self.transaction_cost
         intraday_pnl = self.position * (next_close - execution_price)
@@ -93,24 +114,36 @@ class QLearningAgent:
     def _values(self, state: tuple[int, ...]) -> dict[str, float]:
         return self.q_table.setdefault(state, {action: 0.0 for action in self.actions})
 
+    def _valid_actions(self, state: tuple[int, ...]) -> tuple[str, ...]:
+        if not state or state[-1] not in (0, 1):
+            raise ValueError("Last state component must be the current position (0 or 1)")
+        prohibited = "sell" if state[-1] == 0 else "buy"
+        valid = tuple(action for action in self.actions if action != prohibited)
+        if not valid:
+            raise ValueError("Agent has no valid actions for the current position")
+        return valid
+
     def choose_action(self, state_features, *, explore: bool = True) -> str:
         state = self.get_state(state_features)
+        available = self._valid_actions(state)
         if explore and self.rng.random() < self.epsilon:
-            return self.rng.choice(self.actions)
+            return self.rng.choice(available)
         # Holdout evaluation must not alter the learned Q-table. A state never
         # observed during training takes the conservative no-trade action.
         if not explore and state not in self.q_table:
-            return "hold" if "hold" in self.actions else self.actions[0]
+            return "hold" if "hold" in available else available[0]
         estimates = self._values(state) if explore else self.q_table[state]
-        return max(self.actions, key=estimates.__getitem__)
+        return max(available, key=estimates.__getitem__)
 
     def update_q_value(self, state_features, action: str, reward: float,
                        next_state_features, done: bool = False) -> None:
         state = self.get_state(state_features)
         current = self._values(state)
-        if action not in current:
+        if action not in current or action not in self._valid_actions(state):
             raise ValueError(f"Unrecognized action: {action}")
-        future = 0.0 if done else max(self._values(self.get_state(next_state_features)).values())
+        next_state = self.get_state(next_state_features)
+        future = (0.0 if done else max(self._values(next_state)[candidate]
+                                      for candidate in self._valid_actions(next_state)))
         current[action] += self.alpha * (reward + self.gamma * future - current[action])
 
     def simulate_episode(self, env: SimpleTradingEnv, max_steps: int | None = None,
