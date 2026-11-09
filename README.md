@@ -1,38 +1,5 @@
 # Probabilistic Stock Trading Agent
 
-**Python research prototype · Bayesian networks · Hidden Markov models · Q-learning**
-
-An experimental system for studying next-day stock-price direction using historical market data, feature engineering, probabilistic modeling, and simulated reinforcement learning. The repository contains the implementation, notebooks, datasets, and original research documentation.
-
-## Project at a glance
-
-| Area | Implementation |
-| --- | --- |
-| Data | Historical equity data; approximately 93,612 observations in the original analysis |
-| Processing | Cleaning, winsorization, technical indicators, lagged features, discretization, and feature selection |
-| Modeling | Bayesian networks with parameter tuning and structure search; Gaussian HMMs for latent market regimes |
-| Simulation | Q-learning agent and simplified trading environment |
-| Stack | Python, pandas, NumPy, scikit-learn, pgmpy, hmmlearn, Jupyter |
-
-## Explore the code
-
-- [Data preprocessing pipeline](scripts/data_processing.py)
-- [Model training and evaluation](scripts/model_training.py)
-- [HMM integration](scripts/hmm_integration.py)
-- [Reinforcement-learning prototype](scripts/rl_agent.py)
-- [Experiment notebooks](notebooks/)
-- [Experiment notes](docs/README_experiments.md)
-
-## Evaluation status
-
-This is an **academic research prototype**, not a production trading system. The original report below includes developmental accuracy figures. The current evaluation script fits the final model before evaluating an 80/20 subset, so those figures **are not independently validated holdout results**. A corrected train/validation/test procedure is required before making out-of-sample performance claims.
-
-The code and documentation remain useful for examining probabilistic modeling, feature engineering, exploratory experiments, and the research process.
-
----
-
-## Detailed research documentation
-
 ## Overview
 
 This project develops a **goal-based probabilistic stock trading agent** designed to predict whether the next day’s stock *Close* price (closing price of the day) will exceed today’s. Our primary objective is to maximize profit while managing risk by combining advanced probabilistic models, feature engineering, and reinforcement learning techniques.
