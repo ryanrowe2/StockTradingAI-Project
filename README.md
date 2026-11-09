@@ -148,7 +148,7 @@ The notebooks include saved output tables and plots for immediate viewing on Git
 ```text
 StockTradingAI-Project/
 ├── data/
-│   ├── raw/                       # Historical source CSVs
+│   ├── raw/                       # Third-party historical CSVs and source notice
 │   └── generated/                 # Regenerable outputs (ignored by Git)
 ├── docs/
 │   └── README_experiments.md      # Reproduction and methodology guide
@@ -164,7 +164,8 @@ StockTradingAI-Project/
 ├── .github/workflows/             # Automated verification on pushes / PRs
 ├── requirements.txt
 ├── requirements-repro-py312.txt   # Tested, pinned Python 3.12/Linux environment
-└── requirements-dev.txt
+├── requirements-dev.txt
+└── LICENSE                        # MIT license for original software and docs
 ```
 
 ## Dataset and references
@@ -173,5 +174,12 @@ StockTradingAI-Project/
 - **Bayesian networks:** [pgmpy](https://pgmpy.org/)
 - **Hidden Markov models:** [hmmlearn](https://hmmlearn.readthedocs.io/)
 - **Data processing and evaluation:** [pandas](https://pandas.pydata.org/) and [scikit-learn](https://scikit-learn.org/)
+
+## License
+
+Original project software and documentation are licensed under the
+[MIT License](LICENSE), copyright © 2026 Ryan Rowe. The historical CSVs in
+[`data/raw/`](data/raw/README.md) are third-party material and are not included
+under this MIT license; consult the source dataset's terms for their use.
 
 **Ryan Rowe** · B.S., Mathematics–Computer Science, University of California San Diego
