@@ -18,7 +18,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from data_processing import DEFAULT_RAW_DATA, load_data, prepare_features, validate_bars  # noqa: E402
+from data_processing import (  # noqa: E402
+    DEFAULT_RAW_DATA, load_data, prepare_features, prepare_indicator_history, validate_bars,
+)
 from date_validation import parse_daily_dates  # noqa: E402
 from hmm_integration import (  # noqa: E402
     _gaussian_log_emissions, _validated_indicators,
@@ -96,6 +98,7 @@ def test_technical_indicators_do_not_change_when_future_is_modified():
     latest = data.loc[data["Name"] == "AAA", "Date"].max()
     edited = data.copy()
     edited.loc[(edited["Name"] == "AAA") & (edited["Date"] == latest), "Close"] += 1000
+    edited.loc[(edited["Name"] == "AAA") & (edited["Date"] == latest), "High"] += 1000
     changed = add_technical_indicators(edited)
     subset = (original["Name"] == "AAA") & (original["Date"] < latest)
     columns = ["MA_20", "RSI_14", "MACD", "ATR", "Return", "Close_Lag1", "BB_Upper"]
@@ -144,6 +147,46 @@ def test_direct_indicator_api_normalizes_tickers_before_grouping():
 def test_direct_indicator_api_rejects_empty_frame():
     with pytest.raises(ValueError, match="nonempty indicator DataFrame"):
         add_technical_indicators(pd.DataFrame(columns=["Name", "Date", "Close"]))
+
+
+def test_direct_indicator_api_rejects_incoherent_and_nonfinite_prices():
+    bars = synthetic_bars(50).query("Name == 'AAA'").reset_index(drop=True)
+    for invalid in (
+        bars.assign(High=bars["Low"] - 1),
+        bars.assign(Low=bars["High"] + 1),
+        bars.assign(Close=np.inf),
+        bars.assign(Open=0.0),
+    ):
+        with pytest.raises(ValueError, match="Indicator OHLC prices"):
+            add_technical_indicators(invalid)
+    with pytest.raises(ValueError, match="Volume must be nonnegative"):
+        add_technical_indicators(bars.assign(Volume=-1))
+
+
+def test_missing_raw_market_session_is_not_used_as_a_daily_return_or_rsi():
+    bars = synthetic_bars(100).query("Name == 'AAA'").sort_values("Date").reset_index(drop=True)
+    bad_day = bars.loc[45, "Date"]
+    next_day = bars.loc[46, "Date"]
+    bars.loc[45, "High"] = 0.0
+    clean = validate_bars(bars)
+    assert bad_day not in set(clean["Date"])
+    before = clean.loc[clean["Date"] < bad_day, "Session_Number"].iloc[-1]
+    after = clean.loc[clean["Date"] == next_day, "Session_Number"].iloc[0]
+    assert after - before == 2
+    history = prepare_indicator_history(clean)
+    crossing = history.loc[history["Date"] == next_day].iloc[0]
+    assert pd.isna(crossing["Return"])
+    assert pd.isna(crossing["RSI_14"])
+    assert pd.isna(crossing["ATR"])
+    assert crossing["Close_Lag1"] == pytest.approx(bars.loc[44, "Close"])
+    # After the warm-up, each daily return is again calculated from the true
+    # immediately preceding market session, not from the next available bar.
+    resumed = history.loc[history["Date"] == bars.loc[60, "Date"], "RSI_14"].iloc[0]
+    assert np.isfinite(resumed)
+    prepared = prepare_features(clean)
+    assert next_day not in set(prepared["Date"])
+    assert bars.iloc[-1]["Date"] == history.iloc[-1]["Date"]
+    assert bars.iloc[-1]["Date"] not in set(prepared["Date"])
 
 
 def test_single_ticker_indicators_reject_duplicate_dates_without_name_column():
@@ -406,11 +449,64 @@ def test_hmm_notebook_keeps_causal_observations_purged_from_supervised_splits():
 
     notebook = nbformat.read(ROOT / "notebooks/HMM_and_RL_Experiments.ipynb", as_version=4)
     source = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
-    assert "hmm_training = stock.loc[stock['Date'] <= split.train_end]" in source
+    assert "hmm_training = history.loc[history['Date'] <= split.train_end]" in source
     assert "fit_hmm_on_indicators(hmm_training" in source
-    assert "infer_filtered_regimes(hmm_model, stock)" in source
-    assert "train_regimes = history_regimes.loc[history_regimes['Date'].isin(split.train['Date'])]" in source
-    assert "infer_filtered_regimes(hmm_model, history)" not in source
+    assert "infer_filtered_regimes(hmm_model, history)" in source
+    assert "train_regimes = history_regimes.loc[history_regimes['Date'].isin(split.train.loc[split.train['Name'] == 'AAPL', 'Date'])]" in source
+    assert "indicator_history = prepare_indicator_history" in source
+    assert "split = chronological_split(features)" in source
+    assert "history_regimes['Date'] > split.validation_end" in source
+
+
+def test_hmm_gap_filtering_matches_explicit_missing_market_sessions():
+    class AlternatingModel:
+        covariance_type = "diag"
+        means_ = np.array([[0.], [0.]])
+        covars_ = np.array([[[1.]], [[1.]]])
+        startprob_ = np.array([1., 0.])
+        transmat_ = np.array([[0., 1.], [1., 0.]])
+
+    compressed = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-07"],
+        "Session_Number": [0, 3], "MA_20": [0., 0.],
+    })
+    expanded = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07"],
+        "Session_Number": [0, 1, 2, 3], "MA_20": [0., np.nan, np.nan, 0.],
+    })
+    actual = infer_filtered_regimes(AlternatingModel(), compressed, ("MA_20",))
+    expected = infer_filtered_regimes(AlternatingModel(), expanded, ("MA_20",))
+    assert actual["Market_Regime"].tolist() == [0, 1]
+    assert actual["Market_Regime"].tolist() == expected["Market_Regime"].dropna().tolist()
+
+
+def test_hmm_training_never_learns_a_transition_across_discarded_market_sessions(monkeypatch):
+    source = synthetic_bars(100).query("Name == 'AAA'").sort_values("Date").reset_index(drop=True)
+    source.loc[60, "High"] = 0.0
+    history = prepare_indicator_history(source)
+    frame = history.dropna(subset=["MA_20", "RSI_14", "MACD"])
+    from hmmlearn.hmm import GaussianHMM
+
+    original_fit = GaussianHMM.fit
+    recorded = []
+
+    def recording_fit(self, values, lengths=None):
+        recorded.append(lengths)
+        return original_fit(self, values, lengths=lengths)
+
+    monkeypatch.setattr(GaussianHMM, "fit", recording_fit)
+    model, filtered = fit_hmm_on_indicators(frame, n_components=2)
+    assert sum(recorded[0]) == len(frame)
+    assert len(recorded[0]) >= 2
+    assert filtered["Market_Regime"].notna().all()
+    assert model.stock_trading_indicator_names_ == ("MA_20", "RSI_14", "MACD")
+
+
+def test_hmm_fitting_rejects_history_without_consecutive_market_sessions():
+    data = prepare_features(synthetic_bars()).query("Name == 'AAA'").iloc[:60].copy()
+    data["Session_Number"] = np.arange(len(data)) * 2
+    with pytest.raises(ValueError, match="Insufficient consecutive-session transitions"):
+        fit_hmm_on_indicators(data, n_components=2)
 
 
 def test_gaussian_log_emissions_use_public_model_parameters():
@@ -430,6 +526,17 @@ def test_gaussian_log_emissions_use_public_model_parameters():
     np.testing.assert_allclose(
         _gaussian_log_emissions(GaussianParameters(), observations), expected, atol=1e-12
     )
+
+
+def test_gaussian_log_emissions_avoid_finite_intermediate_square_overflow():
+    class LargeVarianceModel:
+        covariance_type = "diag"
+        means_ = np.array([[0.]])
+        covars_ = np.array([[[1e300]]])
+
+    density = _gaussian_log_emissions(LargeVarianceModel(), np.array([[1e200]]))
+    assert np.isfinite(density).all()
+    assert density[0, 0] == pytest.approx(-0.5e100)
 
 
 def test_hmm_filtering_respects_impossible_initial_states_and_transitions():
@@ -549,6 +656,19 @@ def test_rl_positions_reward_terminal_and_transaction_costs():
     assert state[-1] == 0 and done
     with pytest.raises(RuntimeError):
         env.step("hold")
+
+
+def test_default_trading_state_uses_published_feature_schema():
+    bars = pd.DataFrame({
+        "Open": [99., 100., 101.], "Close": [100., 101., 102.],
+        "Return_binned": [0, 1, 2], "RSI_14_binned": [2, 1, 0],
+        "Market_Regime": [1, 0, 1],
+    })
+    env = SimpleTradingEnv(bars)
+    assert env.state_columns == ("Return_binned", "RSI_14_binned", "Market_Regime")
+    assert env.get_state() == (0, 2, 1, 0)
+    with pytest.raises(ValueError, match="default state columns"):
+        SimpleTradingEnv(bars.drop(columns="Market_Regime"))
 
 
 def test_terminal_open_position_is_marked_to_market_without_forced_sale():
@@ -816,6 +936,35 @@ def test_readme_trading_result_matches_the_published_notebook():
     pnl = float(result[len(prefix):])
     displayed = f"**{'+' if pnl >= 0 else '-'}${abs(pnl):.2f}**"
     assert displayed in (ROOT / "README.md").read_text(encoding="utf-8")
+
+    hold_prefix = "Next-open buy-and-hold P/L, same units: "
+    buy_and_hold = float(next(line for line in lines if line.startswith(hold_prefix))[len(hold_prefix):])
+    displayed_hold = f"**{'+' if buy_and_hold >= 0 else '-'}${abs(buy_and_hold):.2f}**"
+    assert displayed_hold in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def test_readme_bayesian_accuracy_matches_saved_evaluation():
+    import nbformat
+    import re
+
+    notebook = nbformat.read(ROOT / "notebooks/Model_Training_Evaluation.ipynb", as_version=4)
+    content = "\n".join(str(output.get("data", {}).get("text/plain", ""))
+                        for cell in notebook.cells for output in cell.get("outputs", []))
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for name in ("baseline", "enhanced"):
+        match = re.search(rf"^{name}\s+(0\.\d+)\s+", content, flags=re.MULTILINE)
+        assert match is not None
+        assert f"{float(match.group(1)) * 100:.2f}%" in readme
+
+
+def test_historical_aapl_trading_history_keeps_unlabeled_terminal_source_bar():
+    observed = load_data(DEFAULT_RAW_DATA, tickers=("AAPL",))
+    history = prepare_indicator_history(observed)
+    labeled = prepare_features(observed)
+    assert history["Date"].iloc[-1] == pd.Timestamp("2017-12-29")
+    assert labeled["Date"].max() == pd.Timestamp("2017-12-28")
+    assert history["Close"].iloc[-1] == pytest.approx(169.23)
+    assert pd.notna(history["Return"].iloc[-1])
 
 
 def test_notebook_check_detects_stale_published_text():

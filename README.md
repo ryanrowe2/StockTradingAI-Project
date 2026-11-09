@@ -21,24 +21,29 @@ The project emphasizes **reproducible experiments, chronological evaluation, and
 
 ```mermaid
 flowchart TD
-    A["Raw daily OHLCV data"] --> B["Validate and sort by ticker and date"]
-    B --> C["Causal technical indicators and next-day labels"]
-    C --> D["Chronological train / validation / test split"]
-    D --> E["Training-fitted quantile bins"]
-    E --> F["Bayesian network model selection"]
-    F --> G["Final fit and test evaluation"]
-    D --> H["Single-ticker HMM fitting"]
-    H --> I["Forward-filtered market regimes"]
-    E --> J["Q-learning training"]
-    I --> J
-    J --> K["Frozen-policy historical evaluation"]
+    A["Raw daily OHLCV data"] --> B["Validate bars; preserve market-session positions"]
+    B --> C["Causal technical indicators"]
+    C --> D["Next-observed-price labels"]
+    D --> E["Shared chronological date boundaries"]
+    E --> F["Bayesian network training-fitted bins"]
+    F --> G["Bayesian model selection and holdout evaluation"]
+    C --> H["AAPL training-only HMM fit"]
+    E --> H
+    H --> I["Gap-aware forward regimes"]
+    I --> J["Q-learning training with AAPL-fitted bins"]
+    E --> J
+    J --> K["Frozen-policy evaluation on full valid price history"]
 ```
 
 Each ticker's indicators and next-day labels are computed independently. Ticker
 identifiers are normalized consistently, including for direct indicator calls;
 literal symbols such as `NA` are preserved during CSV loading. Date boundaries
-are shared across tickers, so the partitions correspond to actual historical
-market periods. Target dates are required to follow their feature dates.
+are shared across the Bayesian and AAPL trading experiments, so their partitions
+correspond to the same historical market periods. Source-observed market-session
+positions are recorded before invalid bars are excluded. Close-to-close daily
+returns and RSI changes do not incorrectly bridge those excluded sessions;
+HMM filtering advances across the same gaps. Target dates are required to
+follow their feature dates.
 An experiment rejects a ticker with no usable validated history or without
 observations in each chronological partition, and reports ticker coverage for
 training, validation, and test separately.
@@ -57,7 +62,7 @@ Two discrete Bayesian networks support a controlled feature-set comparison:
 
 | Model | Features |
 | --- | --- |
-| Baseline | Daily close-to-close return, intraday return, daily high-low range (normalized by opening price) |
+| Baseline | Consecutive-session close-to-close return, intraday return, daily high-low range (normalized by opening price) |
 | Enhanced | Baseline features plus MACD normalized by closing price |
 
 Both use an explicit feature-to-target directed graph. Price-relative features allow observations from differently priced stocks to share meaningful bins. The training workflow estimates conditional probability tables with a **Bayesian Dirichlet equivalent uniform (BDeu) prior** and selects equivalent sample size using validation data.
@@ -68,7 +73,7 @@ Both feature sets use the same chronological partitions. For validation-based mo
 
 ### 2. Hidden Markov market regimes
 
-The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. Model parameters are fitted on a complete-indicator training sequence and can then be applied to later observations; filtering can also advance through missing observations. The fitting helper records the ordered indicator names and rejects incompatible inference feature orders. Single-ticker inputs normalize ticker spelling and case consistently with the data pipeline.
+The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. During fitting, complete-indicator training observations are divided into contiguous source-market-session segments so the model does not learn fictitious one-session transitions across missing bars. Filtering then advances through missing observations and excluded source sessions without using later observations. The fitting helper records the ordered indicator names and rejects incompatible inference feature orders. Single-ticker inputs normalize ticker spelling and case consistently with the data pipeline.
 
 The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates regime assignments for a single ticker, including a separate later period.
 
@@ -79,7 +84,8 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. State components must be actual integers, and transition dimensions, position changes, and Q-value updates are checked for validity. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs, rejecting nonfinite step and cumulative rewards.
 
 The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
-Both outcomes are marked to the final observed close. A share still held at
+Both outcomes are marked to the final validated source close, including the
+terminal trading session that has no next-day prediction label. A share still held at
 that point remains open, so the displayed P/L excludes a hypothetical final
 sale and its transaction fee.
 
@@ -92,14 +98,14 @@ same later test period, after validation-based parameter selection:
 
 | Predictor | Test accuracy | Test ROC AUC |
 | --- | ---: | ---: |
-| Training-majority benchmark | **52.06%** | — |
-| Baseline Bayesian network | 51.69% | 0.515 |
-| Enhanced Bayesian network | 51.08% | 0.507 |
+| Training-majority benchmark | **52.21%** | — |
+| Baseline Bayesian network | 51.83% | 0.515 |
+| Enhanced Bayesian network | 51.07% | 0.508 |
 
 Neither Bayesian network beat the majority-class benchmark on this holdout.
 In the separate AAPL trading notebook, the frozen Q-learning policy earned
-**+$0.30** in one-share, dollar-denominated holdout P/L, compared with
-**+$54.86** for the next-open buy-and-hold comparator. These historical
+**+$12.27** in one-share, dollar-denominated holdout P/L, compared with
+**+$52.68** for the next-open buy-and-hold comparator. These historical
 experiments demonstrate the implementation and its limitations; they do not
 establish predictive superiority or deployable trading profitability.
 
@@ -119,7 +125,7 @@ Activate the environment (`source .venv/bin/activate` on macOS/Linux or `.venv\S
 ```bash
 python -m pip install -r requirements.txt
 
-# Prepare technical indicators and ticker-safe next-day labels.
+    # Prepare technical indicators and ticker-safe next-observation labels.
 python scripts/data_processing.py
 
 # Train, select, and evaluate Bayesian networks on the historical dataset.
@@ -140,6 +146,11 @@ such as `N/A`, `NaN`, and `NULL`. The same ticker-name validation applies to
 direct indicator, HMM, and trading-environment calls. Of the 93,612 source
 records, 93,435 pass OHLCV validation; 177 incomplete or contradictory rows
 are excluded without modifying the raw files.
+An additional `Session_Number` column preserves source-market-session positions
+through this exclusion. A close-to-close return crossing an excluded session
+is treated as unavailable for single-day modeling rather than compressed into
+one day's return. The next-valid-observation direction label remains explicitly
+defined for the supervised task.
 
 For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
 environment, install `requirements-repro-py312.txt` instead of the flexible
@@ -186,6 +197,7 @@ StockTradingAI-Project/
 ├── notebooks/                     # EDA, model evaluation, HMM / RL experiments
 ├── scripts/
 │   ├── date_validation.py        # Explicit daily calendar date validation
+│   ├── price_validation.py       # Shared coherent-price checks
 │   ├── ticker_validation.py      # Shared ticker-name normalization and checks
 │   ├── data_processing.py         # Input validation and causal features
 │   ├── technical_indicators.py    # Per-symbol technical indicators

@@ -15,11 +15,13 @@ import pandas as pd
 if __package__:
     from .technical_indicators import add_technical_indicators
     from .date_validation import parse_daily_dates
+    from .price_validation import valid_price_bars
     from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from .ticker_validation import normalize_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
+    from price_validation import valid_price_bars
     from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from ticker_validation import normalize_ticker_symbols
 
@@ -29,6 +31,7 @@ DEFAULT_RAW_DATA = PROJECT_ROOT / "data/raw/all_stocks_2006-01-01_to_2018-01-01.
 DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
 REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
 MODEL_FEATURES = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
+SESSION_COLUMN = "Session_Number"
 
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -48,23 +51,27 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
     input_tickers = set(df["Name"])
+    # Preserve the original market-session positions *before* excluding any
+    # corrupt bar. A subsequent valid price must not become the missing bar's
+    # fictional next trading session during return/HMM calculations.
+    if SESSION_COLUMN in df:
+        sessions = df[SESSION_COLUMN]
+        if (sessions.isna().any()
+                or not pd.api.types.is_integer_dtype(sessions.dtype)
+                or isinstance(sessions.dtype, pd.CategoricalDtype)
+                or (sessions < 0).any()
+                or df.assign(_session=sessions).groupby("Date")["_session"].nunique().gt(1).any()):
+            raise ValueError("Session_Number must contain consistent nonnegative integer market positions")
+    else:
+        calendar = pd.Index(df["Date"].unique()).sort_values()
+        df[SESSION_COLUMN] = calendar.get_indexer(df["Date"])
+    ordered = df.sort_values(["Name", "Date"])
+    if ordered.groupby("Name")[SESSION_COLUMN].diff().dropna().le(0).any():
+        raise ValueError("Session_Number must increase with the observation dates")
     numeric_columns = ("Open", "High", "Low", "Close", "Volume")
     for name in numeric_columns:
         df[name] = pd.to_numeric(df[name], errors="coerce")
-    df = df.dropna(subset=numeric_columns).copy()
-    finite = pd.Series(
-        np.isfinite(df[list(numeric_columns)].to_numpy(dtype=float)).all(axis=1),
-        index=df.index,
-    )
-    positive = (
-        (df[["Open", "High", "Low", "Close"]] > 0).all(axis=1)
-        & df["Volume"].ge(0)
-    )
-    coherent = (
-        df["High"].ge(df[["Open", "Low", "Close"]].max(axis=1))
-        & df["Low"].le(df[["Open", "High", "Close"]].min(axis=1))
-    )
-    df = df.loc[finite & positive & coherent].copy()
+    df = df.loc[valid_price_bars(df, require_volume=True)].copy()
     if df.empty:
         raise ValueError("No valid OHLCV observations remain")
     missing_tickers = sorted(input_tickers - set(df["Name"]))
@@ -98,8 +105,7 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     """Produce one next-observed-day target per symbol, with causal indicators."""
-    source = validate_bars(df)
-    source = add_technical_indicators(source)
+    source = prepare_indicator_history(df)
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
     source["Target_Date"] = source.groupby("Name", sort=False)["Date"].shift(-1)
     source["Trend"] = (next_close > source["Close"]).astype("int64")
@@ -122,6 +128,16 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
             f"{', '.join(missing_tickers)}; provide longer price histories"
         )
     return prepared
+
+
+def prepare_indicator_history(df: pd.DataFrame) -> pd.DataFrame:
+    """Retain validated, causally calculated price history, including its last bar.
+
+    Unlike supervised feature preparation, this does not remove rows solely
+    because their next-day prediction target is unavailable. It also retains
+    missing-indicator rows so HMM filtering can advance through them.
+    """
+    return add_technical_indicators(validate_bars(df))
 
 
 def main() -> None:

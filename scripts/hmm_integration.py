@@ -32,12 +32,16 @@ def _gaussian_log_emissions(model: GaussianHMM, observations: np.ndarray) -> np.
         variances = np.maximum(
             np.diagonal(covariances, axis1=-2, axis2=-1), np.finfo(float).tiny
         )
-        differences = observations[:, None, :] - means[None, :, :]
-        return -0.5 * (
-            observations.shape[1] * np.log(2 * np.pi)
-            + np.log(variances).sum(axis=1)[None, :]
-            + (differences**2 / variances[None, :, :]).sum(axis=2)
-        )
+        # Squaring a large finite difference *before* dividing by an even
+        # larger variance overflows unnecessarily (e.g. 1e200**2 / 1e300).
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            standardized = ((observations[:, None, :] - means[None, :, :])
+                            / np.sqrt(variances)[None, :, :])
+            return -0.5 * (
+                observations.shape[1] * np.log(2 * np.pi)
+                + np.log(variances).sum(axis=1)[None, :]
+                + np.square(standardized).sum(axis=2)
+            )
     return np.column_stack([
         np.atleast_1d(multivariate_normal.logpdf(
             observations, mean=means[state], cov=covariances[state]
@@ -68,6 +72,13 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
         ordered = ordered.sort_values("Date", kind="stable")
     if "Date" in ordered and ordered["Date"].duplicated().any():
         raise ValueError("Duplicate dates for a single ticker")
+    if "Session_Number" in ordered:
+        positions = ordered["Session_Number"]
+        if (positions.isna().any()
+                or not pd.api.types.is_integer_dtype(positions.dtype)
+                or (positions < 0).any()
+                or positions.diff().dropna().le(0).any()):
+            raise ValueError("HMM Session_Number must contain increasing nonnegative integers")
     clean = ordered.dropna(subset=list(indicators)).copy()
     if not np.isfinite(clean[list(indicators)].to_numpy(dtype=float)).all():
         raise ValueError("Indicator values must be finite")
@@ -108,11 +119,17 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
         log_alpha = np.log(model.startprob_)
     regimes = []
     emission_index = 0
+    previous_session = None
     for step, (row_index, has_observation) in enumerate(complete.items()):
         # Each dated row advances the latent state, even when its indicators
-        # are missing. A missing observation contributes no emission term.
-        if step:
+        # are missing. Session_Number additionally preserves market dates
+        # whose entire source bar was discarded before indicator creation.
+        current_session = (int(ordered.loc[row_index, "Session_Number"])
+                           if "Session_Number" in ordered else step)
+        gap = 0 if previous_session is None else current_session - previous_session
+        for _ in range(gap):
             log_alpha = logsumexp(log_alpha[:, None] + transition, axis=0)
+        previous_session = current_session
         if has_observation:
             log_alpha = log_alpha + emissions[emission_index]
             emission_index += 1
@@ -139,9 +156,9 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
     """
     indicators = tuple(indicators)
     clean = _validated_indicators(df, indicators, keep_missing=True)
-    # Fitting on a compressed sequence would interpret nonadjacent observations
-    # as single-step HMM transitions. Missing observations may be handled by
-    # forward filtering, but training must not silently collapse those gaps.
+    # Fitting cannot directly accept missing-emission rows. Instead, break
+    # complete observations into independent contiguous segments; no fitted
+    # transition then crosses a discarded market session.
     if clean[list(indicators)].isna().any().any():
         raise ValueError("HMM fitting requires complete indicator observations")
     if n_components < 1 or len(clean) < max(n_components * 3, 10):
@@ -151,7 +168,15 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
         n_components=n_components, covariance_type="diag", n_iter=500,
         tol=1e-4, random_state=random_state, min_covar=1e-4,
     )
-    model.fit(X)
+    if "Session_Number" in clean:
+        starts = clean["Session_Number"].diff().ne(1).to_numpy()
+        boundaries = np.flatnonzero(starts)
+        lengths = np.diff(np.r_[boundaries, len(clean)]).tolist()
+    else:
+        lengths = [len(clean)]
+    if sum(length - 1 for length in lengths) < n_components:
+        raise ValueError("Insufficient consecutive-session transitions for the HMM")
+    model.fit(X, lengths=lengths)
     history = model.monitor_.history
     if len(history) >= 2 and abs(history[-1] - history[-2]) >= model.tol:
         raise RuntimeError("HMM fitting did not reach the specified tolerance")

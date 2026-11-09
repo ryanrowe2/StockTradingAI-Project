@@ -49,30 +49,42 @@ indicator calculation, HMM fitting/inference, and trading environments.
 All paths normalize whitespace and case before checking ticker identity.
 In the included 93,612-row source, 93,435 bars pass OHLCV validation;
 177 incomplete or inconsistent records are excluded without imputation.
+Before exclusion, validation assigns `Session_Number` from the sorted
+source-observed market dates. This position survives filtering and subsetting,
+allowing indicators and HMM filtering to detect excluded sessions. The source
+calendar does not claim to reconstruct dates absent from every ticker's input.
+Direct indicator calls validate positive, finite, internally coherent OHLC
+prices; Volume remains optional for that standalone API but is checked for
+finite nonnegative values when supplied.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
 | Indicator | Definition / implementation |
 | --- | --- |
 | MA_20 | Twenty-observation simple moving average of closing price |
-| ATR | Fourteen-observation moving average of true range, using prior close |
-| RSI_14 | Fourteen-observation rolling gain/loss RSI |
+| ATR | Fourteen-observation moving average of true range using the prior close; interrupted by missing sessions |
+| RSI_14 | Fourteen-consecutive-session rolling gain/loss RSI; missing bars interrupt the window |
 | MACD | Twelve-period EMA minus twenty-six-period EMA, plus nine-period signal EMA |
 | Bollinger Bands | Twenty-period mean ± two rolling standard deviations |
-| Return / Return_Lag1 | Daily fractional close-to-close change and its previous value |
+| Return / Return_Lag1 | Fractional change between consecutive source-market sessions and its preceding value; unavailable across missing bars |
 | Close_Lag1 | Previous observed closing price for the same ticker |
 | Intraday_Return | (Close − Open) / Open |
 | Daily_Range | (High − Low) / Open |
 | MACD_Pct | MACD divided by current Close |
 
 `Target_Date` is the date of that ticker's next available observation. `Trend=1` when its closing price exceeds the current close, otherwise `Trend=0`. A final row without a subsequent observation is excluded, along with indicator warm-up rows.
+The target deliberately means *next valid observation*, which may follow an
+excluded source bar. This does not turn a multi-session close change into a
+one-session `Return` feature. Moving averages, EMA/MACD, and Bollinger Bands
+retain their explicitly observation-based windows without invented prices.
 
 The generated feature table is saved to `data/generated/stock_features.csv` by default. Raw stock prices retain their original units; transformations learned from data are handled in the model-training step.
 
 The [EDA notebook](../notebooks/EDA_Preprocessing.ipynb) displays the raw
 missingness and the validator's retained/excluded row counts. Its histogram
 uses daily percentage returns, and its box plots compare percentage returns
-within each ticker rather than mixing stocks' nominal closing prices.
+within each ticker rather than mixing stocks' nominal closing prices. Returns
+spanning invalid source sessions are omitted from those comparisons.
 
 ## 2. Bayesian-network experiment
 
@@ -109,9 +121,9 @@ For the included combined source, the evaluation periods are:
 
 | Partition | Observations | Date boundary |
 | --- | ---: | --- |
-| Training | 55,334 | Through 2013-04-03 |
-| Validation | 18,472 | 2013-04-04 through 2015-08-14 |
-| Test | 18,513 | 2015-08-17 through 2017-12-28 |
+| Training | 53,739 | Through 2013-04-03 |
+| Validation | 18,416 | 2013-04-04 through 2015-08-14 |
+| Test | 18,163 | 2015-08-17 through 2017-12-28 |
 
 The [model evaluation notebook](../notebooks/Model_Training_Evaluation.ipynb) runs the same experiment and displays both models' metrics side by side.
 
@@ -119,11 +131,14 @@ The [model evaluation notebook](../notebooks/Model_Training_Evaluation.ipynb) ru
 
 Open [HMM_and_RL_Experiments.ipynb](../notebooks/HMM_and_RL_Experiments.ipynb).
 
-The notebook selects **AAPL** for a contiguous trading sequence, computes indicators, and partitions observations chronologically. A three-state diagonal-covariance Gaussian HMM is fitted to the training period's `MA_20`, `RSI_14`, and `MACD`.
-HMM fitting requires complete indicator observations. The fit rejects missing
-training indicators instead of compressing nonadjacent dates into artificial
-single-step transitions; missing observations can still be handled during
-forward inference.
+The notebook selects **AAPL**, computes indicators, and uses the same global
+market-date train/validation/test boundaries as the Bayesian experiment.
+A three-state diagonal-covariance Gaussian HMM is fitted to the training
+period's `MA_20`, `RSI_14`, and `MACD`. HMM fitting requires complete indicator
+observations: the notebook omits missing-emission rows from the fitting matrix,
+and `fit_hmm_on_indicators` supplies contiguous-sequence lengths so no learned
+transition crosses an excluded source session or missing indicator period.
+Forward filtering handles those intervening sessions without compressing time.
 
 `infer_filtered_regimes` computes forward probabilities from the fitted HMM emission and transition parameters:
 
@@ -132,7 +147,7 @@ P(z_t\mid x_{1:t}) \propto P(x_t\mid z_t)\sum_{z_{t-1}}
 P(z_t\mid z_{t-1})P(z_{t-1}\mid x_{1:t-1}).
 $$
 
-Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. The HMM is fitted on all causal indicator observations through the training cutoff, including the final training day whose next-day label is excluded from supervised training. Forward filtering then uses the entire indicator history, including both supervised-split boundary days, while the Q-learning training sequence retains the label-purged training rows. No validation or test observation contributes to HMM parameter fitting. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
+Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. The HMM is fitted on all *complete* causal indicator observations through the training cutoff, including the final training day whose next-day label is excluded from supervised training. Forward filtering uses the indicator history through the final source session, including both supervised-split boundary days, while the Q-learning training sequence retains the label-purged training rows. No validation or test observation contributes to HMM parameter fitting. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
 Gaussian emission likelihoods are calculated from the fitted model's public
 mean and covariance parameters, without relying on internal hmmlearn methods.
 The fitting helper stores its ordered indicator names on the model and
@@ -141,10 +156,13 @@ counts do not imply interchangeable HMM dimensions.
 Impossible initial states and transitions retain zero probability. When an
 indicator observation is missing, the filter advances the latent state using
 the transition matrix without assigning a regime to that incomplete row.
+`Session_Number` also advances the filter through excluded source sessions
+that no longer have an indicator row. Gaussian log densities standardize
+residuals before squaring to avoid avoidable intermediate overflow.
 
 ## 4. Q-learning experiment
 
-The same notebook fits three-bin quantiles on the training period's daily return and RSI, combines those two binned features with the filtered HMM regime and the current position, and trains the tabular policy on the earlier single-ticker training sequence for 75 episodes.
+The same notebook fits three-bin quantiles on AAPL's training-period consecutive-session return and RSI, combines those two binned features with the filtered HMM regime and the current position, and trains the tabular policy on the earlier single-ticker training sequence for 75 episodes. These columns, `Return_binned`, `RSI_14_binned`, and `Market_Regime`, also form the environment's default state schema when present.
 
 The `SimpleTradingEnv` has three actions:
 
@@ -173,7 +191,8 @@ Q-values are updated using the discounted next-state value for non-terminal step
 An optional `max_steps` argument permits nonnegative integer episode limits;
 invalid values are rejected before resetting the environment.
 
-Both strategies are marked to market at the last observed close. Positions
+Both strategies are marked to market at the last validated source close,
+including the final session without a following prediction target. Positions
 still held at that close remain open; no hypothetical final sale or exit fee
 is included in either strategy's reported P/L.
 

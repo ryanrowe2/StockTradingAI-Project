@@ -26,7 +26,7 @@ else:
 class SimpleTradingEnv:
     """Sequential one-share simulator with next-session-open execution."""
 
-    DEFAULT_STATE_COLUMNS = ("Open_binned", "High_binned", "Low_binned", "Market_Regime")
+    DEFAULT_STATE_COLUMNS = ("Return_binned", "RSI_14_binned", "Market_Regime")
 
     def __init__(self, data: pd.DataFrame, transaction_cost: float = 0.001,
                  state_columns: tuple[str, ...] | None = None):
