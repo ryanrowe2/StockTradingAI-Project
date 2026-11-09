@@ -8,11 +8,13 @@ in sequence, captures stdout and generated figures, and validates the result.
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import io
 import os
 import sys
-from contextlib import redirect_stdout
+import tokenize
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import matplotlib
@@ -21,7 +23,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nbformat
 import numpy as np
+from IPython.core.formatters import DisplayFormatter
 from PIL import Image, UnidentifiedImageError
+from scipy.ndimage import label
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +38,70 @@ def _display(value: object) -> None:
         print(value.to_string())
     else:
         print(value)
+
+
+class _StreamCapture(io.TextIOBase):
+    """Collect ordered stdout/stderr writes as notebook stream outputs."""
+
+    def __init__(self, name: str, events: list[list[str]]):
+        self.name = name
+        self.events = events
+
+    def write(self, message: str) -> int:
+        if message:
+            if self.events and self.events[-1][0] == self.name:
+                self.events[-1][1] += message
+            else:
+                self.events.append([self.name, message])
+        return len(message)
+
+
+def _remove_inline_magic(source: str) -> str:
+    """Remove standalone notebook magic without changing multiline string data."""
+    string_lines: set[int] = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.STRING:
+                string_lines.update(range(token.start[0], token.end[0] + 1))
+    except tokenize.TokenError:
+        # Parsing the remaining source will report malformed Python below.
+        pass
+    return "".join(
+        "\n" if number not in string_lines and line.strip() == "%matplotlib inline" else line
+        for number, line in enumerate(source.splitlines(keepends=True), 1)
+    )
+
+
+def _execute_cell(source: str, path: Path, variables: dict) -> object:
+    """Execute a cell and return its final expression for Jupyter-style display."""
+    tree = ast.parse(source, filename=str(path))
+    meaningful = [token for token in tokenize.generate_tokens(io.StringIO(source).readline)
+                  if token.type not in (tokenize.ENDMARKER, tokenize.NEWLINE,
+                                        tokenize.NL, tokenize.COMMENT, tokenize.DEDENT)]
+    suppressed = bool(meaningful and meaningful[-1].type == tokenize.OP
+                      and meaningful[-1].string == ";")
+    if (not tree.body or not isinstance(tree.body[-1], ast.Expr)
+            or suppressed):
+        exec(compile(tree, str(path), "exec"), variables)
+        return None
+
+    capture_name = "__notebook_runner_last_expression__"
+    missing = object()
+    previous = variables.get(capture_name, missing)
+    last = tree.body[-1]
+    tree.body[-1] = ast.copy_location(
+        ast.Assign(targets=[ast.Name(id=capture_name, ctx=ast.Store())], value=last.value),
+        last,
+    )
+    ast.fix_missing_locations(tree)
+    try:
+        exec(compile(tree, str(path), "exec"), variables)
+        return variables[capture_name]
+    finally:
+        if previous is missing:
+            variables.pop(capture_name, None)
+        else:
+            variables[capture_name] = previous
 
 
 def _verify_outputs(previous: list, current: list, path: Path, cell_number: int) -> None:
@@ -85,9 +153,14 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
         difference = np.abs(old_pixels - new_pixels)
         # A mean-only check misses a thin graph line that moves dramatically
         # across a mostly blank chart. Also count strongly changed pixels.
-        significant_fraction = np.mean(difference.max(axis=2) > 40)
+        strong_difference = difference.max(axis=2) > 40
+        significant_fraction = np.mean(strong_difference)
+        components, count = label(strong_difference, structure=np.ones((3, 3), dtype=int))
+        largest_change = (np.bincount(components.ravel())[1:].max()
+                          if count else 0)
         if (max(abs(a - b) for a, b in zip(old_size, new_size)) > 3
-                or difference.mean() > 3.0 or significant_fraction > 0.001):
+                or difference.mean() > 3.0 or significant_fraction > 0.001
+                or largest_change >= 30):
             raise RuntimeError(f"Published chart differs in {path.name}, cell {cell_number}")
 
 
@@ -102,7 +175,9 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
     variables = {"__name__": "__main__", "display": _display}
     execution_count = 0
     previous_directory = Path.cwd()
+    previous_sys_path = sys.path.copy()
     existing_figures = set(plt.get_fignums())
+    formatter = DisplayFormatter()
     try:
         # Relative data paths inside a notebook resolve beside that notebook,
         # regardless of where a caller invokes this helper.
@@ -112,18 +187,23 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
                 continue
             execution_count += 1
             original_outputs = list(cell.outputs)
-            source = cell.source.replace("%matplotlib inline", "")
-            text_output = io.StringIO()
+            source = _remove_inline_magic(cell.source)
+            stream_events: list[list[str]] = []
             try:
-                with redirect_stdout(text_output):
-                    exec(compile(source, str(path), "exec"), variables)
+                with (redirect_stdout(_StreamCapture("stdout", stream_events)),
+                      redirect_stderr(_StreamCapture("stderr", stream_events))):
+                    expression_result = _execute_cell(source, path, variables)
             except Exception as error:
                 raise RuntimeError(f"Notebook {path.name}, cell {execution_count}") from error
-            outputs = []
-            if text_output.getvalue():
-                outputs.append(nbformat.v4.new_output(
-                    "stream", name="stdout", text=text_output.getvalue(),
-                ))
+            outputs = [nbformat.v4.new_output("stream", name=name, text=message)
+                       for name, message in stream_events]
+            if expression_result is not None:
+                data, metadata = formatter.format(expression_result)
+                if data:
+                    outputs.append(nbformat.v4.new_output(
+                        "execute_result", data=data, metadata=metadata,
+                        execution_count=execution_count,
+                    ))
             for number in plt.get_fignums():
                 if number in existing_figures:
                     continue
@@ -149,6 +229,7 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
                 plt.close(number)
         finally:
             os.chdir(previous_directory)
+            sys.path[:] = previous_sys_path
     nbformat.validate(notebook)
     if save:
         nbformat.write(notebook, path)

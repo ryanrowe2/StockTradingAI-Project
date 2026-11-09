@@ -34,7 +34,11 @@ flowchart TD
     J --> K["Frozen-policy historical evaluation"]
 ```
 
-Each ticker's indicators and next-day labels are computed independently. Date boundaries are shared across tickers, so the partitions correspond to actual historical market periods.
+Each ticker's indicators and next-day labels are computed independently. Ticker
+identifiers are normalized consistently, including for direct indicator calls;
+literal symbols such as `NA` are preserved during CSV loading. Date boundaries
+are shared across tickers, so the partitions correspond to actual historical
+market periods. Target dates are required to follow their feature dates.
 An experiment rejects a ticker with no usable validated history or without
 observations in each chronological partition, and reports ticker coverage for
 training, validation, and test separately.
@@ -64,7 +68,7 @@ To make the comparison reproducible, the same chronological partitions and train
 
 ### 2. Hidden Markov market regimes
 
-The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. Model parameters are fitted on the training period and can then be applied to later observations.
+The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. Model parameters are fitted on a complete-indicator training sequence and can then be applied to later observations; filtering can also advance through missing observations.
 
 The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates regime assignments for a single ticker, including a separate later period.
 
@@ -72,7 +76,7 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 
 ### 3. Q-learning trading simulator
 
-The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs.
+The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. State components must be actual integers, and both terminal transitions and Q-value updates are checked for validity. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs.
 
 The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
 Both outcomes are marked to the final observed close. A share still held at
@@ -101,7 +105,7 @@ establish predictive superiority or deployable trading profitability.
 
 ## Reproduce the experiments
 
-**Requirements:** Python 3.10+ and Git.
+**Requirements:** Python 3.10–3.12 and Git.
 
 ```bash
 git clone https://github.com/ryanrowe2/StockTradingAI-Project.git
@@ -130,6 +134,8 @@ The input validator raises a clear error if all valid price bars for any ticker
 are discarded, rather than silently excluding that ticker.
 When `--ticker` is specified, selection happens before price-bar validation,
 so invalid records belonging only to other symbols do not block the experiment.
+CSV parsing preserves ticker strings such as `NA`, which pandas otherwise
+interprets as missing values.
 
 For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
 environment, install `requirements-repro-py312.txt` instead of the flexible
@@ -159,8 +165,10 @@ jupyter lab
 ```
 
 Open the files in `notebooks/` and select the project environment as the kernel. Reproduce the published outputs with `python -m scripts.refresh_notebooks`. See the [experiment reproduction guide](docs/README_experiments.md) for technical details and exact experiment settings.
-The notebook reproduction helper excludes existing Matplotlib figures from
-capture and cleans up newly created figures if a cell fails.
+The notebook reproduction helper captures stdout, stderr, expression results,
+and Matplotlib figures. It restores the caller's working directory and import
+path, excludes existing figures from capture, and cleans up newly created
+figures if a cell fails.
 
 ## Repository structure
 

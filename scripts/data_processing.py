@@ -74,7 +74,9 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
 
 def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -> pd.DataFrame:
     """Read and validate raw stock observations, optionally selecting symbols first."""
-    source = pd.read_csv(filepath)
+    # Stock symbols such as "NA" are valid identifiers. Pandas' default NA
+    # tokens would silently turn them into missing ticker names.
+    source = pd.read_csv(filepath, keep_default_na=False)
     if tickers is not None:
         if not tickers or any(not isinstance(ticker, str) or not ticker.strip()
                               for ticker in tickers):

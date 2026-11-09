@@ -128,6 +128,19 @@ def test_direct_indicator_api_rejects_missing_symbols_and_duplicate_dates():
         add_technical_indicators(bars.assign(Date=[bars.loc[0, "Date"]] * len(bars)))
 
 
+def test_direct_indicator_api_normalizes_tickers_before_grouping():
+    bars = synthetic_bars(80).query("Name == 'AAA'").sort_values("Date").reset_index(drop=True)
+    variants = bars.copy()
+    variants.loc[40:, "Name"] = " aaa "
+    result = add_technical_indicators(variants)
+    canonical = add_technical_indicators(bars)
+    assert set(result["Name"]) == {"AAA"}
+    pd.testing.assert_frame_equal(result, canonical)
+    duplicate = pd.concat([bars.iloc[:1], bars.iloc[:1].assign(Name=" aaa ")])
+    with pytest.raises(ValueError, match="Duplicate ticker/date"):
+        add_technical_indicators(duplicate)
+
+
 def test_single_ticker_indicators_reject_duplicate_dates_without_name_column():
     bars = synthetic_bars(3).query("Name == 'AAA'").drop(columns="Name").reset_index(drop=True)
     bars.loc[1, "Date"] = bars.loc[0, "Date"]
@@ -187,6 +200,16 @@ def test_selected_ticker_ignores_unrelated_invalid_bars_and_dates(tmp_path: Path
         load_data(csv, tickers=("MISSING",))
     with pytest.raises(ValueError, match="Selected tickers must be nonempty strings"):
         load_data(csv, tickers=())
+
+
+def test_csv_loader_preserves_literal_ticker_na():
+    source = "Date,Name,Open,High,Low,Close,Volume\n2020-01-02,NA,10,11,9,10,100\n"
+    for selected in (None, ("NA",), (" na ",)):
+        kwargs = {} if selected is None else {"tickers": selected}
+        loaded = load_data(io.StringIO(source), **kwargs)
+        assert loaded["Name"].tolist() == ["NA"]
+    with pytest.raises(ValueError, match="ticker symbol"):
+        load_data(io.StringIO(source.replace(",NA,", ",,")))
 
 
 def test_loader_excludes_inconsistent_prices_and_rejects_invalid_dates(tmp_path: Path):
@@ -294,6 +317,15 @@ def test_chronological_split_rejects_missing_ticker_coverage():
     assert set(features["Name"]) == {"AAA", "BBB"}
     with pytest.raises(ValueError, match="Missing ticker coverage.*validation: BBB; test: BBB"):
         chronological_split(features)
+
+
+def test_chronological_split_rejects_nonfuture_target_dates():
+    frame = prepare_features(synthetic_bars())
+    for bad_target in (frame.loc[0, "Date"], frame.loc[0, "Date"] - pd.Timedelta(days=1)):
+        edited = frame.copy()
+        edited.loc[0, "Target_Date"] = bad_target
+        with pytest.raises(ValueError, match="Target_Date must follow"):
+            chronological_split(edited)
 
 
 def test_binner_learns_thresholds_only_from_training_data():
@@ -477,6 +509,13 @@ def test_hmm_fit_completes_without_exhausting_iteration_limit():
     assert model.monitor_.iter < model.n_iter
 
 
+def test_hmm_training_rejects_missing_observations_instead_of_compressing_time():
+    frame = prepare_features(synthetic_bars()).query("Name == 'AAA'").reset_index(drop=True)
+    frame.loc[42, "MA_20"] = np.nan
+    with pytest.raises(ValueError, match="HMM fitting requires complete indicator observations"):
+        fit_hmm_on_indicators(frame.iloc[:70], n_components=2)
+
+
 def test_historical_hmm_fit_reaches_configured_tolerance():
     data = load_data(DEFAULT_RAW_DATA)
     stock = prepare_features(data.loc[data["Name"] == "AAPL"])
@@ -528,6 +567,19 @@ def test_trading_disallows_actions_that_cannot_execute():
     invalid_states = bars.assign(Return_binned=pd.Series([0, pd.NA, 1], dtype="Int64"))
     with pytest.raises(ValueError, match="finite integer states"):
         SimpleTradingEnv(invalid_states, state_columns=("Return_binned",))
+
+
+@pytest.mark.parametrize("invalid_states", [
+    [True, False, True], ["1", "0", "1"], ["1.0", "0.0", "1.0"],
+    [1.0, 0.0, 1.0],
+])
+def test_trading_state_validation_requires_actual_integers(invalid_states):
+    bars = pd.DataFrame({"Open": [10., 11., 12.], "Close": [11., 12., 13.],
+                         "Bin": invalid_states})
+    with pytest.raises(ValueError, match="finite integer states"):
+        SimpleTradingEnv(bars, state_columns=("Bin",))
+    bars["Bin"] = pd.Series([1, 0, 1], dtype="Int64")
+    assert SimpleTradingEnv(bars, state_columns=("Bin",)).get_state() == (1, 0)
 
 
 def test_trading_sorts_parsed_dates_and_rejects_invalid_or_duplicate_dates():
@@ -633,6 +685,26 @@ def test_rejected_q_update_is_atomic_and_cannot_change_frozen_policy():
     with pytest.raises(ValueError, match="Reward must be finite"):
         agent.update_q_value((0,), "buy", float("nan"), (1,))
     assert agent.q_table == {}
+
+
+def test_terminal_next_state_must_have_valid_position_and_boolean_done():
+    agent = QLearningAgent()
+    with pytest.raises(ValueError, match="current position"):
+        agent.update_q_value((0,), "buy", 1.0, (2,), done=True)
+    with pytest.raises(ValueError, match="done must be a boolean"):
+        agent.update_q_value((0,), "buy", 1.0, (1,), done="False")
+    assert agent.q_table == {}
+    agent.update_q_value((0,), "buy", 1.0, (1,), done=np.bool_(True))
+    assert agent.q_table[(0,)]["buy"] == pytest.approx(0.1)
+
+
+def test_overflowing_q_update_is_rejected_without_mutating_table():
+    agent = QLearningAgent(alpha=1.0, gamma=1.0)
+    agent.q_table[(1,)] = {"buy": 0.0, "sell": 1e308, "hold": 0.0}
+    before = copy.deepcopy(agent.q_table)
+    with pytest.raises(ValueError, match="Q-value update must remain finite"):
+        agent.update_q_value((0,), "buy", 1e308, (1,))
+    assert agent.q_table == before
 
 
 def test_rl_terminal_update_does_not_bootstrap():
@@ -795,6 +867,97 @@ def test_programmatic_notebook_execution_resolves_relative_paths_and_restores_cw
     assert Path.cwd() == original_cwd
 
 
+def test_notebook_magic_removal_does_not_modify_string_literals(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    path = tmp_path / "literal_magic.ipynb"
+    expected = "%matplotlib inline\n"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source="%matplotlib inline\nprint('%matplotlib inline')",
+        execution_count=1,
+        outputs=[nbformat.v4.new_output("stream", name="stdout", text=expected)],
+    )]), path)
+    result = reproduce_notebook(path, check=True)
+    assert result.cells[0].outputs[0].text == expected
+
+    multiline = tmp_path / "multiline_magic.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source='text = """\n%matplotlib inline\n"""\nprint(text)',
+        execution_count=1,
+        outputs=[nbformat.v4.new_output("stream", name="stdout",
+                                        text="\n%matplotlib inline\n\n")],
+    )]), multiline)
+    reproduce_notebook(multiline, check=True)
+
+
+def test_notebook_check_reproduces_stderr_and_expression_results(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    streams = tmp_path / "stream_order.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source="import sys\nprint('before')\n_ = sys.stderr.write('warning\\n')\nprint('after')",
+        execution_count=1,
+        outputs=[
+            nbformat.v4.new_output("stream", name="stdout", text="before\n"),
+            nbformat.v4.new_output("stream", name="stderr", text="warning\n"),
+            nbformat.v4.new_output("stream", name="stdout", text="after\n"),
+        ],
+    )]), streams)
+    result = reproduce_notebook(streams, check=True)
+    assert [out.name for out in result.cells[0].outputs] == ["stdout", "stderr", "stdout"]
+
+    expression = tmp_path / "expression.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[
+        nbformat.v4.new_code_cell(source="1 + 1", execution_count=1,
+            outputs=[nbformat.v4.new_output("execute_result", data={"text/plain": "2"},
+                execution_count=1)]),
+        nbformat.v4.new_code_cell(source="1 + 1;", execution_count=2, outputs=[]),
+        nbformat.v4.new_code_cell(source="1 + 1; # suppress result", execution_count=3,
+                                  outputs=[]),
+    ]), expression)
+    reproduced = reproduce_notebook(expression, check=True)
+    assert reproduced.cells[0].outputs[0].data["text/plain"] == "2"
+    assert reproduced.cells[1].outputs == []
+
+
+def test_notebook_check_reproduces_rich_expression_result(tmp_path: Path):
+    import nbformat
+    from IPython.core.formatters import DisplayFormatter
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    table = pd.DataFrame({"A": [1]})
+    data, metadata = DisplayFormatter().format(table)
+    path = tmp_path / "rich_expression.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source="import pandas as pd\npd.DataFrame({'A': [1]})",
+        execution_count=1,
+        outputs=[nbformat.v4.new_output("execute_result", data=data,
+                                        metadata=metadata, execution_count=1)],
+    )]), path)
+    reproduce_notebook(path, check=True)
+
+
+def test_notebook_execution_restores_sys_path_even_after_failure(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    original = sys.path.copy()
+    for failing in (False, True):
+        source = "import sys\nsys.path.insert(0, 'unexpected-import-path')"
+        if failing:
+            source += "\nraise RuntimeError('expected')"
+        path = tmp_path / f"sys_path_{failing}.ipynb"
+        nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(source)]), path)
+        if failing:
+            with pytest.raises(RuntimeError, match="Notebook sys_path_True.ipynb"):
+                reproduce_notebook(path, save=False)
+        else:
+            reproduce_notebook(path, save=False)
+        assert sys.path == original
+
+
 def test_notebook_failures_clean_own_figures_without_touching_caller_figures(tmp_path: Path):
     import matplotlib.pyplot as plt
     import nbformat
@@ -863,6 +1026,24 @@ def test_notebook_check_catches_moved_thin_plot_lines():
 
     with pytest.raises(RuntimeError, match="Published chart differs"):
         _verify_outputs([line_chart(200)], [line_chart(500)], Path("chart.ipynb"), 2)
+
+
+def test_notebook_check_catches_small_localized_chart_markers():
+    from PIL import Image, ImageDraw
+    from scripts.refresh_notebooks import _verify_outputs
+
+    base = Image.new("RGB", (1000, 750), "white")
+    modified = base.copy()
+    ImageDraw.Draw(modified).rectangle((450, 350, 467, 367), fill="black")
+
+    def png_output(chart):
+        buffer = io.BytesIO()
+        chart.save(buffer, format="PNG")
+        return {"output_type": "display_data", "data": {
+            "image/png": base64.b64encode(buffer.getvalue()).decode("ascii")}}
+
+    with pytest.raises(RuntimeError, match="Published chart differs"):
+        _verify_outputs([png_output(base)], [png_output(modified)], Path("chart.ipynb"), 2)
 
 
 def test_notebook_check_catches_changed_rich_text_results():

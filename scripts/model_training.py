@@ -57,6 +57,8 @@ def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
         raise ValueError("A nonempty, feature-prepared DataFrame is required")
     date = parse_daily_dates(df["Date"], context="Feature dates")
     target_date = parse_daily_dates(df["Target_Date"], context="Target dates")
+    if (target_date <= date).any():
+        raise ValueError("Every Target_Date must follow its observation Date")
     dates = pd.DatetimeIndex(date.unique()).sort_values()
     if len(dates) < 15:
         raise ValueError("At least 15 distinct trading dates are required")

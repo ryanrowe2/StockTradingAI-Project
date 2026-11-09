@@ -81,6 +81,7 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("Date is required for multi-ticker indicators")
     if df["Name"].isna().any() or df["Name"].astype(str).str.strip().eq("").any():
         raise ValueError("Every indicator observation must have a ticker name")
+    df["Name"] = df["Name"].astype(str).str.strip().str.upper()
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations in indicator input")
     return pd.concat(

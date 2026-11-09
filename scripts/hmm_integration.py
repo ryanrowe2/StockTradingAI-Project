@@ -123,7 +123,12 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
     using the fitted training-period model, never to this fitting function.
     """
     indicators = tuple(indicators)
-    clean = _validated_indicators(df, indicators)
+    clean = _validated_indicators(df, indicators, keep_missing=True)
+    # Fitting on a compressed sequence would interpret nonadjacent observations
+    # as single-step HMM transitions. Missing observations may be handled by
+    # forward filtering, but training must not silently collapse those gaps.
+    if clean[list(indicators)].isna().any().any():
+        raise ValueError("HMM fitting requires complete indicator observations")
     if n_components < 1 or len(clean) < max(n_components * 3, 10):
         raise ValueError("Insufficient training observations for the HMM")
     X = clean[list(indicators)].to_numpy(dtype=float)

@@ -57,11 +57,9 @@ class SimpleTradingEnv:
         if missing:
             raise ValueError(f"Missing trading state columns: {sorted(missing)}")
         if state_columns:
-            try:
-                state_values = self.data[list(state_columns)].to_numpy(dtype=float, na_value=np.nan)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("Trading state columns must be numeric") from exc
-            if not np.isfinite(state_values).all() or not np.equal(state_values, np.floor(state_values)).all():
+            state_values = self.data[list(state_columns)].to_numpy(dtype=object)
+            if any(not isinstance(value, Integral) or isinstance(value, (bool, np.bool_))
+                   for value in state_values.flat):
                 raise ValueError("Trading state columns must contain finite integer states")
         self.state_columns = tuple(state_columns)
         self.transaction_cost = transaction_cost
@@ -163,22 +161,30 @@ class QLearningAgent:
 
     def update_q_value(self, state_features, action: str, reward: float,
                        next_state_features, done: bool = False) -> None:
+        if not isinstance(done, (bool, np.bool_)):
+            raise ValueError("done must be a boolean")
         state = self.get_state(state_features)
         if action not in self._valid_actions(state):
             raise ValueError(f"Unrecognized action: {action}")
         next_state = self.get_state(next_state_features)
-        next_actions = () if done else self._valid_actions(next_state)
+        valid_next_actions = self._valid_actions(next_state)
         try:
             reward = float(reward)
         except (TypeError, ValueError) as exc:
             raise ValueError("Reward must be finite") from exc
         if not np.isfinite(reward):
             raise ValueError("Reward must be finite")
-        # Validate everything before creating a new Q-table entry.
-        future = (0.0 if done else max(self._values(next_state)[candidate]
-                                      for candidate in next_actions))
+        # Calculate and validate the update before changing either state entry.
+        future = (0.0 if done else max(self.q_table.get(next_state, {}).get(candidate, 0.0)
+                                      for candidate in valid_next_actions))
+        prior = self.q_table.get(state, {}).get(action, 0.0)
+        updated = prior + self.alpha * (reward + self.gamma * future - prior)
+        if not np.isfinite(updated):
+            raise ValueError("Q-value update must remain finite")
+        if not done:
+            self._values(next_state)
         current = self._values(state)
-        current[action] += self.alpha * (reward + self.gamma * future - current[action])
+        current[action] = updated
 
     def simulate_episode(self, env: SimpleTradingEnv, max_steps: int | None = None,
                          *, train: bool = True) -> float:

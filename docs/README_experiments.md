@@ -4,7 +4,7 @@ This guide documents the reproducible Bayesian-network, HMM, and Q-learning expe
 
 ## Environment
 
-Use Python 3.10 or later from the repository root:
+Use Python 3.10, 3.11, or 3.12 from the repository root:
 
 ```bash
 python -m venv .venv
@@ -41,7 +41,10 @@ preparation rejects an input ticker if insufficient valid price history remains
 after indicator warm-up, so no ticker is silently omitted from the prepared data.
 Validation also rejects a ticker if every one of its price bars is invalid.
 Single-ticker selection is applied before validating OHLCV records and dates,
-so unrelated symbols cannot cause a selected ticker's run to fail.
+so unrelated symbols cannot cause a selected ticker's run to fail. Literal
+symbols such as `NA` remain ticker identifiers instead of being parsed as
+missing values; indicator calculations also normalize whitespace and case
+before grouping observations by ticker.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
@@ -73,7 +76,7 @@ python scripts/model_training.py --ticker AAPL --num-bins 4 --output data/genera
 The experiment proceeds as follows:
 
 1. **Prepare:** read validated raw observations and construct ticker-safe features and next-observation labels.
-2. **Partition by date:** split the combined market calendar into 60% training, 20% validation, and 20% test. Rows whose target date crosses a training or validation boundary are excluded from those earlier partitions.
+2. **Partition by date:** verify that every target date follows its observation date, then split the combined market calendar into 60% training, 20% validation, and 20% test. Rows whose target date crosses a training or validation boundary are excluded from those earlier partitions.
    Every ticker must retain observations in all three partitions; missing ticker
    coverage produces an explicit error naming the affected symbols and periods.
 3. **Fit discretization:** calculate quantile edges on training observations; apply exactly those edges to validation features.
@@ -108,6 +111,10 @@ The [model evaluation notebook](../notebooks/Model_Training_Evaluation.ipynb) ru
 Open [HMM_and_RL_Experiments.ipynb](../notebooks/HMM_and_RL_Experiments.ipynb).
 
 The notebook selects **AAPL** for a contiguous trading sequence, computes indicators, and partitions observations chronologically. A three-state diagonal-covariance Gaussian HMM is fitted to the training period's `MA_20`, `RSI_14`, and `MACD`.
+HMM fitting requires complete indicator observations. The fit rejects missing
+training indicators instead of compressing nonadjacent dates into artificial
+single-step transitions; missing observations can still be handled during
+forward inference.
 
 `infer_filtered_regimes` computes forward probabilities from the fitted HMM emission and transition parameters:
 
@@ -133,8 +140,9 @@ The `SimpleTradingEnv` has three actions:
 - **Sell:** exit the position when long; unavailable while flat.
 - **Hold:** leave the position unchanged.
 
-Q-learning state components must be integers. The agent rejects fractional,
-string, and boolean components instead of silently converting them to bins.
+Q-learning state components must be integers. Both the trading environment and
+the agent reject fractional, string, and boolean components instead of
+silently converting them to bins.
 
 Decisions made after observing a daily close are filled at the next trading session's open. Holdings existing before an action remain exposed to the overnight price change. The reward for a step is:
 
@@ -144,7 +152,7 @@ r_t = \mathrm{position}_{t}(\mathrm{Open}_{t+1}-\mathrm{Close}_t)
 - \mathrm{transaction\_cost}\times\mathrm{Open}_{t+1}\times\mathbf{1}[\mathrm{trade}].
 $$
 
-Q-values are updated using the discounted next-state value for non-terminal steps. At the final step, the next-state bootstrap value is zero. To score the holdout period, the notebook disables both exploration and Q-table updates and compares one-share dollar profit/loss with a next-open buy-and-hold entry.
+Q-values are updated using the discounted next-state value for non-terminal steps. At the final step, the next-state bootstrap value is zero. Terminal next-position values and the `done` flag are validated, and updates that would make a Q-value nonfinite are rejected without changing the table. To score the holdout period, the notebook disables both exploration and Q-table updates and compares one-share dollar profit/loss with a next-open buy-and-hold entry.
 
 An optional `max_steps` argument permits nonnegative integer episode limits;
 invalid values are rejected before resetting the environment.
@@ -171,9 +179,10 @@ The same checks run automatically through [GitHub Actions](../.github/workflows/
 python -m scripts.refresh_notebooks
 ```
 
-`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them, compares all saved output types (including numerical text and rich results), fully decodes the saved PNGs, and checks for both broad and localized visual changes against the newly generated charts.
+`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them. The in-process runner captures stdout, stderr, final-expression results (including rich MIME representations), and Matplotlib PNGs. It compares saved output order and content, fully decodes saved PNGs, and detects both broad and localized changes to generated charts. Jupyter's `%matplotlib inline` directive is removed only when it appears as a standalone magic command.
 The `reproduce_notebook(path, check=True)` Python helper resolves relative data
-paths from the notebook's directory and restores the caller's working directory.
+paths from the notebook's directory and restores the caller's working directory
+and `sys.path` import search path.
 It excludes the caller's existing Matplotlib figures from capture and cleanup,
 and closes newly created figures when execution fails, preventing stale-chart
 contamination.
