@@ -28,8 +28,10 @@ from sklearn.metrics import (
 
 if __package__:
     from .data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
+    from .date_validation import parse_daily_dates
 else:
     from data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
+    from date_validation import parse_daily_dates
 
 
 BASELINE_FEATURES = ("Return", "Intraday_Return", "Daily_Range")
@@ -53,7 +55,9 @@ def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
         raise ValueError("Train and validation fractions must leave a test period")
     if df.empty or "Target_Date" not in df or "Date" not in df:
         raise ValueError("A nonempty, feature-prepared DataFrame is required")
-    dates = pd.DatetimeIndex(pd.to_datetime(df["Date"]).unique()).sort_values()
+    date = parse_daily_dates(df["Date"], context="Feature dates")
+    target_date = parse_daily_dates(df["Target_Date"], context="Target dates")
+    dates = pd.DatetimeIndex(date.unique()).sort_values()
     if len(dates) < 15:
         raise ValueError("At least 15 distinct trading dates are required")
     first_cut = int(len(dates) * train_fraction)
@@ -61,8 +65,6 @@ def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
     train_end, validation_end = dates[first_cut - 1], dates[second_cut - 1]
     # A row at the split boundary could have a next-day label drawn from the
     # following period; those labels must not be available to earlier models.
-    target_date = pd.to_datetime(df["Target_Date"])
-    date = pd.to_datetime(df["Date"])
     train = df.loc[(date <= train_end) & (target_date <= train_end)].copy()
     validation = df.loc[
         (date > train_end) & (date <= validation_end) & (target_date <= validation_end)

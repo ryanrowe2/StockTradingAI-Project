@@ -6,9 +6,42 @@ import numpy as np
 import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from scipy.special import logsumexp
+from scipy.stats import multivariate_normal
+
+if __package__:
+    from .date_validation import parse_daily_dates
+else:
+    from date_validation import parse_daily_dates
 
 
 DEFAULT_INDICATORS = ("MA_20", "RSI_14", "MACD")
+
+
+def _gaussian_log_emissions(model: GaussianHMM, observations: np.ndarray) -> np.ndarray:
+    """Compute Gaussian log densities from documented HMM parameters.
+
+    ``covars_`` exposes full covariance matrices for every covariance type.
+    For diagonal/spherical models, use the direct Gaussian formula to retain
+    the numerical behavior of the experiment without private hmmlearn methods.
+    """
+    means = np.asarray(model.means_, dtype=float)
+    covariances = np.asarray(model.covars_, dtype=float)
+    if model.covariance_type in {"diag", "spherical"}:
+        variances = np.maximum(
+            np.diagonal(covariances, axis1=-2, axis2=-1), np.finfo(float).tiny
+        )
+        differences = observations[:, None, :] - means[None, :, :]
+        return -0.5 * (
+            observations.shape[1] * np.log(2 * np.pi)
+            + np.log(variances).sum(axis=1)[None, :]
+            + (differences**2 / variances[None, :, :]).sum(axis=2)
+        )
+    return np.column_stack([
+        np.atleast_1d(multivariate_normal.logpdf(
+            observations, mean=means[state], cov=covariances[state]
+        ))
+        for state in range(model.n_components)
+    ])
 
 
 def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...]) -> pd.DataFrame:
@@ -22,9 +55,7 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...]) -> p
             raise ValueError("Fit/infer HMM regimes for one ticker with a valid name at a time")
     ordered = frame.copy()
     if "Date" in ordered:
-        ordered["Date"] = pd.to_datetime(ordered["Date"], format="mixed", errors="coerce")
-        if ordered["Date"].isna().any():
-            raise ValueError("HMM dates must be present and parseable")
+        ordered["Date"] = parse_daily_dates(ordered["Date"], context="HMM dates")
         ordered = ordered.sort_values("Date", kind="stable")
     if "Date" in ordered and ordered["Date"].duplicated().any():
         raise ValueError("Duplicate dates for a single ticker")
@@ -52,7 +83,7 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
         output.index = df.index
         return output
     observations = clean[list(indicators)].to_numpy(dtype=float)
-    emissions = model._compute_log_likelihood(observations)
+    emissions = _gaussian_log_emissions(model, observations)
     transition = np.log(np.clip(model.transmat_, 1e-300, 1))
     log_alpha = np.log(np.clip(model.startprob_, 1e-300, 1))
     regimes = []

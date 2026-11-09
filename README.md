@@ -72,6 +72,9 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs.
 
 The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
+Both outcomes are marked to the final observed close. A share still held at
+that point remains open, so the displayed P/L excludes a hypothetical final
+sale and its transaction fee.
 
 **Implementation:** [`scripts/rl_agent.py`](scripts/rl_agent.py)
 
@@ -154,6 +157,7 @@ StockTradingAI-Project/
 │   └── README_experiments.md      # Reproduction and methodology guide
 ├── notebooks/                     # EDA, model evaluation, HMM / RL experiments
 ├── scripts/
+│   ├── date_validation.py        # Explicit daily calendar date validation
 │   ├── data_processing.py         # Input validation and causal features
 │   ├── technical_indicators.py    # Per-symbol technical indicators
 │   ├── model_training.py          # Bayesian networks and time-based evaluation

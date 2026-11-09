@@ -5,6 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+if __package__:
+    from .date_validation import parse_daily_dates
+else:
+    from date_validation import parse_daily_dates
+
 
 def compute_moving_average(df: pd.DataFrame, window: int = 20, column: str = "Close") -> pd.Series:
     return df[column].rolling(window=window, min_periods=window).mean()
@@ -67,9 +72,7 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     if "Date" in df:
-        df["Date"] = pd.to_datetime(df["Date"], format="mixed", errors="coerce")
-        if df["Date"].isna().any():
-            raise ValueError("Indicator dates must be present and parseable")
+        df["Date"] = parse_daily_dates(df["Date"], context="Indicator dates")
     if "Name" not in df.columns:
         return _one_symbol_indicators(df.sort_values("Date") if "Date" in df else df)
     if "Date" not in df:

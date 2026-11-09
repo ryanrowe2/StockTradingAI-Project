@@ -20,6 +20,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nbformat
+import numpy as np
+from PIL import Image, UnidentifiedImageError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +37,7 @@ def _display(value: object) -> None:
 
 
 def _verify_outputs(previous: list, current: list, path: Path, cell_number: int) -> None:
-    """Check published text results and the number and validity of charts."""
+    """Check numerical text and integrity/visual consistency of saved charts."""
     def text_results(outputs):
         return [(output.get("output_type"), output.get("name"),
                  str(output.get("text", "")).strip())
@@ -50,9 +52,29 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
     old_figures, new_figures = figures(previous), figures(current)
     if len(old_figures) != len(new_figures):
         raise RuntimeError(f"Published chart count differs in {path.name}, cell {cell_number}")
-    for encoded in (*old_figures, *new_figures):
-        if not base64.b64decode(encoded, validate=True).startswith(b"\x89PNG\r\n\x1a\n"):
-            raise RuntimeError(f"Invalid published chart in {path.name}, cell {cell_number}")
+    def decoded_chart(encoded: str) -> tuple[tuple[int, int], np.ndarray]:
+        try:
+            binary = base64.b64decode(encoded, validate=True)
+            with Image.open(io.BytesIO(binary)) as chart:
+                if chart.format != "PNG":
+                    raise ValueError("Chart is not a PNG image")
+                chart.load()  # Force decoding; checking the PNG header alone is insufficient.
+                pixels = np.asarray(
+                    chart.convert("RGB").resize((128, 96), Image.Resampling.LANCZOS),
+                    dtype=np.int16,
+                )
+                return chart.size, pixels
+        except (ValueError, OSError, UnidentifiedImageError) as exc:
+            raise RuntimeError(
+                f"Invalid published chart in {path.name}, cell {cell_number}"
+            ) from exc
+
+    for old, new in zip(old_figures, new_figures):
+        old_size, old_pixels = decoded_chart(old)
+        new_size, new_pixels = decoded_chart(new)
+        if (max(abs(a - b) for a, b in zip(old_size, new_size)) > 3
+                or np.abs(old_pixels - new_pixels).mean() > 3.0):
+            raise RuntimeError(f"Published chart differs in {path.name}, cell {cell_number}")
 
 
 def reproduce_notebook(path: Path, *, save: bool = True,

@@ -27,7 +27,13 @@ python scripts/data_processing.py
 python scripts/data_processing.py --ticker AAPL
 ```
 
-The source CSV is validated for required columns, parseable dates, finite numeric values, positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)` observations. Incomplete or contradictory bars are excluded without guessing replacement prices. The pipeline computes indicators on each ticker's chronological series independently:
+The source CSV is validated for required columns, explicit ISO year-first
+calendar dates (including non-zero-padded months/days), finite numeric values,
+positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)`
+observations. Relative dates, numeric timestamps, timezones, and intraday
+times are rejected to preserve one observation per trading day. Incomplete or
+contradictory bars are excluded without guessing replacement prices. The
+pipeline computes indicators on each ticker's chronological series independently:
 
 | Indicator | Definition / implementation |
 | --- | --- |
@@ -99,6 +105,8 @@ P(z_t\mid z_{t-1})P(z_{t-1}\mid x_{1:t-1}).
 $$
 
 Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Holdout filtering uses the preceding training and validation observations as historical context while keeping the HMM parameters fitted exclusively on training data. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
+Gaussian emission likelihoods are calculated from the fitted model's public
+mean and covariance parameters, without relying on internal hmmlearn methods.
 
 ## 4. Q-learning experiment
 
@@ -119,6 +127,9 @@ r_t = \mathrm{position}_{t}(\mathrm{Open}_{t+1}-\mathrm{Close}_t)
 $$
 
 Q-values are updated using the discounted next-state value for non-terminal steps. At the final step, the next-state bootstrap value is zero. To score the holdout period, the notebook disables both exploration and Q-table updates and compares one-share dollar profit/loss with a next-open buy-and-hold entry.
+Both strategies are marked to market at the last observed close. Positions
+still held at that close remain open; no hypothetical final sale or exit fee
+is included in either strategy's reported P/L.
 
 The implementation is intentionally a transparent research simulator; it can be extended with portfolio sizing, risk controls, and realistic order execution.
 
@@ -138,7 +149,7 @@ The same checks run automatically through [GitHub Actions](../.github/workflows/
 python -m scripts.refresh_notebooks
 ```
 
-`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them and checks the committed numerical text results and presence of valid chart images against the newly generated outputs.
+`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them, compares numerical text results, fully decodes the saved PNGs, and checks for material visual differences against the newly generated charts.
 
 ## References
 

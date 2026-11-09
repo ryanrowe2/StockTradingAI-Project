@@ -14,8 +14,10 @@ import pandas as pd
 
 if __package__:
     from .technical_indicators import add_technical_indicators
+    from .date_validation import parse_daily_dates
 else:
     from technical_indicators import add_technical_indicators
+    from date_validation import parse_daily_dates
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,9 +37,7 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
     df = df.copy()
-    df["Date"] = pd.to_datetime(df["Date"], format="mixed", errors="coerce")
-    if df["Date"].isna().any():
-        raise ValueError("Every Date must be present and parseable")
+    df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
     if df["Name"].isna().any() or df["Name"].astype(str).str.strip().eq("").any():
         raise ValueError("Every observation must have a ticker symbol")
     df["Name"] = df["Name"].astype(str).str.strip().str.upper()

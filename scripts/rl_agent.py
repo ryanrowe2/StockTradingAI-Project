@@ -13,6 +13,11 @@ import random
 import numpy as np
 import pandas as pd
 
+if __package__:
+    from .date_validation import parse_daily_dates
+else:
+    from date_validation import parse_daily_dates
+
 
 class SimpleTradingEnv:
     """Sequential one-share simulator with next-session-open execution."""
@@ -32,9 +37,7 @@ class SimpleTradingEnv:
             raise ValueError("transaction_cost must be a fraction between 0 and 1")
         self.data = data.copy()
         if "Date" in self.data:
-            self.data["Date"] = pd.to_datetime(self.data["Date"], format="mixed", errors="coerce")
-            if self.data["Date"].isna().any():
-                raise ValueError("Trading dates must be present and parseable")
+            self.data["Date"] = parse_daily_dates(self.data["Date"], context="Trading dates")
             self.data = self.data.sort_values("Date", kind="stable")
         self.data = self.data.reset_index(drop=True)
         if "Date" in self.data and self.data["Date"].duplicated().any():

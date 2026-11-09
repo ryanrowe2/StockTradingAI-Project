@@ -7,6 +7,7 @@ import base64
 import io
 import importlib
 import sys
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -17,8 +18,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from data_processing import DEFAULT_RAW_DATA, load_data, prepare_features  # noqa: E402
-from hmm_integration import fit_hmm_on_indicators, infer_filtered_regimes  # noqa: E402
+from data_processing import DEFAULT_RAW_DATA, load_data, prepare_features, validate_bars  # noqa: E402
+from date_validation import parse_daily_dates  # noqa: E402
+from hmm_integration import (  # noqa: E402
+    _gaussian_log_emissions, _validated_indicators,
+    fit_hmm_on_indicators, infer_filtered_regimes,
+)
 from model_training import (  # noqa: E402
     BASELINE_FEATURES, QuantileBinner, chronological_split,
     classification_metrics, fit_network, predict_up_probability, run_experiment,
@@ -140,6 +145,48 @@ def test_loader_parses_valid_mixed_date_formats_without_lexical_ordering():
     assert load_data(raw)["Date"].dt.day.tolist() == [2, 3, 10]
 
 
+@pytest.mark.parametrize("bad_date", [
+    20200102, "today", "03/04/2020", "2020-01-02 12:00",
+    pd.Timestamp("2020-01-02 12:00"), pd.Timestamp("2020-01-02", tz="UTC"),
+])
+def test_daily_calendar_dates_reject_ambiguous_or_non_daily_inputs(bad_date):
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        parse_daily_dates(pd.Series([bad_date], dtype=object))
+
+
+def test_daily_dates_accept_explicit_year_first_dates_and_date_objects():
+    result = parse_daily_dates(pd.Series([
+        "2020-1-2", "2020-01-03", date(2020, 1, 4), np.datetime64("2020-01-05"),
+    ]))
+    assert result.dt.strftime("%Y-%m-%d").tolist() == [
+        "2020-01-02", "2020-01-03", "2020-01-04", "2020-01-05",
+    ]
+
+
+def test_all_daily_date_entry_points_reject_intraday_or_relative_dates():
+    bars = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-02 12:00", "2020-01-03"],
+        "Name": ["AAA"] * 3,
+        "Open": [10., 10., 10.], "High": [12., 12., 12.],
+        "Low": [9., 9., 9.], "Close": [11., 11., 11.],
+        "Volume": [100, 100, 100],
+    })
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        validate_bars(bars)
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        add_technical_indicators(bars)
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        _validated_indicators(bars.assign(MA_20=[1., 2., 3.]), ("MA_20",))
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        SimpleTradingEnv(bars)
+
+    frame = prepare_features(synthetic_bars(70))
+    frame["Target_Date"] = frame["Target_Date"].astype(object)
+    frame.loc[frame.index[0], "Target_Date"] = "today"
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        chronological_split(frame)
+
+
 def test_loader_excludes_nonfinite_prices_and_volume(tmp_path: Path):
     data = synthetic_bars(70)
     data["Volume"] = data["Volume"].astype(float)
@@ -227,6 +274,25 @@ def test_hmm_filtering_is_prefix_invariant():
     assert prefix["Market_Regime"].tolist() == full["Market_Regime"].iloc[:72].tolist()
 
 
+def test_gaussian_log_emissions_use_public_model_parameters():
+    from scipy.stats import norm
+
+    class GaussianParameters:
+        covariance_type = "diag"
+        means_ = np.array([[1., 2.], [4., 6.]])
+        covars_ = np.array([np.diag([1., 4.]), np.diag([9., 16.])])
+
+    observations = np.array([[1., 3.], [5., 8.]])
+    expected = np.column_stack([
+        norm.logpdf(observations, loc=GaussianParameters.means_[state],
+                    scale=np.sqrt(np.diag(GaussianParameters.covars_[state]))).sum(axis=1)
+        for state in range(2)
+    ])
+    np.testing.assert_allclose(
+        _gaussian_log_emissions(GaussianParameters(), observations), expected, atol=1e-12
+    )
+
+
 def test_hmm_filtering_preserves_duplicate_input_index_labels():
     frame = prepare_features(synthetic_bars()).query("Name == 'AAA'").reset_index(drop=True)
     model, _ = fit_hmm_on_indicators(frame.iloc[:65], n_components=2)
@@ -299,6 +365,17 @@ def test_rl_positions_reward_terminal_and_transaction_costs():
     assert state[-1] == 0 and done
     with pytest.raises(RuntimeError):
         env.step("hold")
+
+
+def test_terminal_open_position_is_marked_to_market_without_forced_sale():
+    env = SimpleTradingEnv(pd.DataFrame({
+        "Open": [10., 11., 12.], "Close": [10., 11., 14.],
+    }), transaction_cost=0.01)
+    _, first_reward, done, _ = env.step("buy")
+    assert not done
+    _, final_reward, done, info = env.step("hold")
+    assert done and info["position"] == 1 and info["fee"] == 0
+    assert first_reward + final_reward == pytest.approx(14 - 11 * 1.01)
 
 
 def test_trading_disallows_actions_that_cannot_execute():
@@ -478,3 +555,27 @@ def test_notebook_check_detects_stale_published_text():
     with pytest.raises(RuntimeError, match="Published chart count differs"):
         _verify_outputs([dict(output_type="display_data", data={"image/png": "unused"})],
                         [], Path("example.ipynb"), 1)
+
+
+def test_notebook_check_rejects_corrupted_or_materially_changed_pngs():
+    from PIL import Image
+    from scripts.refresh_notebooks import _verify_outputs
+
+    def png_output(color):
+        buffer = io.BytesIO()
+        Image.new("RGB", (100, 60), color=color).save(buffer, format="PNG")
+        return {"output_type": "display_data", "data": {
+            "image/png": base64.b64encode(buffer.getvalue()).decode("ascii")
+        }}
+
+    white = png_output("white")
+    black = png_output("black")
+    _verify_outputs([white], [white], Path("example.ipynb"), 1)
+    with pytest.raises(RuntimeError, match="Published chart differs"):
+        _verify_outputs([white], [black], Path("example.ipynb"), 1)
+
+    corrupt = {"output_type": "display_data", "data": {
+        "image/png": base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+    }}
+    with pytest.raises(RuntimeError, match="Invalid published chart"):
+        _verify_outputs([white], [corrupt], Path("example.ipynb"), 1)
