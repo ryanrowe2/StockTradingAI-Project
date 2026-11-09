@@ -105,9 +105,17 @@ class QuantileBinner:
             values = df[feature].to_numpy(dtype=float)
             if not len(values) or not np.isfinite(values).all():
                 raise ValueError(f"Feature {feature} contains missing/nonfinite values")
-            new_edges[feature] = np.unique(
-                np.quantile(values, np.linspace(0, 1, self.num_bins + 1)[1:-1])
-            )
+            quantiles = np.linspace(0, 1, self.num_bins + 1)[1:-1]
+            with np.errstate(over="ignore", invalid="ignore"):
+                edges = np.quantile(values, quantiles)
+            if not np.isfinite(edges).all():
+                # Scaling avoids overflowing a subtraction between two finite
+                # values of opposite sign during quantile interpolation.
+                scale = np.max(np.abs(values))
+                edges = np.quantile(values / scale, quantiles) * scale
+            if not np.isfinite(edges).all():
+                raise ValueError(f"Could not calculate finite quantiles for {feature}")
+            new_edges[feature] = np.unique(edges)
         self.edges = new_edges
         return self
 
@@ -157,7 +165,14 @@ def predict_up_probability(network: DiscreteBayesianNetwork, frame: pd.DataFrame
 
 
 def classification_metrics(labels: pd.Series, probabilities: np.ndarray) -> dict[str, float]:
-    actual = labels.to_numpy(dtype=int)
+    supplied_labels = labels.to_numpy()
+    if not np.isin(supplied_labels, (0, 1)).all():
+        raise ValueError("Classification labels must be binary (0 or 1)")
+    actual = supplied_labels.astype(int)
+    probabilities = np.asarray(probabilities, dtype=float)
+    if (probabilities.shape != actual.shape or not np.isfinite(probabilities).all()
+            or ((probabilities < 0) | (probabilities > 1)).any()):
+        raise ValueError("Probabilities must be finite values between 0 and 1 for every label")
     predictions = (probabilities >= 0.5).astype(int)
     result = {
         "accuracy": float(accuracy_score(actual, predictions)),

@@ -2,7 +2,8 @@
 
 This in-process runner also works where network-isolated environments prevent
 the Jupyter kernel message sockets from starting. It executes each code cell
-in sequence, captures stdout and generated figures, and validates the result.
+in sequence, captures text streams, rich displays, and generated figures,
+and validates the result.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 import base64
+import codeop
 import io
 import os
 import sys
@@ -32,27 +34,22 @@ ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOKS = ROOT / "notebooks"
 
 
-def _display(value: object) -> None:
-    """Capture human-readable tables in the notebook's stdout output."""
-    if hasattr(value, "to_string"):
-        print(value.to_string())
-    else:
-        print(value)
-
-
 class _StreamCapture(io.TextIOBase):
     """Collect ordered stdout/stderr writes as notebook stream outputs."""
 
-    def __init__(self, name: str, events: list[list[str]]):
+    def __init__(self, name: str, events: list[nbformat.NotebookNode]):
         self.name = name
         self.events = events
 
     def write(self, message: str) -> int:
         if message:
-            if self.events and self.events[-1][0] == self.name:
-                self.events[-1][1] += message
+            if (self.events and self.events[-1].output_type == "stream"
+                    and self.events[-1].name == self.name):
+                self.events[-1].text += message
             else:
-                self.events.append([self.name, message])
+                self.events.append(nbformat.v4.new_output(
+                    "stream", name=self.name, text=message,
+                ))
         return len(message)
 
 
@@ -61,7 +58,7 @@ def _remove_inline_magic(source: str) -> str:
     string_lines: set[int] = set()
     try:
         for token in tokenize.generate_tokens(io.StringIO(source).readline):
-            if token.type == tokenize.STRING:
+            if token.type in (tokenize.STRING, getattr(tokenize, "FSTRING_MIDDLE", -1)):
                 string_lines.update(range(token.start[0], token.end[0] + 1))
     except tokenize.TokenError:
         # Parsing the remaining source will report malformed Python below.
@@ -72,8 +69,10 @@ def _remove_inline_magic(source: str) -> str:
     )
 
 
-def _execute_cell(source: str, path: Path, variables: dict) -> object:
+def _execute_cell(source: str, path: Path, variables: dict,
+                  compiler: codeop.Compile | None = None) -> object:
     """Execute a cell and return its final expression for Jupyter-style display."""
+    compiler = compiler if compiler is not None else codeop.Compile()
     tree = ast.parse(source, filename=str(path))
     meaningful = [token for token in tokenize.generate_tokens(io.StringIO(source).readline)
                   if token.type not in (tokenize.ENDMARKER, tokenize.NEWLINE,
@@ -82,7 +81,7 @@ def _execute_cell(source: str, path: Path, variables: dict) -> object:
                       and meaningful[-1].string == ";")
     if (not tree.body or not isinstance(tree.body[-1], ast.Expr)
             or suppressed):
-        exec(compile(tree, str(path), "exec"), variables)
+        exec(compiler(tree, str(path), "exec"), variables)
         return None
 
     capture_name = "__notebook_runner_last_expression__"
@@ -95,7 +94,7 @@ def _execute_cell(source: str, path: Path, variables: dict) -> object:
     )
     ast.fix_missing_locations(tree)
     try:
-        exec(compile(tree, str(path), "exec"), variables)
+        exec(compiler(tree, str(path), "exec"), variables)
         return variables[capture_name]
     finally:
         if previous is missing:
@@ -112,8 +111,6 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
         for output in outputs:
             saved = dict(output)
             saved.pop("execution_count", None)
-            if "text" in saved:
-                saved["text"] = str(saved["text"]).strip()
             if "data" in saved:
                 data = dict(saved["data"])
                 data.pop("image/png", None)  # Compare PNG pixels separately.
@@ -172,12 +169,13 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
         raise ValueError("Notebook verification cannot save or overwrite files")
     path = Path(path).resolve()
     notebook = nbformat.read(path, as_version=4)
-    variables = {"__name__": "__main__", "display": _display}
+    variables = {"__name__": "__main__"}
     execution_count = 0
     previous_directory = Path.cwd()
     previous_sys_path = sys.path.copy()
     existing_figures = set(plt.get_fignums())
     formatter = DisplayFormatter()
+    compiler = codeop.Compile()
     try:
         # Relative data paths inside a notebook resolve beside that notebook,
         # regardless of where a caller invokes this helper.
@@ -188,35 +186,53 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
             execution_count += 1
             original_outputs = list(cell.outputs)
             source = _remove_inline_magic(cell.source)
-            stream_events: list[list[str]] = []
+            outputs: list[nbformat.NotebookNode] = []
+
+            def capture_display(*values: object) -> None:
+                for value in values:
+                    data, metadata = formatter.format(value)
+                    if data:
+                        outputs.append(nbformat.v4.new_output(
+                            "display_data", data=data, metadata=metadata,
+                        ))
+
+            def capture_figures() -> None:
+                for number in list(plt.get_fignums()):
+                    if number in existing_figures:
+                        continue
+                    figure = plt.figure(number)
+                    buffer = io.BytesIO()
+                    figure.savefig(buffer, format="png", dpi=110, bbox_inches="tight")
+                    outputs.append(nbformat.v4.new_output(
+                        "display_data", data={
+                            "image/png": base64.b64encode(buffer.getvalue()).decode("ascii"),
+                            "text/plain": "Experiment visualization",
+                        }, metadata={},
+                    ))
+                    plt.close(figure)
+
+            variables["display"] = capture_display
+            previous_show = plt.show
             try:
-                with (redirect_stdout(_StreamCapture("stdout", stream_events)),
-                      redirect_stderr(_StreamCapture("stderr", stream_events))):
-                    expression_result = _execute_cell(source, path, variables)
+                try:
+                    plt.show = lambda *args, **kwargs: capture_figures()
+                    with (redirect_stdout(_StreamCapture("stdout", outputs)),
+                          redirect_stderr(_StreamCapture("stderr", outputs))):
+                        expression_result = _execute_cell(source, path, variables, compiler)
+                        if expression_result is not None:
+                            data, metadata = formatter.format(expression_result)
+                            if data:
+                                outputs.append(nbformat.v4.new_output(
+                                    "execute_result", data=data, metadata=metadata,
+                                    execution_count=execution_count,
+                                ))
+                        # Inline Matplotlib also publishes remaining open figures
+                        # automatically at the end of a notebook cell.
+                        capture_figures()
+                finally:
+                    plt.show = previous_show
             except Exception as error:
                 raise RuntimeError(f"Notebook {path.name}, cell {execution_count}") from error
-            outputs = [nbformat.v4.new_output("stream", name=name, text=message)
-                       for name, message in stream_events]
-            if expression_result is not None:
-                data, metadata = formatter.format(expression_result)
-                if data:
-                    outputs.append(nbformat.v4.new_output(
-                        "execute_result", data=data, metadata=metadata,
-                        execution_count=execution_count,
-                    ))
-            for number in plt.get_fignums():
-                if number in existing_figures:
-                    continue
-                figure = plt.figure(number)
-                buffer = io.BytesIO()
-                figure.savefig(buffer, format="png", dpi=110, bbox_inches="tight")
-                outputs.append(nbformat.v4.new_output(
-                    "display_data", data={
-                        "image/png": base64.b64encode(buffer.getvalue()).decode("ascii"),
-                        "text/plain": "Experiment visualization",
-                    }, metadata={},
-                ))
-                plt.close(figure)
             if check:
                 _verify_outputs(original_outputs, outputs, path, execution_count)
             cell.outputs = outputs

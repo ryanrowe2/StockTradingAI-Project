@@ -46,15 +46,20 @@ def _gaussian_log_emissions(model: GaussianHMM, observations: np.ndarray) -> np.
 
 def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
                           *, keep_missing: bool = False) -> pd.DataFrame:
+    if not indicators or len(set(indicators)) != len(indicators):
+        raise ValueError("HMM indicators must be a nonempty set of distinct columns")
     absent = set(indicators) - set(frame.columns)
     if absent:
         raise ValueError(f"Missing HMM indicators: {sorted(absent)}")
     if "Name" in frame:
         symbols = frame["Name"]
-        if (symbols.isna().any() or symbols.astype(str).str.strip().eq("").any()
-                or symbols.nunique() != 1):
+        normalized = symbols.astype(str).str.strip().str.upper()
+        if (symbols.isna().any() or normalized.eq("").any()
+                or normalized.nunique() != 1):
             raise ValueError("Fit/infer HMM regimes for one ticker with a valid name at a time")
     ordered = frame.copy()
+    if "Name" in ordered:
+        ordered["Name"] = normalized
     if "Date" in ordered:
         ordered["Date"] = parse_daily_dates(ordered["Date"], context="HMM dates")
         ordered = ordered.sort_values("Date", kind="stable")
@@ -79,6 +84,8 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
     rows = df.reset_index(drop=True)
     ordered = _validated_indicators(rows, indicators, keep_missing=True)
     output = rows.copy()
+    if "Name" in output:
+        output["Name"] = output["Name"].astype(str).str.strip().str.upper()
     output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
     complete = ordered[list(indicators)].notna().all(axis=1)
     if not complete.any():

@@ -8,6 +8,7 @@ This is an experimental simulator, not an execution or profitability claim.
 
 from __future__ import annotations
 
+import math
 import random
 from numbers import Integral
 
@@ -31,12 +32,15 @@ class SimpleTradingEnv:
             raise ValueError("The trading environment needs at least two daily open/close bars")
         if "Name" in data:
             symbols = data["Name"]
-            if (symbols.isna().any() or symbols.astype(str).str.strip().eq("").any()
-                    or symbols.nunique() != 1):
+            normalized_symbols = symbols.astype(str).str.strip().str.upper()
+            if (symbols.isna().any() or normalized_symbols.eq("").any()
+                    or normalized_symbols.nunique() != 1):
                 raise ValueError("A trading episode must contain exactly one ticker with a valid name")
         if not 0 <= transaction_cost < 1:
             raise ValueError("transaction_cost must be a fraction between 0 and 1")
         self.data = data.copy()
+        if "Name" in self.data:
+            self.data["Name"] = normalized_symbols
         if "Date" in self.data:
             self.data["Date"] = parse_daily_dates(self.data["Date"], context="Trading dates")
             self.data = self.data.sort_values("Date", kind="stable")
@@ -87,16 +91,20 @@ class SimpleTradingEnv:
         execution_price = float(next_bar["Open"])
         next_close = float(next_bar["Close"])
         # Existing holdings remain exposed to the overnight price change.
+        next_position = self.position
         overnight_pnl = self.position * (execution_price - decision_close)
         fee = 0.0
         if action == "buy":
-            self.position = 1
+            next_position = 1
             fee = execution_price * self.transaction_cost
         elif action == "sell":
-            self.position = 0
+            next_position = 0
             fee = execution_price * self.transaction_cost
-        intraday_pnl = self.position * (next_close - execution_price)
+        intraday_pnl = next_position * (next_close - execution_price)
         reward = overnight_pnl + intraday_pnl - fee
+        if not np.isfinite(reward):
+            raise ValueError("Trading reward must remain finite")
+        self.position = next_position
         self.index += 1
         self.done = self.index == len(self.data) - 1
         return self.get_state(), float(reward), self.done, {
@@ -168,6 +176,9 @@ class QLearningAgent:
             raise ValueError(f"Unrecognized action: {action}")
         next_state = self.get_state(next_state_features)
         valid_next_actions = self._valid_actions(next_state)
+        expected_position = {"buy": 1, "sell": 0, "hold": state[-1]}[action]
+        if next_state[-1] != expected_position:
+            raise ValueError("Next position is inconsistent with the trading action")
         try:
             reward = float(reward)
         except (TypeError, ValueError) as exc:
@@ -178,7 +189,11 @@ class QLearningAgent:
         future = (0.0 if done else max(self.q_table.get(next_state, {}).get(candidate, 0.0)
                                       for candidate in valid_next_actions))
         prior = self.q_table.get(state, {}).get(action, 0.0)
-        updated = prior + self.alpha * (reward + self.gamma * future - prior)
+        try:
+            updated = math.fsum(((1 - self.alpha) * prior,
+                                 self.alpha * reward, self.alpha * self.gamma * future))
+        except OverflowError as exc:
+            raise ValueError("Q-value update must remain finite") from exc
         if not np.isfinite(updated):
             raise ValueError("Q-value update must remain finite")
         if not done:

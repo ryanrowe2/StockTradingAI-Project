@@ -70,6 +70,8 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Rows are sorted chronologically within each symbol. No rolling window,
     shift, or exponential average crosses a symbol boundary.
     """
+    if df.empty:
+        raise ValueError("A nonempty indicator DataFrame is required")
     df = df.copy()
     if "Date" in df:
         df["Date"] = parse_daily_dates(df["Date"], context="Indicator dates")

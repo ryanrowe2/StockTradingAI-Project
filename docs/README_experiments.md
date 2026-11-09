@@ -43,8 +43,9 @@ Validation also rejects a ticker if every one of its price bars is invalid.
 Single-ticker selection is applied before validating OHLCV records and dates,
 so unrelated symbols cannot cause a selected ticker's run to fail. Literal
 symbols such as `NA` remain ticker identifiers instead of being parsed as
-missing values; indicator calculations also normalize whitespace and case
-before grouping observations by ticker.
+missing values, while missing-name placeholders such as `N/A`, `NaN`, and
+`NULL` are rejected. Indicator, HMM, and trading inputs normalize whitespace
+and case before grouping or checking ticker identity.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
@@ -142,7 +143,9 @@ The `SimpleTradingEnv` has three actions:
 
 Q-learning state components must be integers. Both the trading environment and
 the agent reject fractional, string, and boolean components instead of
-silently converting them to bins.
+silently converting them to bins. Q-learning updates also enforce action-to-position
+consistency, including at the terminal step. The trading environment refuses
+to advance its state if a price calculation yields a nonfinite reward.
 
 Decisions made after observing a daily close are filled at the next trading session's open. Holdings existing before an action remain exposed to the overnight price change. The reward for a step is:
 
@@ -179,7 +182,7 @@ The same checks run automatically through [GitHub Actions](../.github/workflows/
 python -m scripts.refresh_notebooks
 ```
 
-`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them. The in-process runner captures stdout, stderr, final-expression results (including rich MIME representations), and Matplotlib PNGs. It compares saved output order and content, fully decodes saved PNGs, and detects both broad and localized changes to generated charts. Jupyter's `%matplotlib inline` directive is removed only when it appears as a standalone magic command.
+`python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them. The in-process runner captures stdout, stderr, explicit `display()` calls, final-expression results (including rich MIME representations), and Matplotlib PNGs in their execution order. It compares saved output order and text exactly, fully decodes saved PNGs, and detects both broad and localized changes to generated charts. Jupyter's `%matplotlib inline` directive is removed only when it is an actual standalone magic command, never when it appears inside a string. Python future-import compiler flags persist from one cell to the next.
 The `reproduce_notebook(path, check=True)` Python helper resolves relative data
 paths from the notebook's directory and restores the caller's working directory
 and `sys.path` import search path.

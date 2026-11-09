@@ -141,6 +141,11 @@ def test_direct_indicator_api_normalizes_tickers_before_grouping():
         add_technical_indicators(duplicate)
 
 
+def test_direct_indicator_api_rejects_empty_frame():
+    with pytest.raises(ValueError, match="nonempty indicator DataFrame"):
+        add_technical_indicators(pd.DataFrame(columns=["Name", "Date", "Close"]))
+
+
 def test_single_ticker_indicators_reject_duplicate_dates_without_name_column():
     bars = synthetic_bars(3).query("Name == 'AAA'").drop(columns="Name").reset_index(drop=True)
     bars.loc[1, "Date"] = bars.loc[0, "Date"]
@@ -210,6 +215,9 @@ def test_csv_loader_preserves_literal_ticker_na():
         assert loaded["Name"].tolist() == ["NA"]
     with pytest.raises(ValueError, match="ticker symbol"):
         load_data(io.StringIO(source.replace(",NA,", ",,")))
+    for marker in ("N/A", "NaN", "NULL", "None"):
+        with pytest.raises(ValueError, match="ticker symbol"):
+            load_data(io.StringIO(source.replace(",NA,", f",{marker},")))
 
 
 def test_loader_excludes_inconsistent_prices_and_rejects_invalid_dates(tmp_path: Path):
@@ -1053,3 +1061,156 @@ def test_notebook_check_catches_changed_rich_text_results():
     after = [{"output_type": "execute_result", "data": {"text/plain": "accuracy: 0.10"}}]
     with pytest.raises(RuntimeError, match="Published results differ"):
         _verify_outputs(before, after, Path("results.ipynb"), 2)
+
+
+def test_q_update_rejects_impossible_position_transitions():
+    agent = QLearningAgent()
+    invalid = [((0,), "buy", (0,)), ((1,), "sell", (1,)),
+               ((0,), "hold", (1,)), ((1,), "hold", (0,))]
+    for state, action, next_state in invalid:
+        for terminal in (False, True):
+            with pytest.raises(ValueError, match="inconsistent with the trading action"):
+                agent.update_q_value(state, action, 1.0, next_state, done=terminal)
+    assert agent.q_table == {}
+
+
+def test_trading_rejects_reward_overflow_without_mutating_episode():
+    bars = pd.DataFrame({"Open": [1., 1e308], "Close": [1., 1e-308]})
+    env = SimpleTradingEnv(bars, transaction_cost=0.9)
+    before = (env.index, env.position, env.done)
+    with pytest.raises(ValueError, match="Trading reward must remain finite"):
+        env.step("buy")
+    assert (env.index, env.position, env.done) == before
+
+
+def test_q_update_avoids_intermediate_overflow_for_finite_result():
+    agent = QLearningAgent(alpha=0.1, gamma=0)
+    agent.q_table[(0,)] = {"buy": -1e308, "sell": 0., "hold": 0.}
+    agent.update_q_value((0,), "buy", 1e308, (1,), done=True)
+    assert agent.q_table[(0,)]["buy"] == pytest.approx(-8e307)
+
+
+def test_quantile_binner_avoids_overflow_with_finite_large_values():
+    frame = pd.DataFrame({"A": [-1e308, -1e308, 1e308, 1e308]})
+    binner = QuantileBinner(2).fit(frame, ("A",))
+    assert np.isfinite(binner.edges["A"]).all()
+    assert binner.edges["A"] == pytest.approx([0.0])
+    assert binner.transform(frame, ("A",))["A"].tolist() == [0, 0, 1, 1]
+
+
+@pytest.mark.parametrize("invalid", [np.nan, np.inf, -0.1, 1.1])
+def test_metrics_reject_invalid_probability_values(invalid):
+    with pytest.raises(ValueError, match="Probabilities must be finite"):
+        classification_metrics(pd.Series([0, 0]), np.array([invalid, 0.2]))
+
+
+def test_metrics_reject_fractional_classification_labels():
+    with pytest.raises(ValueError, match="Classification labels must be binary"):
+        classification_metrics(pd.Series([0.5, 1.0]), np.array([0.2, 0.8]))
+
+
+def test_hmm_and_trading_normalize_single_ticker_aliases():
+    frame = prepare_features(synthetic_bars()).query("Name == 'AAA'").reset_index(drop=True)
+    frame.loc[::2, "Name"] = " aaa "
+    valid = _validated_indicators(frame, ("MA_20", "RSI_14", "MACD"))
+    assert set(valid["Name"]) == {"AAA"}
+    model, inferred = fit_hmm_on_indicators(frame.iloc[:75], n_components=2)
+    assert set(inferred["Name"]) == {"AAA"}
+    assert model.n_components == 2
+    env = SimpleTradingEnv(frame.iloc[:10], state_columns=())
+    assert set(env.data["Name"]) == {"AAA"}
+
+
+def test_hmm_rejects_empty_or_duplicate_indicator_selection():
+    frame = pd.DataFrame({"MA_20": [1.] * 12})
+    for indicators in ((), ("MA_20", "MA_20")):
+        with pytest.raises(ValueError, match="nonempty set of distinct columns"):
+            fit_hmm_on_indicators(frame, indicators=indicators, n_components=2)
+
+
+def test_notebook_magic_preserves_fstring_multiline_contents(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    path = tmp_path / "fstring.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source='value = f"""\n%matplotlib inline\n"""\nprint(value)',
+        execution_count=1,
+        outputs=[nbformat.v4.new_output("stream", name="stdout",
+                                        text="\n%matplotlib inline\n\n")],
+    )]), path)
+    reproduce_notebook(path, check=True)
+
+
+def test_notebook_compiler_uses_future_flags_only_when_imported(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    missing = tmp_path / "without_future.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source="def func(x: UndefinedAnnotation): pass",
+    )]), missing)
+    with pytest.raises(RuntimeError, match="Notebook without_future.ipynb") as error:
+        reproduce_notebook(missing, save=False)
+    assert isinstance(error.value.__cause__, NameError)
+
+    allowed = tmp_path / "with_future.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[
+        nbformat.v4.new_code_cell("from __future__ import annotations"),
+        nbformat.v4.new_code_cell(
+            "def func(x: UndefinedAnnotation): pass\nprint(func.__annotations__)",
+        ),
+    ]), allowed)
+    reproduced = reproduce_notebook(allowed, save=False)
+    assert "UndefinedAnnotation" in reproduced.cells[1].outputs[0].text
+
+
+def test_notebook_explicit_display_uses_rich_output_not_stdout(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    path = tmp_path / "rich_display.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        "import pandas as pd\ndisplay(pd.DataFrame({'A': [1]}))",
+    )]), path)
+    result = reproduce_notebook(path, save=False)
+    outputs = result.cells[0].outputs
+    assert len(outputs) == 1
+    assert outputs[0].output_type == "display_data"
+    assert "text/html" in outputs[0].data
+
+
+def test_notebook_figure_capture_respects_show_order_and_closed_figures(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    path = tmp_path / "show_order.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        "import matplotlib.pyplot as plt\n"
+        "fig, ax = plt.subplots()\nax.plot([1, 2])\n"
+        "plt.show()\nplt.close(fig)\nprint('after display')",
+    )]), path)
+    outputs = reproduce_notebook(path, save=False).cells[0].outputs
+    assert [out.output_type for out in outputs] == ["display_data", "stream"]
+    assert "image/png" in outputs[0].data
+    assert outputs[1].text == "after display\n"
+
+
+def test_notebook_output_check_detects_whitespace_changes():
+    import nbformat
+    from scripts.refresh_notebooks import _verify_outputs
+
+    old = [nbformat.v4.new_output("stream", name="stdout", text="Profit: 1.00\n")]
+    new = [nbformat.v4.new_output("stream", name="stdout", text="  Profit: 1.00")]
+    with pytest.raises(RuntimeError, match="Published results differ"):
+        _verify_outputs(old, new, Path("output.ipynb"), 1)
+
+
+def test_eda_notebook_includes_saved_aapl_price_time_series():
+    import nbformat
+
+    notebook = nbformat.read(ROOT / "notebooks" / "EDA_Preprocessing.ipynb", as_version=4)
+    plotting = [cell for cell in notebook.cells if cell.cell_type == "code"
+                and "AAPL" in cell.source and "ax.plot" in cell.source]
+    assert len(plotting) == 1
+    assert any("image/png" in output.get("data", {}) for output in plotting[0].outputs)

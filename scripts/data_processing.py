@@ -25,6 +25,7 @@ DEFAULT_RAW_DATA = PROJECT_ROOT / "data/raw/all_stocks_2006-01-01_to_2018-01-01.
 DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
 REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
 MODEL_FEATURES = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
+MISSING_TICKER_MARKERS = frozenset({"N/A", "NAN", "NULL", "NONE"})
 
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -38,7 +39,10 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
-    if df["Name"].isna().any() or df["Name"].astype(str).str.strip().eq("").any():
+    if (df["Name"].isna().any()
+            or df["Name"].astype(str).str.strip().str.upper().isin(
+                MISSING_TICKER_MARKERS | {""}
+            ).any()):
         raise ValueError("Every observation must have a ticker symbol")
     df["Name"] = df["Name"].astype(str).str.strip().str.upper()
     if df.duplicated(["Name", "Date"]).any():
