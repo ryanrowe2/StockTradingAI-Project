@@ -15,9 +15,13 @@ import pandas as pd
 if __package__:
     from .technical_indicators import add_technical_indicators
     from .date_validation import parse_daily_dates
+    from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
+    from .ticker_validation import normalize_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
+    from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
+    from ticker_validation import normalize_ticker_symbols
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +29,6 @@ DEFAULT_RAW_DATA = PROJECT_ROOT / "data/raw/all_stocks_2006-01-01_to_2018-01-01.
 DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
 REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
 MODEL_FEATURES = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
-MISSING_TICKER_MARKERS = frozenset({"N/A", "NAN", "NULL", "NONE"})
 
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -39,12 +42,9 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
-    if (df["Name"].isna().any()
-            or df["Name"].astype(str).str.strip().str.upper().isin(
-                MISSING_TICKER_MARKERS | {""}
-            ).any()):
-        raise ValueError("Every observation must have a ticker symbol")
-    df["Name"] = df["Name"].astype(str).str.strip().str.upper()
+    df["Name"] = normalize_ticker_symbols(
+        df["Name"], context="Every observation must have a ticker symbol",
+    )
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
     input_tickers = set(df["Name"])

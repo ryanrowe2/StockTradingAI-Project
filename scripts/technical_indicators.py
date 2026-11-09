@@ -7,8 +7,10 @@ import pandas as pd
 
 if __package__:
     from .date_validation import parse_daily_dates
+    from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
+    from ticker_validation import normalize_ticker_symbols
 
 
 def compute_moving_average(df: pd.DataFrame, window: int = 20, column: str = "Close") -> pd.Series:
@@ -81,9 +83,9 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         return _one_symbol_indicators(df.sort_values("Date") if "Date" in df else df)
     if "Date" not in df:
         raise ValueError("Date is required for multi-ticker indicators")
-    if df["Name"].isna().any() or df["Name"].astype(str).str.strip().eq("").any():
-        raise ValueError("Every indicator observation must have a ticker name")
-    df["Name"] = df["Name"].astype(str).str.strip().str.upper()
+    df["Name"] = normalize_ticker_symbols(
+        df["Name"], context="Every indicator observation must have a ticker name",
+    )
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations in indicator input")
     return pd.concat(

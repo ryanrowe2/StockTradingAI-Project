@@ -17,8 +17,10 @@ import pandas as pd
 
 if __package__:
     from .date_validation import parse_daily_dates
+    from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
+    from ticker_validation import normalize_ticker_symbols
 
 
 class SimpleTradingEnv:
@@ -32,9 +34,10 @@ class SimpleTradingEnv:
             raise ValueError("The trading environment needs at least two daily open/close bars")
         if "Name" in data:
             symbols = data["Name"]
-            normalized_symbols = symbols.astype(str).str.strip().str.upper()
-            if (symbols.isna().any() or normalized_symbols.eq("").any()
-                    or normalized_symbols.nunique() != 1):
+            normalized_symbols = normalize_ticker_symbols(
+                symbols, context="A trading episode must contain exactly one ticker with a valid name",
+            )
+            if normalized_symbols.nunique() != 1:
                 raise ValueError("A trading episode must contain exactly one ticker with a valid name")
         if not 0 <= transaction_cost < 1:
             raise ValueError("transaction_cost must be a fraction between 0 and 1")
@@ -175,6 +178,8 @@ class QLearningAgent:
         if action not in self._valid_actions(state):
             raise ValueError(f"Unrecognized action: {action}")
         next_state = self.get_state(next_state_features)
+        if len(next_state) != len(state):
+            raise ValueError("Current and next trading states must have the same dimensions")
         valid_next_actions = self._valid_actions(next_state)
         expected_position = {"buy": 1, "sell": 0, "hold": state[-1]}[action]
         if next_state[-1] != expected_position:
@@ -215,10 +220,16 @@ class QLearningAgent:
         for _ in range(steps):
             action = self.choose_action(state, explore=train)
             next_state, reward, done, _ = env.step(action)
+            try:
+                next_total_reward = math.fsum((total_reward, reward))
+            except OverflowError as exc:
+                raise ValueError("Total trading reward must remain finite") from exc
+            if not np.isfinite(next_total_reward):
+                raise ValueError("Total trading reward must remain finite")
             if train:
                 self.update_q_value(state, action, reward, next_state, done)
             state = next_state
-            total_reward += reward
+            total_reward = next_total_reward
             if done:
                 break
         return float(total_reward)

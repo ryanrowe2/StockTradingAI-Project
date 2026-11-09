@@ -62,13 +62,13 @@ Two discrete Bayesian networks support a controlled feature-set comparison:
 
 Both use an explicit feature-to-target directed graph. Price-relative features allow observations from differently priced stocks to share meaningful bins. The training workflow estimates conditional probability tables with a **Bayesian Dirichlet equivalent uniform (BDeu) prior** and selects equivalent sample size using validation data.
 
-To make the comparison reproducible, the same chronological partitions and training-fitted discretization are used throughout. The final report includes accuracy, balanced accuracy, precision, recall, F1, ROC AUC, and a majority-class benchmark.
+Both feature sets use the same chronological partitions. For validation-based model selection, quantile bins are fitted on training data only. After selecting the prior strength, the bins and model are refitted on the combined training and validation observations before the final test evaluation. The report includes accuracy, balanced accuracy, precision, recall, F1, ROC AUC, and a majority-class benchmark.
 
 **Implementation:** [`scripts/model_training.py`](scripts/model_training.py)
 
 ### 2. Hidden Markov market regimes
 
-The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. Model parameters are fitted on a complete-indicator training sequence and can then be applied to later observations; filtering can also advance through missing observations. Single-ticker inputs normalize ticker spelling and case consistently with the data pipeline.
+The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. Model parameters are fitted on a complete-indicator training sequence and can then be applied to later observations; filtering can also advance through missing observations. The fitting helper records the ordered indicator names and rejects incompatible inference feature orders. Single-ticker inputs normalize ticker spelling and case consistently with the data pipeline.
 
 The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates regime assignments for a single ticker, including a separate later period.
 
@@ -76,7 +76,7 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 
 ### 3. Q-learning trading simulator
 
-The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. State components must be actual integers, and position transitions and Q-value updates are checked for validity. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs, rejecting nonfinite rewards before advancing an episode.
+The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. State components must be actual integers, and transition dimensions, position changes, and Q-value updates are checked for validity. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs, rejecting nonfinite step and cumulative rewards.
 
 The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
 Both outcomes are marked to the final observed close. A share still held at
@@ -136,7 +136,10 @@ When `--ticker` is specified, selection happens before price-bar validation,
 so invalid records belonging only to other symbols do not block the experiment.
 CSV parsing preserves legitimate ticker strings such as `NA`, which pandas
 otherwise interprets as missing values, while rejecting explicit placeholders
-such as `N/A`, `NaN`, and `NULL`.
+such as `N/A`, `NaN`, and `NULL`. The same ticker-name validation applies to
+direct indicator, HMM, and trading-environment calls. Of the 93,612 source
+records, 93,435 pass OHLCV validation; 177 incomplete or contradictory rows
+are excluded without modifying the raw files.
 
 For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
 environment, install `requirements-repro-py312.txt` instead of the flexible
@@ -154,7 +157,7 @@ python -m pytest tests -q
 
 | Notebook | Purpose |
 | --- | --- |
-| [Exploratory Data Analysis](notebooks/EDA_Preprocessing.ipynb) | Describe the historical dataset, missingness, distributions, price outliers, and an AAPL closing-price time series |
+| [Exploratory Data Analysis](notebooks/EDA_Preprocessing.ipynb) | Audit source-data quality, compare per-ticker return distributions and outliers, and chart AAPL closing prices |
 | [Model Training & Evaluation](notebooks/Model_Training_Evaluation.ipynb) | Reproduce the chronological Bayesian-network comparison |
 | [HMM & Q-learning Experiments](notebooks/HMM_and_RL_Experiments.ipynb) | Visualize filtered regimes and compare an experimental trading policy with buy-and-hold |
 
@@ -183,6 +186,7 @@ StockTradingAI-Project/
 ├── notebooks/                     # EDA, model evaluation, HMM / RL experiments
 ├── scripts/
 │   ├── date_validation.py        # Explicit daily calendar date validation
+│   ├── ticker_validation.py      # Shared ticker-name normalization and checks
 │   ├── data_processing.py         # Input validation and causal features
 │   ├── technical_indicators.py    # Per-symbol technical indicators
 │   ├── model_training.py          # Bayesian networks and time-based evaluation

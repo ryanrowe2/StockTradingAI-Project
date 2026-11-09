@@ -10,8 +10,10 @@ from scipy.stats import multivariate_normal
 
 if __package__:
     from .date_validation import parse_daily_dates
+    from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
+    from ticker_validation import normalize_ticker_symbols
 
 
 DEFAULT_INDICATORS = ("MA_20", "RSI_14", "MACD")
@@ -53,9 +55,10 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
         raise ValueError(f"Missing HMM indicators: {sorted(absent)}")
     if "Name" in frame:
         symbols = frame["Name"]
-        normalized = symbols.astype(str).str.strip().str.upper()
-        if (symbols.isna().any() or normalized.eq("").any()
-                or normalized.nunique() != 1):
+        normalized = normalize_ticker_symbols(
+            symbols, context="Fit/infer HMM regimes for one ticker with a valid name at a time",
+        )
+        if normalized.nunique() != 1:
             raise ValueError("Fit/infer HMM regimes for one ticker with a valid name at a time")
     ordered = frame.copy()
     if "Name" in ordered:
@@ -79,13 +82,18 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
     observations to revise earlier states, invalidating historical backtests.
     """
     indicators = tuple(indicators)
+    fitted_indicators = getattr(model, "stock_trading_indicator_names_", None)
+    if fitted_indicators is not None and indicators != fitted_indicators:
+        raise ValueError(
+            "HMM inference indicators must match the names and order used during fitting"
+        )
     # Work with positional row identifiers: concatenated training/holdout
     # frames can have repeated index labels, which are unsafe for .loc writes.
     rows = df.reset_index(drop=True)
     ordered = _validated_indicators(rows, indicators, keep_missing=True)
     output = rows.copy()
     if "Name" in output:
-        output["Name"] = output["Name"].astype(str).str.strip().str.upper()
+        output["Name"] = ordered["Name"]
     output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
     complete = ordered[list(indicators)].notna().all(axis=1)
     if not complete.any():
@@ -147,4 +155,7 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
     history = model.monitor_.history
     if len(history) >= 2 and abs(history[-1] - history[-2]) >= model.tol:
         raise RuntimeError("HMM fitting did not reach the specified tolerance")
+    # GaussianHMM sees a NumPy array, so record the feature identity ourselves.
+    # Otherwise, inference can silently treat a reordered column as another one.
+    model.stock_trading_indicator_names_ = indicators
     return model, infer_filtered_regimes(model, df, indicators)

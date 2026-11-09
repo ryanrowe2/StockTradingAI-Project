@@ -1214,3 +1214,80 @@ def test_eda_notebook_includes_saved_aapl_price_time_series():
                 and "AAPL" in cell.source and "ax.plot" in cell.source]
     assert len(plotting) == 1
     assert any("image/png" in output.get("data", {}) for output in plotting[0].outputs)
+
+
+def test_hmm_fit_records_feature_order_and_rejects_incompatible_inference():
+    frame = prepare_features(synthetic_bars()).query("Name == 'AAA'").reset_index(drop=True)
+    model, original = fit_hmm_on_indicators(frame, n_components=2)
+    assert model.stock_trading_indicator_names_ == ("MA_20", "RSI_14", "MACD")
+    assert infer_filtered_regimes(model, frame)["Market_Regime"].equals(original["Market_Regime"])
+    for mismatched in (("MACD", "RSI_14", "MA_20"),
+                       ("MA_20", "MACD_Signal", "MACD")):
+        with pytest.raises(ValueError, match="names and order used during fitting"):
+            infer_filtered_regimes(model, frame, indicators=mismatched)
+
+
+def test_q_update_rejects_state_dimension_mismatch_atomically():
+    agent = QLearningAgent()
+    for terminal in (False, True):
+        with pytest.raises(ValueError, match="same dimensions"):
+            agent.update_q_value((0, 0), "buy", 1.0, (0, 0, 1), done=terminal)
+    assert agent.q_table == {}
+
+
+def test_episode_total_reward_overflow_is_rejected():
+    bars = pd.DataFrame({
+        "Open": [1e-308, 1e-308, 1e308, 1e-308],
+        "Close": [1e-308, 1e308, 1e308, 1e308],
+    })
+    env = SimpleTradingEnv(bars, transaction_cost=0, state_columns=())
+    agent = QLearningAgent(epsilon=0)
+    agent.q_table = {
+        (0,): {"buy": 2.0, "sell": 0.0, "hold": 0.0},
+        (1,): {"buy": 0.0, "sell": 2.0, "hold": 0.0},
+    }
+    before = copy.deepcopy(agent.q_table)
+    with pytest.raises(ValueError, match="Total trading reward must remain finite"):
+        agent.simulate_episode(env, train=False)
+    assert agent.q_table == before
+
+
+@pytest.mark.parametrize("placeholder", ["N/A", "NaN", "NULL", "None", " null "])
+def test_shared_ticker_validator_rejects_placeholders_in_direct_apis(placeholder):
+    original = synthetic_bars(60).query("Name == 'AAA'").reset_index(drop=True)
+    invalid = original.assign(Name=placeholder)
+    with pytest.raises(ValueError, match="ticker name"):
+        add_technical_indicators(invalid)
+    with pytest.raises(ValueError, match="ticker with a valid name"):
+        SimpleTradingEnv(invalid.iloc[:4], state_columns=())
+    indicators = add_technical_indicators(original)
+    with pytest.raises(ValueError, match="ticker with a valid name"):
+        _validated_indicators(indicators.assign(Name=placeholder), ("MA_20", "RSI_14", "MACD"))
+
+
+def test_shared_ticker_validator_preserves_legitimate_na_symbol():
+    original = synthetic_bars(60).query("Name == 'AAA'").reset_index(drop=True)
+    legitimate = original.assign(Name=" NA ")
+    indicator_frame = add_technical_indicators(legitimate)
+    assert set(indicator_frame["Name"]) == {"NA"}
+    assert set(_validated_indicators(indicator_frame, ("MA_20", "RSI_14", "MACD"))["Name"]) == {"NA"}
+    env = SimpleTradingEnv(legitimate.iloc[:4], state_columns=())
+    assert set(env.data["Name"]) == {"NA"}
+
+
+def test_eda_notebook_uses_validated_percent_returns_and_reports_exclusions():
+    import nbformat
+
+    notebook = nbformat.read(ROOT / "notebooks" / "EDA_Preprocessing.ipynb", as_version=4)
+    cells = [cell for cell in notebook.cells if cell.cell_type == "code"]
+    audit = [cell for cell in cells if "validate_bars(df)" in cell.source]
+    assert len(audit) == 1
+    assert "177" in "".join(
+        str(output.get("data", {})) for output in audit[0].outputs
+    )
+    histograms = [cell for cell in cells if "plt.hist" in cell.source]
+    boxplots = [cell for cell in cells if "ax.boxplot" in cell.source]
+    assert len(histograms) == len(boxplots) == 1
+    assert "returns" in histograms[0].source
+    assert "ticker_returns" in boxplots[0].source
+    assert "df['Close']" not in histograms[0].source + boxplots[0].source

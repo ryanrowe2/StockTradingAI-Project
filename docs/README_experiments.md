@@ -44,8 +44,11 @@ Single-ticker selection is applied before validating OHLCV records and dates,
 so unrelated symbols cannot cause a selected ticker's run to fail. Literal
 symbols such as `NA` remain ticker identifiers instead of being parsed as
 missing values, while missing-name placeholders such as `N/A`, `NaN`, and
-`NULL` are rejected. Indicator, HMM, and trading inputs normalize whitespace
-and case before grouping or checking ticker identity.
+`NULL` are rejected by all four input paths: raw data validation, direct
+indicator calculation, HMM fitting/inference, and trading environments.
+All paths normalize whitespace and case before checking ticker identity.
+In the included 93,612-row source, 93,435 bars pass OHLCV validation;
+177 incomplete or inconsistent records are excluded without imputation.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
@@ -65,6 +68,11 @@ The pipeline computes indicators on each ticker's chronological series independe
 `Target_Date` is the date of that ticker's next available observation. `Trend=1` when its closing price exceeds the current close, otherwise `Trend=0`. A final row without a subsequent observation is excluded, along with indicator warm-up rows.
 
 The generated feature table is saved to `data/generated/stock_features.csv` by default. Raw stock prices retain their original units; transformations learned from data are handled in the model-training step.
+
+The [EDA notebook](../notebooks/EDA_Preprocessing.ipynb) displays the raw
+missingness and the validator's retained/excluded row counts. Its histogram
+uses daily percentage returns, and its box plots compare percentage returns
+within each ticker rather than mixing stocks' nominal closing prices.
 
 ## 2. Bayesian-network experiment
 
@@ -127,6 +135,9 @@ $$
 Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. The HMM is fitted on all causal indicator observations through the training cutoff, including the final training day whose next-day label is excluded from supervised training. Forward filtering then uses the entire indicator history, including both supervised-split boundary days, while the Q-learning training sequence retains the label-purged training rows. No validation or test observation contributes to HMM parameter fitting. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
 Gaussian emission likelihoods are calculated from the fitted model's public
 mean and covariance parameters, without relying on internal hmmlearn methods.
+The fitting helper stores its ordered indicator names on the model and
+inference rejects a reordered or substituted indicator tuple; equal feature
+counts do not imply interchangeable HMM dimensions.
 Impossible initial states and transitions retain zero probability. When an
 indicator observation is missing, the filter advances the latent state using
 the transition matrix without assigning a regime to that incomplete row.
@@ -143,9 +154,11 @@ The `SimpleTradingEnv` has three actions:
 
 Q-learning state components must be integers. Both the trading environment and
 the agent reject fractional, string, and boolean components instead of
-silently converting them to bins. Q-learning updates also enforce action-to-position
-consistency, including at the terminal step. The trading environment refuses
-to advance its state if a price calculation yields a nonfinite reward.
+silently converting them to bins. Q-learning updates require equal current and
+next-state dimensions, and enforce action-to-position consistency, including
+at the terminal step. The trading environment refuses to advance its state if
+a price calculation yields a nonfinite reward; episode aggregation also rejects
+nonfinite cumulative returns.
 
 Decisions made after observing a daily close are filled at the next trading session's open. Holdings existing before an action remain exposed to the overnight price change. The reward for a step is:
 
