@@ -128,6 +128,8 @@ python scripts/model_training.py --ticker AAPL --output data/generated/aapl_mode
 Generated feature tables and model metrics are saved under `data/generated/`. These artifacts can be regenerated directly from the included raw data.
 The input validator raises a clear error if all valid price bars for any ticker
 are discarded, rather than silently excluding that ticker.
+When `--ticker` is specified, selection happens before price-bar validation,
+so invalid records belonging only to other symbols do not block the experiment.
 
 For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
 environment, install `requirements-repro-py312.txt` instead of the flexible
@@ -157,6 +159,8 @@ jupyter lab
 ```
 
 Open the files in `notebooks/` and select the project environment as the kernel. Reproduce the published outputs with `python -m scripts.refresh_notebooks`. See the [experiment reproduction guide](docs/README_experiments.md) for technical details and exact experiment settings.
+The notebook reproduction helper excludes existing Matplotlib figures from
+capture and cleans up newly created figures if a cell fails.
 
 ## Repository structure
 

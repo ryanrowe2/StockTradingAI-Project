@@ -156,6 +156,39 @@ def test_load_data_validates_and_removes_incomplete_rows(tmp_path: Path):
     assert not loaded.duplicated(["Name", "Date"]).any()
 
 
+def test_selected_ticker_ignores_unrelated_invalid_bars_and_dates(tmp_path: Path, monkeypatch):
+    from data_processing import main as prepare_main
+
+    bars = synthetic_bars()
+    bars["Date"] = bars["Date"].astype(str)
+    bars.loc[bars["Name"] == "BBB", "High"] = 0.0
+    bars.loc[bars["Name"] == "BBB", "Date"] = "not-a-date"
+    csv = tmp_path / "mixed.csv"
+    bars.to_csv(csv, index=False)
+
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        load_data(csv)
+    selected = load_data(csv, tickers=(" aaa ",))
+    assert len(selected) == 130 and set(selected["Name"]) == {"AAA"}
+    experiment = run_experiment(csv, tickers=("aaa",), num_bins=3)
+    assert experiment["tickers"] == 1
+    assert experiment["tickers_per_partition"] == {
+        "train": 1, "validation": 1, "test": 1,
+    }
+
+    output = tmp_path / "selected.csv"
+    monkeypatch.setattr(sys, "argv", [
+        "data_processing.py", "--input", str(csv), "--ticker", "AAA", "--output", str(output),
+    ])
+    prepare_main()
+    assert set(pd.read_csv(output)["Name"]) == {"AAA"}
+
+    with pytest.raises(ValueError, match="Ticker not found: MISSING"):
+        load_data(csv, tickers=("MISSING",))
+    with pytest.raises(ValueError, match="Selected tickers must be nonempty strings"):
+        load_data(csv, tickers=())
+
+
 def test_loader_excludes_inconsistent_prices_and_rejects_invalid_dates(tmp_path: Path):
     data = synthetic_bars(70)
     data.loc[0, "Open"] = 2000.0
@@ -760,6 +793,34 @@ def test_programmatic_notebook_execution_resolves_relative_paths_and_restores_cw
     with pytest.raises(RuntimeError, match="Notebook failure.ipynb, cell 1"):
         reproduce_notebook(failed_path, check=True)
     assert Path.cwd() == original_cwd
+
+
+def test_notebook_failures_clean_own_figures_without_touching_caller_figures(tmp_path: Path):
+    import matplotlib.pyplot as plt
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    initial_figures = set(plt.get_fignums())
+    caller_figure = plt.figure()
+    try:
+        failed = tmp_path / "raises_after_plot.ipynb"
+        nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+            "import matplotlib.pyplot as plt\nplt.figure()\nraise RuntimeError('failure')",
+        )]), failed)
+        with pytest.raises(RuntimeError, match="Notebook raises_after_plot.ipynb, cell 1"):
+            reproduce_notebook(failed, check=True)
+        assert set(plt.get_fignums()) == initial_figures | {caller_figure.number}
+
+        succeeding = tmp_path / "still_valid.ipynb"
+        nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+            source="print('untouched')", execution_count=1,
+            outputs=[nbformat.v4.new_output("stream", name="stdout", text="untouched\n")],
+        )]), succeeding)
+        reproduce_notebook(succeeding, check=True)
+        assert set(plt.get_fignums()) == initial_figures | {caller_figure.number}
+    finally:
+        plt.close(caller_figure)
+    assert set(plt.get_fignums()) == initial_figures
 
 
 def test_notebook_check_rejects_corrupted_or_materially_changed_pngs():

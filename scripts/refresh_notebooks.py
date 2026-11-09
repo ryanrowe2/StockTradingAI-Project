@@ -102,6 +102,7 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
     variables = {"__name__": "__main__", "display": _display}
     execution_count = 0
     previous_directory = Path.cwd()
+    existing_figures = set(plt.get_fignums())
     try:
         # Relative data paths inside a notebook resolve beside that notebook,
         # regardless of where a caller invokes this helper.
@@ -124,6 +125,8 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
                     "stream", name="stdout", text=text_output.getvalue(),
                 ))
             for number in plt.get_fignums():
+                if number in existing_figures:
+                    continue
                 figure = plt.figure(number)
                 buffer = io.BytesIO()
                 figure.savefig(buffer, format="png", dpi=110, bbox_inches="tight")
@@ -139,7 +142,13 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
             cell.outputs = outputs
             cell.execution_count = execution_count
     finally:
-        os.chdir(previous_directory)
+        try:
+            # Failed cells can leave figures open. Never capture or close
+            # figures that belonged to the caller before this notebook ran.
+            for number in set(plt.get_fignums()) - existing_figures:
+                plt.close(number)
+        finally:
+            os.chdir(previous_directory)
     nbformat.validate(notebook)
     if save:
         nbformat.write(notebook, path)

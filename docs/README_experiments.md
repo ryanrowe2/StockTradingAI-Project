@@ -40,6 +40,8 @@ contradictory bars are excluded without guessing replacement prices. Feature
 preparation rejects an input ticker if insufficient valid price history remains
 after indicator warm-up, so no ticker is silently omitted from the prepared data.
 Validation also rejects a ticker if every one of its price bars is invalid.
+Single-ticker selection is applied before validating OHLCV records and dates,
+so unrelated symbols cannot cause a selected ticker's run to fail.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
@@ -172,6 +174,9 @@ python -m scripts.refresh_notebooks
 `python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them, compares all saved output types (including numerical text and rich results), fully decodes the saved PNGs, and checks for both broad and localized visual changes against the newly generated charts.
 The `reproduce_notebook(path, check=True)` Python helper resolves relative data
 paths from the notebook's directory and restores the caller's working directory.
+It excludes the caller's existing Matplotlib figures from capture and cleanup,
+and closes newly created figures when execution fails, preventing stale-chart
+contamination.
 
 ## References
 

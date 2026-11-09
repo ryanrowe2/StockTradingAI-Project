@@ -72,9 +72,22 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(["Name", "Date"]).reset_index(drop=True)
 
 
-def load_data(filepath: str | Path) -> pd.DataFrame:
-    """Read and validate raw stock observations in their actual price units."""
-    return validate_bars(pd.read_csv(filepath))
+def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -> pd.DataFrame:
+    """Read and validate raw stock observations, optionally selecting symbols first."""
+    source = pd.read_csv(filepath)
+    if tickers is not None:
+        if not tickers or any(not isinstance(ticker, str) or not ticker.strip()
+                              for ticker in tickers):
+            raise ValueError("Selected tickers must be nonempty strings")
+        if "Name" not in source:
+            raise ValueError("Missing required columns: ['Name']")
+        selected = {ticker.strip().upper() for ticker in tickers}
+        normalized_names = source["Name"].astype("string").str.strip().str.upper()
+        not_found = selected - set(normalized_names.dropna())
+        if not_found:
+            raise ValueError(f"Ticker not found: {', '.join(sorted(not_found))}")
+        source = source.loc[normalized_names.isin(selected)].copy()
+    return validate_bars(source)
 
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -111,11 +124,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--ticker", type=str, default=None)
     args = parser.parse_args()
-    data = load_data(args.input)
-    if args.ticker:
-        data = data.loc[data["Name"] == args.ticker.upper()].copy()
-        if data.empty:
-            raise ValueError(f"Ticker not found: {args.ticker}")
+    data = load_data(args.input, tickers=(args.ticker,) if args.ticker is not None else None)
     result = prepare_features(data)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(args.output, index=False)

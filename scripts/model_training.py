@@ -203,13 +203,7 @@ def train_and_select(split: ChronologicalSplit, features: tuple[str, ...],
 
 def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
                    tickers: tuple[str, ...] | None = None, num_bins: int = 4) -> dict:
-    data = load_data(raw_data)
-    if tickers:
-        selected = {ticker.upper() for ticker in tickers}
-        data = data.loc[data["Name"].isin(selected)].copy()
-        not_found = selected - set(data["Name"])
-        if not_found:
-            raise ValueError(f"Ticker not found: {', '.join(sorted(not_found))}")
+    data = load_data(raw_data, tickers=tickers)
     frame = prepare_features(data)
     split = chronological_split(frame)
     baseline = train_and_select(split, BASELINE_FEATURES, num_bins)
