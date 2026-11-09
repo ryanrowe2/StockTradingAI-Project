@@ -12,6 +12,11 @@ python -m venv .venv
 python -m pip install -r requirements-dev.txt
 ```
 
+To reproduce the exact dependency versions used for the published numerical
+results on Python 3.12/Linux, install `requirements-repro-py312.txt` instead.
+That file includes pinned transitive dependencies; the normal requirements
+files retain broader version compatibility.
+
 The combined historical source is `data/raw/all_stocks_2006-01-01_to_2018-01-01.csv`, containing daily OHLCV observations and ticker identifiers.
 
 ## 1. Feature preparation

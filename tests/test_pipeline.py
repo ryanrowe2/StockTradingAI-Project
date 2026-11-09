@@ -227,6 +227,35 @@ def test_hmm_filtering_is_prefix_invariant():
     assert prefix["Market_Regime"].tolist() == full["Market_Regime"].iloc[:72].tolist()
 
 
+def test_hmm_filtering_preserves_duplicate_input_index_labels():
+    frame = prepare_features(synthetic_bars()).query("Name == 'AAA'").reset_index(drop=True)
+    model, _ = fit_hmm_on_indicators(frame.iloc[:65], n_components=2)
+    repeated = pd.concat([
+        frame.iloc[:50].reset_index(drop=True),
+        frame.iloc[50:].reset_index(drop=True),
+    ]).sample(frac=1, random_state=13)
+    assert repeated.index.has_duplicates
+
+    actual = infer_filtered_regimes(model, repeated)
+    expected = infer_filtered_regimes(model, repeated.reset_index(drop=True))
+    assert actual.index.equals(repeated.index)
+    assert actual["Market_Regime"].tolist() == expected["Market_Regime"].tolist()
+
+    missing = repeated.copy()
+    missing.iloc[4, missing.columns.get_loc("MA_20")] = np.nan
+    filtered = infer_filtered_regimes(model, missing)
+    comparison = infer_filtered_regimes(model, missing.reset_index(drop=True))
+    assert filtered.index.equals(missing.index)
+    pd.testing.assert_series_equal(
+        filtered["Market_Regime"].reset_index(drop=True), comparison["Market_Regime"]
+    )
+
+    missing["MA_20"] = np.nan
+    all_missing = infer_filtered_regimes(model, missing)
+    assert all_missing.index.equals(missing.index)
+    assert all_missing["Market_Regime"].isna().all()
+
+
 def test_hmm_uses_chronological_dates_even_when_strings_are_not_zero_padded():
     frame = pd.DataFrame({
         "Date": ["2020-1-10", "2020-1-2", "2020-1-3"],

@@ -15,8 +15,8 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
+      - name: Install pinned experiment environment
+        run: python -m pip install -r requirements-repro-py312.txt
       - name: Test and verify reproducibility
         run: |
           python -m pytest tests -q

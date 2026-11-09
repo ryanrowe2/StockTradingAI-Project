@@ -42,10 +42,14 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
     observations to revise earlier states, invalidating historical backtests.
     """
     indicators = tuple(indicators)
-    clean = _validated_indicators(df, indicators)
-    output = df.copy()
+    # Work with positional row identifiers: concatenated training/holdout
+    # frames can have repeated index labels, which are unsafe for .loc writes.
+    rows = df.reset_index(drop=True)
+    clean = _validated_indicators(rows, indicators)
+    output = rows.copy()
     output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
     if clean.empty:
+        output.index = df.index
         return output
     observations = clean[list(indicators)].to_numpy(dtype=float)
     emissions = model._compute_log_likelihood(observations)
@@ -60,6 +64,7 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
         log_alpha = log_alpha - logsumexp(log_alpha)
         regimes.append(int(np.argmax(log_alpha)))
     output.loc[clean.index, "Market_Regime"] = pd.array(regimes, dtype="Int64")
+    output.index = df.index
     return output
 
 

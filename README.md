@@ -75,6 +75,24 @@ The experiment trains on an earlier historical segment and evaluates the frozen 
 
 **Implementation:** [`scripts/rl_agent.py`](scripts/rl_agent.py)
 
+## Historical evaluation results
+
+On the included 31-ticker dataset, both Bayesian networks were evaluated on the
+same later test period, after validation-based parameter selection:
+
+| Predictor | Test accuracy | Test ROC AUC |
+| --- | ---: | ---: |
+| Training-majority benchmark | **52.06%** | — |
+| Baseline Bayesian network | 51.69% | 0.515 |
+| Enhanced Bayesian network | 51.08% | 0.507 |
+
+Neither Bayesian network beat the majority-class benchmark on this holdout.
+In the separate AAPL trading notebook, the frozen Q-learning policy earned
+**+$11.68** in one-share, dollar-denominated holdout P/L, compared with
+**+$54.86** for the next-open buy-and-hold comparator. These historical
+experiments demonstrate the implementation and its limitations; they do not
+establish predictive superiority or deployable trading profitability.
+
 ## Reproduce the experiments
 
 **Requirements:** Python 3.10+ and Git.
@@ -102,6 +120,11 @@ python scripts/model_training.py --ticker AAPL
 ```
 
 Generated feature tables and model metrics are saved under `data/generated/`. These artifacts can be regenerated directly from the included raw data.
+
+For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
+environment, install `requirements-repro-py312.txt` instead of the flexible
+requirements files. It pins both direct and transitive dependencies; use
+`requirements.txt` / `requirements-dev.txt` for other supported environments.
 
 For tests, install the development requirements and run:
 
@@ -140,6 +163,7 @@ StockTradingAI-Project/
 ├── tests/                         # Automated pipeline regression tests
 ├── .github/workflows/             # Automated verification on pushes / PRs
 ├── requirements.txt
+├── requirements-repro-py312.txt   # Tested, pinned Python 3.12/Linux environment
 └── requirements-dev.txt
 ```
 
