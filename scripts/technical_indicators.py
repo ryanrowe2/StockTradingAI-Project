@@ -8,10 +8,12 @@ import pandas as pd
 if __package__:
     from .date_validation import parse_daily_dates
     from .price_validation import valid_price_bars
+    from .session_validation import validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
     from price_validation import valid_price_bars
+    from session_validation import validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -87,11 +89,17 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if not valid_price_bars(df, require_volume="Volume" in df).all():
         raise ValueError("Indicator OHLC prices must be coherent and finite; supplied Volume must be nonnegative")
+    # The shared validator accepts numeric CSV strings; calculate on the
+    # normalized numbers rather than attempting subtraction on strings.
+    for column in ("Open", "High", "Low", "Close", "Volume"):
+        if column in df:
+            df[column] = pd.to_numeric(df[column], errors="raise")
     if "Date" in df:
         df["Date"] = parse_daily_dates(df["Date"], context="Indicator dates")
     if "Name" not in df.columns:
         if "Date" in df and df["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates in indicator input")
+        validate_session_positions(df)
         return _one_symbol_indicators(df.sort_values("Date") if "Date" in df else df)
     if "Date" not in df:
         raise ValueError("Date is required for multi-ticker indicators")
@@ -100,6 +108,7 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     )
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations in indicator input")
+    validate_session_positions(df)
     return pd.concat(
         [
             _one_symbol_indicators(group.sort_values("Date"))

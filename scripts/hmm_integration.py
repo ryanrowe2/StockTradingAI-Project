@@ -10,9 +10,11 @@ from scipy.stats import multivariate_normal
 
 if __package__:
     from .date_validation import parse_daily_dates
+    from .session_validation import validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
+    from session_validation import validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -72,13 +74,7 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
         ordered = ordered.sort_values("Date", kind="stable")
     if "Date" in ordered and ordered["Date"].duplicated().any():
         raise ValueError("Duplicate dates for a single ticker")
-    if "Session_Number" in ordered:
-        positions = ordered["Session_Number"]
-        if (positions.isna().any()
-                or not pd.api.types.is_integer_dtype(positions.dtype)
-                or (positions < 0).any()
-                or positions.diff().dropna().le(0).any()):
-            raise ValueError("HMM Session_Number must contain increasing nonnegative integers")
+    validate_session_positions(ordered)
     clean = ordered.dropna(subset=list(indicators)).copy()
     if not np.isfinite(clean[list(indicators)].to_numpy(dtype=float)).all():
         raise ValueError("Indicator values must be finite")
@@ -116,29 +112,35 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
     # Keep it at -inf in log space instead of assigning artificial mass.
     with np.errstate(divide="ignore"):
         transition = np.log(model.transmat_)
-        log_alpha = np.log(model.startprob_)
+        log_start = np.log(model.startprob_)
+    log_alpha = log_start.copy()
     regimes = []
     emission_index = 0
-    previous_session = None
+    previous_observed_session = None
+    missing_since_observation = False
     for step, (row_index, has_observation) in enumerate(complete.items()):
-        # Each dated row advances the latent state, even when its indicators
-        # are missing. Session_Number additionally preserves market dates
-        # whose entire source bar was discarded before indicator creation.
+        # Fitting treats complete contiguous segments as independent HMM
+        # sequences. Filtering must use the *same* boundary rule, restarting
+        # after missing indicators or missing source-market sessions.
         current_session = (int(ordered.loc[row_index, "Session_Number"])
                            if "Session_Number" in ordered else step)
-        gap = 0 if previous_session is None else current_session - previous_session
-        for _ in range(gap):
-            log_alpha = logsumexp(log_alpha[:, None] + transition, axis=0)
-        previous_session = current_session
         if has_observation:
+            if previous_observed_session is not None:
+                if missing_since_observation or current_session != previous_observed_session + 1:
+                    log_alpha = log_start.copy()
+                else:
+                    log_alpha = logsumexp(log_alpha[:, None] + transition, axis=0)
             log_alpha = log_alpha + emissions[emission_index]
             emission_index += 1
-        normalization = logsumexp(log_alpha)
-        if not np.isfinite(normalization):
-            raise ValueError("HMM filtering produced no finite state probabilities")
-        log_alpha = log_alpha - normalization
-        if has_observation:
+            normalization = logsumexp(log_alpha)
+            if not np.isfinite(normalization):
+                raise ValueError("HMM filtering produced no finite state probabilities")
+            log_alpha = log_alpha - normalization
             regimes.append((row_index, int(np.argmax(log_alpha))))
+            previous_observed_session = current_session
+            missing_since_observation = False
+        elif previous_observed_session is not None:
+            missing_since_observation = True
     for row_index, regime in regimes:
         output.loc[row_index, "Market_Regime"] = regime
     output.index = df.index
@@ -169,8 +171,9 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
         tol=1e-4, random_state=random_state, min_covar=1e-4,
     )
     if "Session_Number" in clean:
-        starts = clean["Session_Number"].diff().ne(1).to_numpy()
-        boundaries = np.flatnonzero(starts)
+        positions = clean["Session_Number"].tolist()
+        boundaries = np.array([0] + [i for i in range(1, len(positions))
+                                     if positions[i] != positions[i - 1] + 1])
         lengths = np.diff(np.r_[boundaries, len(clean)]).tolist()
     else:
         lengths = [len(clean)]

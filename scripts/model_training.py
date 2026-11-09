@@ -65,7 +65,7 @@ def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
     first_cut = int(len(dates) * train_fraction)
     second_cut = int(len(dates) * (train_fraction + validation_fraction))
     train_end, validation_end = dates[first_cut - 1], dates[second_cut - 1]
-    # A row at the split boundary could have a next-day label drawn from the
+    # A row at the split boundary could have a next-session label drawn from the
     # following period; those labels must not be available to earlier models.
     train = df.loc[(date <= train_end) & (target_date <= train_end)].copy()
     validation = df.loc[
@@ -133,7 +133,7 @@ class QuantileBinner:
 
 def fit_network(df: pd.DataFrame, features: tuple[str, ...],
                 num_bins: int, equivalent_sample_size: int) -> DiscreteBayesianNetwork:
-    """Fit a simple, interpretable feature-to-next-day-direction network."""
+    """Fit a simple, interpretable feature-to-next-session-direction network."""
     network = DiscreteBayesianNetwork([(name, "Trend") for name in features])
     # Specify the full bin vocabulary even when a particular training period
     # does not observe one of its bins.

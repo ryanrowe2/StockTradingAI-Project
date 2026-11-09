@@ -6,6 +6,7 @@ import copy
 import base64
 import io
 import importlib
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -14,6 +15,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+
+# Make CPU-count probing deterministic in sandboxed CI/test environments.
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -163,6 +167,24 @@ def test_direct_indicator_api_rejects_incoherent_and_nonfinite_prices():
         add_technical_indicators(bars.assign(Volume=-1))
 
 
+def test_direct_indicator_api_normalizes_numeric_strings():
+    bars = synthetic_bars(60).query("Name == 'AAA'").reset_index(drop=True)
+    string_prices = bars.copy()
+    for field in ("Open", "High", "Low", "Close", "Volume"):
+        string_prices[field] = string_prices[field].map(str)
+    expected = add_technical_indicators(bars)
+    actual = add_technical_indicators(string_prices)
+    pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_direct_indicator_api_rejects_inconsistent_market_positions():
+    bars = synthetic_bars(3).query("Name == 'AAA'").reset_index(drop=True)
+    with pytest.raises(ValueError, match="Session_Number"):
+        add_technical_indicators(bars.assign(Session_Number=[0, 0, 1]))
+    with pytest.raises(ValueError, match="Session_Number"):
+        add_technical_indicators(bars.assign(Session_Number=[2, 1, 0]))
+
+
 def test_missing_raw_market_session_is_not_used_as_a_daily_return_or_rsi():
     bars = synthetic_bars(100).query("Name == 'AAA'").sort_values("Date").reset_index(drop=True)
     bad_day = bars.loc[45, "Date"]
@@ -184,6 +206,9 @@ def test_missing_raw_market_session_is_not_used_as_a_daily_return_or_rsi():
     resumed = history.loc[history["Date"] == bars.loc[60, "Date"], "RSI_14"].iloc[0]
     assert np.isfinite(resumed)
     prepared = prepare_features(clean)
+    # A target must be the next source-market session, not merely the next
+    # available valid close after the discarded price bar.
+    assert bars.loc[44, "Date"] not in set(prepared["Date"])
     assert next_day not in set(prepared["Date"])
     assert bars.iloc[-1]["Date"] == history.iloc[-1]["Date"]
     assert bars.iloc[-1]["Date"] not in set(prepared["Date"])
@@ -248,6 +273,58 @@ def test_selected_ticker_ignores_unrelated_invalid_bars_and_dates(tmp_path: Path
         load_data(csv, tickers=("MISSING",))
     with pytest.raises(ValueError, match="Selected tickers must be nonempty strings"):
         load_data(csv, tickers=())
+
+
+def test_selected_ticker_retains_source_wide_market_calendar(tmp_path: Path):
+    source = synthetic_bars(100)
+    missing = source.query("Name == 'AAA'")["Date"].sort_values().iloc[55]
+    source = source.loc[~((source.Name == "AAA") & (source.Date == missing))].copy()
+    csv = tmp_path / "source.csv"
+    source.to_csv(csv, index=False)
+    complete = load_data(csv)
+    selected = load_data(csv, tickers=("AAA",))
+    pd.testing.assert_frame_equal(
+        complete.loc[complete.Name == "AAA"].reset_index(drop=True), selected,
+    )
+    full_history = prepare_indicator_history(complete.loc[complete.Name == "AAA"])
+    selected_history = prepare_indicator_history(selected)
+    pd.testing.assert_frame_equal(full_history, selected_history)
+    next_date = source.query("Name == 'AAA' and Date > @missing")["Date"].min()
+    assert pd.isna(selected_history.loc[selected_history.Date == next_date, "Return"].iloc[0])
+
+
+def test_historical_aapl_subset_and_full_source_have_identical_features():
+    complete = load_data(DEFAULT_RAW_DATA)
+    selected = load_data(DEFAULT_RAW_DATA, tickers=("AAPL",))
+    full_aapl = complete.loc[complete.Name == "AAPL"].reset_index(drop=True)
+    pd.testing.assert_frame_equal(full_aapl, selected)
+    pd.testing.assert_frame_equal(prepare_indicator_history(full_aapl),
+                                  prepare_indicator_history(selected))
+    pd.testing.assert_frame_equal(prepare_features(full_aapl), prepare_features(selected))
+
+
+def test_validate_bars_rejects_conflicting_source_session_calendar():
+    bars = synthetic_bars(3)
+    dates = sorted(bars.Date.unique())
+    bars["Session_Number"] = bars.Date.map({date: i for i, date in enumerate(dates)})
+    collision = bars.copy()
+    collision.loc[collision.Date == dates[2], "Session_Number"] = 1
+    with pytest.raises(ValueError, match="Session_Number"):
+        validate_bars(collision)
+    descending = bars.copy()
+    descending["Session_Number"] = descending.Session_Number.map({0: 2, 1: 1, 2: 0})
+    with pytest.raises(ValueError, match="Session_Number"):
+        validate_bars(descending)
+
+
+def test_historical_supervised_targets_are_next_market_session_only():
+    raw = load_data(DEFAULT_RAW_DATA)
+    prepared = prepare_features(raw)
+    calendar = raw[["Name", "Date", "Session_Number"]].rename(
+        columns={"Date": "Target_Date", "Session_Number": "Target_Session"},
+    )
+    checked = prepared.merge(calendar, on=["Name", "Target_Date"], validate="many_to_one")
+    assert (checked.Target_Session - checked.Session_Number).eq(1).all()
 
 
 def test_csv_loader_preserves_literal_ticker_na():
@@ -456,9 +533,11 @@ def test_hmm_notebook_keeps_causal_observations_purged_from_supervised_splits():
     assert "indicator_history = prepare_indicator_history" in source
     assert "split = chronological_split(features)" in source
     assert "history_regimes['Date'] > split.validation_end" in source
+    assert "training.groupby(training['Session_Number'].diff().ne(1).cumsum())" in source
+    assert "train_envs = [SimpleTradingEnv(group" in source
 
 
-def test_hmm_gap_filtering_matches_explicit_missing_market_sessions():
+def test_hmm_gap_filtering_restarts_segments_with_and_without_missing_rows():
     class AlternatingModel:
         covariance_type = "diag"
         means_ = np.array([[0.], [0.]])
@@ -476,7 +555,7 @@ def test_hmm_gap_filtering_matches_explicit_missing_market_sessions():
     })
     actual = infer_filtered_regimes(AlternatingModel(), compressed, ("MA_20",))
     expected = infer_filtered_regimes(AlternatingModel(), expanded, ("MA_20",))
-    assert actual["Market_Regime"].tolist() == [0, 1]
+    assert actual["Market_Regime"].tolist() == [0, 0]
     assert actual["Market_Regime"].tolist() == expected["Market_Regime"].dropna().tolist()
 
 
@@ -557,7 +636,7 @@ def test_hmm_filtering_respects_impossible_initial_states_and_transitions():
     assert filtered["Market_Regime"].tolist() == [0, 0]
 
 
-def test_hmm_filtering_advances_through_missing_indicator_observations():
+def test_hmm_filtering_restarts_after_missing_indicator_observations():
     class AlternatingModel:
         covariance_type = "diag"
         means_ = np.array([[0.], [0.]])
@@ -572,8 +651,34 @@ def test_hmm_filtering_advances_through_missing_indicator_observations():
     filtered = infer_filtered_regimes(AlternatingModel(), frame, ("MA_20",))
     assert filtered.loc[0, "Market_Regime"] == 0
     assert pd.isna(filtered.loc[1, "Market_Regime"])
-    # Two transitions from the first day's prior yield [0.8136, 0.1864].
+    # The missing emission splits the fitted/inferred sequences consistently.
     assert filtered.loc[2, "Market_Regime"] == 0
+
+
+def test_hmm_rejects_descending_unsigned_market_sessions():
+    frame = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-03"],
+        "Session_Number": pd.Series([2, 1], dtype="uint64"),
+        "MA_20": [1.0, 2.0],
+    })
+    with pytest.raises(ValueError, match="Session_Number"):
+        _validated_indicators(frame, ("MA_20",))
+
+
+def test_hmm_large_gap_restarts_in_constant_time():
+    class SimpleModel:
+        covariance_type = "diag"
+        means_ = np.array([[0.], [0.]])
+        covars_ = np.array([[[1.]], [[1.]]])
+        startprob_ = np.array([1., 0.])
+        transmat_ = np.array([[0., 1.], [1., 0.]])
+
+    frame = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-03"],
+        "Session_Number": pd.Series([0, 10**12], dtype="uint64"),
+        "MA_20": [0., 0.],
+    })
+    assert infer_filtered_regimes(SimpleModel(), frame, ("MA_20",))["Market_Regime"].tolist() == [0, 0]
 
 
 def test_hmm_filtering_preserves_duplicate_input_index_labels():
@@ -656,6 +761,19 @@ def test_rl_positions_reward_terminal_and_transaction_costs():
     assert state[-1] == 0 and done
     with pytest.raises(RuntimeError):
         env.step("hold")
+
+
+def test_trading_environment_rejects_skipped_market_sessions():
+    bars = pd.DataFrame({
+        "Date": ["2020-01-02", "2020-01-06", "2020-01-07"],
+        "Session_Number": [0, 2, 3],
+        "Open": [10.0, 12.0, 13.0],
+        "Close": [11.0, 12.5, 13.5],
+    })
+    with pytest.raises(ValueError, match="consecutive market sessions"):
+        SimpleTradingEnv(bars)
+    # Each contiguous slice remains a valid two-step simulation.
+    assert len(SimpleTradingEnv(bars.iloc[1:]).data) == 2
 
 
 def test_default_trading_state_uses_published_feature_schema():

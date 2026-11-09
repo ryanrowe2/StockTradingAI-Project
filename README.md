@@ -2,7 +2,7 @@
 
 **Bayesian networks · Time-series feature engineering · Hidden Markov models · Q-learning**
 
-A Python research project exploring probabilistic next-day stock-direction prediction and sequential trading decisions. The system turns daily equity observations into technical indicators, estimates conditional probabilities with Bayesian networks, analyzes latent market regimes with a Gaussian Hidden Markov model, and experiments with an interpretable Q-learning agent.
+A Python research project exploring probabilistic next-session stock-direction prediction and sequential trading decisions. The system turns daily equity observations into technical indicators, estimates conditional probabilities with Bayesian networks, analyzes latent market regimes with a Gaussian Hidden Markov model, and experiments with an interpretable Q-learning agent.
 
 The project emphasizes **reproducible experiments, chronological evaluation, and modular model implementations**.
 
@@ -23,27 +23,29 @@ The project emphasizes **reproducible experiments, chronological evaluation, and
 flowchart TD
     A["Raw daily OHLCV data"] --> B["Validate bars; preserve market-session positions"]
     B --> C["Causal technical indicators"]
-    C --> D["Next-observed-price labels"]
+    C --> D["Next-market-session price labels"]
     D --> E["Shared chronological date boundaries"]
     E --> F["Bayesian network training-fitted bins"]
     F --> G["Bayesian model selection and holdout evaluation"]
     C --> H["AAPL training-only HMM fit"]
     E --> H
-    H --> I["Gap-aware forward regimes"]
+    H --> I["Segment-consistent forward regimes"]
     I --> J["Q-learning training with AAPL-fitted bins"]
     E --> J
     J --> K["Frozen-policy evaluation on full valid price history"]
 ```
 
-Each ticker's indicators and next-day labels are computed independently. Ticker
+Each ticker's indicators and next-session labels are computed independently. Ticker
 identifiers are normalized consistently, including for direct indicator calls;
 literal symbols such as `NA` are preserved during CSV loading. Date boundaries
 are shared across the Bayesian and AAPL trading experiments, so their partitions
 correspond to the same historical market periods. Source-observed market-session
-positions are recorded before invalid bars are excluded. Close-to-close daily
-returns and RSI changes do not incorrectly bridge those excluded sessions;
-HMM filtering advances across the same gaps. Target dates are required to
-follow their feature dates.
+positions use the entire source's valid market dates, even when selecting one
+ticker before validating its prices. Close-to-close daily returns, RSI changes,
+and prediction targets do not bridge missing sessions. HMM fitting and forward
+filtering restart at incomplete observations or missing source sessions, so
+both use the same contiguous-sequence model. Target dates must follow their
+feature dates by exactly one recorded market session.
 An experiment rejects a ticker with no usable validated history or without
 observations in each chronological partition, and reports ticker coverage for
 training, validation, and test separately.
@@ -52,7 +54,7 @@ training, validation, and test separately.
 
 ### 1. Bayesian-network prediction
 
-The supervised target is whether the **next observed trading day's closing price** is higher than the current day's close:
+The supervised target is whether the **next market session's closing price** is higher than the current session's close. Observations without a valid next-session close are excluded:
 
 $$
 \mathrm{Trend}_t = \mathbf{1}\left[\mathrm{Close}_{t+1} > \mathrm{Close}_t\right].
@@ -73,7 +75,7 @@ Both feature sets use the same chronological partitions. For validation-based mo
 
 ### 2. Hidden Markov market regimes
 
-The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. During fitting, complete-indicator training observations are divided into contiguous source-market-session segments so the model does not learn fictitious one-session transitions across missing bars. Filtering then advances through missing observations and excluded source sessions without using later observations. The fitting helper records the ordered indicator names and rejects incompatible inference feature orders. Single-ticker inputs normalize ticker spelling and case consistently with the data pipeline.
+The Gaussian HMM models technical-indicator observations as emissions from latent market states. Its inference routine performs **forward filtering**, estimating the regime at each date from information available through that date. During fitting, complete-indicator training observations are divided into contiguous source-market-session segments so the model does not learn fictitious one-session transitions across missing bars. Filtering restarts from the learned initial-state distribution after the same gaps, matching the fitted independent-sequence treatment. The fitting helper records the ordered indicator names and rejects incompatible inference feature orders. Single-ticker inputs normalize ticker spelling and case consistently with the data pipeline.
 
 The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates regime assignments for a single ticker, including a separate later period.
 
@@ -81,9 +83,9 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 
 ### 3. Q-learning trading simulator
 
-The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. State components must be actual integers, and transition dimensions, position changes, and Q-value updates are checked for validity. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation tracks a long-or-flat position, overnight gaps, intraday price changes, and transaction costs, rejecting nonfinite step and cumulative rewards.
+The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. State components must be actual integers, and transition dimensions, position changes, and Q-value updates are checked for validity. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation requires consecutive recorded market sessions; training splits at missing feature sessions rather than treating weeks as one trading step. The simulator tracks overnight gaps, intraday price changes, and transaction costs, rejecting nonfinite step and cumulative rewards.
 
-The experiment trains on an earlier historical segment and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
+The experiment trains across separate contiguous episodes in an earlier historical period and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
 Both outcomes are marked to the final validated source close, including the
 terminal trading session that has no next-day prediction label. A share still held at
 that point remains open, so the displayed P/L excludes a hypothetical final
@@ -98,13 +100,13 @@ same later test period, after validation-based parameter selection:
 
 | Predictor | Test accuracy | Test ROC AUC |
 | --- | ---: | ---: |
-| Training-majority benchmark | **52.21%** | — |
-| Baseline Bayesian network | 51.83% | 0.515 |
-| Enhanced Bayesian network | 51.07% | 0.508 |
+| Training-majority benchmark | **52.19%** | — |
+| Baseline Bayesian network | 51.79% | 0.515 |
+| Enhanced Bayesian network | 51.02% | 0.508 |
 
 Neither Bayesian network beat the majority-class benchmark on this holdout.
 In the separate AAPL trading notebook, the frozen Q-learning policy earned
-**+$12.27** in one-share, dollar-denominated holdout P/L, compared with
+**-$2.45** in one-share, dollar-denominated holdout P/L, compared with
 **+$52.68** for the next-open buy-and-hold comparator. These historical
 experiments demonstrate the implementation and its limitations; they do not
 establish predictive superiority or deployable trading profitability.
@@ -125,7 +127,7 @@ Activate the environment (`source .venv/bin/activate` on macOS/Linux or `.venv\S
 ```bash
 python -m pip install -r requirements.txt
 
-    # Prepare technical indicators and ticker-safe next-observation labels.
+# Prepare technical indicators and ticker-safe next-session labels.
 python scripts/data_processing.py
 
 # Train, select, and evaluate Bayesian networks on the historical dataset.
@@ -147,10 +149,11 @@ direct indicator, HMM, and trading-environment calls. Of the 93,612 source
 records, 93,435 pass OHLCV validation; 177 incomplete or contradictory rows
 are excluded without modifying the raw files.
 An additional `Session_Number` column preserves source-market-session positions
-through this exclusion. A close-to-close return crossing an excluded session
-is treated as unavailable for single-day modeling rather than compressed into
-one day's return. The next-valid-observation direction label remains explicitly
-defined for the supervised task.
+through this exclusion, using the source-wide calendar even for selected tickers.
+A close-to-close return crossing an excluded session is unavailable for
+single-day modeling rather than compressed into one day's return. Such a row
+also receives no next-session direction label and is excluded from supervised
+training and evaluation.
 
 For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
 environment, install `requirements-repro-py312.txt` instead of the flexible
@@ -198,6 +201,7 @@ StockTradingAI-Project/
 ├── scripts/
 │   ├── date_validation.py        # Explicit daily calendar date validation
 │   ├── price_validation.py       # Shared coherent-price checks
+│   ├── session_validation.py     # Consistent market-session metadata
 │   ├── ticker_validation.py      # Shared ticker-name normalization and checks
 │   ├── data_processing.py         # Input validation and causal features
 │   ├── technical_indicators.py    # Per-symbol technical indicators

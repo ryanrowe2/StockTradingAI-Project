@@ -16,12 +16,14 @@ if __package__:
     from .technical_indicators import add_technical_indicators
     from .date_validation import parse_daily_dates
     from .price_validation import valid_price_bars
+    from .session_validation import validate_session_positions
     from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from .ticker_validation import normalize_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
     from price_validation import valid_price_bars
+    from session_validation import validate_session_positions
     from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from ticker_validation import normalize_ticker_symbols
 
@@ -54,20 +56,10 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     # Preserve the original market-session positions *before* excluding any
     # corrupt bar. A subsequent valid price must not become the missing bar's
     # fictional next trading session during return/HMM calculations.
-    if SESSION_COLUMN in df:
-        sessions = df[SESSION_COLUMN]
-        if (sessions.isna().any()
-                or not pd.api.types.is_integer_dtype(sessions.dtype)
-                or isinstance(sessions.dtype, pd.CategoricalDtype)
-                or (sessions < 0).any()
-                or df.assign(_session=sessions).groupby("Date")["_session"].nunique().gt(1).any()):
-            raise ValueError("Session_Number must contain consistent nonnegative integer market positions")
-    else:
+    if SESSION_COLUMN not in df:
         calendar = pd.Index(df["Date"].unique()).sort_values()
         df[SESSION_COLUMN] = calendar.get_indexer(df["Date"])
-    ordered = df.sort_values(["Name", "Date"])
-    if ordered.groupby("Name")[SESSION_COLUMN].diff().dropna().le(0).any():
-        raise ValueError("Session_Number must increase with the observation dates")
+    validate_session_positions(df)
     numeric_columns = ("Open", "High", "Low", "Close", "Volume")
     for name in numeric_columns:
         df[name] = pd.to_numeric(df[name], errors="coerce")
@@ -84,7 +76,7 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -> pd.DataFrame:
-    """Read and validate raw stock observations, optionally selecting symbols first."""
+    """Read prices, preserving the source-wide calendar when selecting symbols."""
     # Stock symbols such as "NA" are valid identifiers. Pandas' default NA
     # tokens would silently turn them into missing ticker names.
     source = pd.read_csv(filepath, keep_default_na=False)
@@ -94,20 +86,38 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
             raise ValueError("Selected tickers must be nonempty strings")
         if "Name" not in source:
             raise ValueError("Missing required columns: ['Name']")
+        # Other tickers' malformed OHLCV rows or dates must not invalidate a
+        # selected ticker. Their *valid* source dates nevertheless identify
+        # real market sessions and must remain in its calendar.
+        if "Date" in source and SESSION_COLUMN not in source:
+            source_dates = source["Date"].astype("string")
+            iso_dates = source_dates.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").fillna(False)
+            observed_dates = pd.to_datetime(
+                source_dates.loc[iso_dates], format="mixed", errors="coerce",
+            ).dropna()
+            source_calendar = pd.DatetimeIndex(observed_dates.unique()).sort_values()
+        else:
+            source_calendar = None
         selected = {ticker.strip().upper() for ticker in tickers}
         normalized_names = source["Name"].astype("string").str.strip().str.upper()
         not_found = selected - set(normalized_names.dropna())
         if not_found:
             raise ValueError(f"Ticker not found: {', '.join(sorted(not_found))}")
         source = source.loc[normalized_names.isin(selected)].copy()
+        if source_calendar is not None:
+            selected_dates = parse_daily_dates(source["Date"], context="Every Date")
+            source[SESSION_COLUMN] = source_calendar.get_indexer(selected_dates)
     return validate_bars(source)
 
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Produce one next-observed-day target per symbol, with causal indicators."""
+    """Produce one valid next-market-session target per symbol with causal indicators."""
     source = prepare_indicator_history(df)
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
-    source["Target_Date"] = source.groupby("Name", sort=False)["Date"].shift(-1)
+    next_session = source.groupby("Name", sort=False)[SESSION_COLUMN].shift(-1)
+    adjacent_target = next_session.sub(source[SESSION_COLUMN]).eq(1)
+    source["Target_Date"] = (source.groupby("Name", sort=False)["Date"]
+                             .shift(-1).where(adjacent_target))
     source["Trend"] = (next_close > source["Close"]).astype("int64")
     required = list(MODEL_FEATURES) + [
         "Target_Date", "MA_20", "RSI_14",
@@ -134,8 +144,8 @@ def prepare_indicator_history(df: pd.DataFrame) -> pd.DataFrame:
     """Retain validated, causally calculated price history, including its last bar.
 
     Unlike supervised feature preparation, this does not remove rows solely
-    because their next-day prediction target is unavailable. It also retains
-    missing-indicator rows so HMM filtering can advance through them.
+    because their next-session prediction target is unavailable. It also retains
+    missing-indicator rows to preserve HMM sequence boundaries.
     """
     return add_technical_indicators(validate_bars(df))
 

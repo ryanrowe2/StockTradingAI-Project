@@ -17,9 +17,11 @@ import pandas as pd
 
 if __package__:
     from .date_validation import parse_daily_dates
+    from .session_validation import validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
+    from session_validation import validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -50,6 +52,7 @@ class SimpleTradingEnv:
         self.data = self.data.reset_index(drop=True)
         if "Date" in self.data and self.data["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates")
+        validate_session_positions(self.data, require_consecutive=True)
         prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
         if not np.isfinite(prices).all() or np.any(prices <= 0):
             raise ValueError("Open/close prices must be finite and positive")
