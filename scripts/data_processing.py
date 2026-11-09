@@ -1,175 +1,88 @@
-import pandas as pd
+"""Load historical equity data and create causal, per-ticker model features.
+
+This stage never fits global scalers, quantile bins, or an HMM. Those learned
+transformations belong inside training folds, after the chronological split.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
 import numpy as np
-import os
-import json
-import glob
-from sklearn.preprocessing import StandardScaler
+import pandas as pd
+
 from technical_indicators import add_technical_indicators
-from hmm_integration import fit_hmm_on_indicators
-from hmmlearn.hmm import GaussianHMM  # Updated HMM class import
 
-def load_data(filepath):
-    """
-    Load stock market data from a CSV file.
-    
-    Parameters:
-        filepath (str): Path to the CSV file.
-        
-    Returns:
-        pd.DataFrame: Loaded data as a DataFrame.
-    """
-    df = pd.read_csv(filepath)
-    return df
 
-def impute_missing(df):
-    """
-    Impute missing values in numerical columns with the column mean.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame containing the data.
-        
-    Returns:
-        pd.DataFrame: DataFrame with imputed missing values.
-    """
-    num_cols = df.select_dtypes(include=[np.number]).columns
-    for col in num_cols:
-        # Reassign the filled series to avoid chained assignment warnings
-        df[col] = df[col].fillna(df[col].mean())
-    return df
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RAW_DATA = PROJECT_ROOT / "data/raw/all_stocks_2006-01-01_to_2018-01-01.csv"
+DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
+REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
+MODEL_FEATURES = ("Open", "High", "Low", "ATR", "Return")
 
-def log_transform(df, feature_cols):
-    """
-    Apply a logarithmic transformation to reduce skewness in numerical features.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame containing the data.
-        feature_cols (list): List of feature column names to transform.
-        
-    Returns:
-        pd.DataFrame: DataFrame with log-transformed features.
-    """
-    for col in feature_cols:
-        df[col] = np.log(df[col] + 1e-5)
-    return df
 
-def scale_features(df, feature_cols):
-    """
-    Scale numerical features using StandardScaler.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame containing the data.
-        feature_cols (list): List of numerical feature column names to scale.
-        
-    Returns:
-        tuple: (Scaled DataFrame, scaler object)
-    """
-    scaler = StandardScaler()
-    df[feature_cols] = scaler.fit_transform(df[feature_cols])
-    return df, scaler
+def load_data(filepath: str | Path) -> pd.DataFrame:
+    """Validate raw observations; retain their actual, positive price units."""
+    df = pd.read_csv(filepath, parse_dates=["Date"])
+    missing = set(REQUIRED_COLUMNS) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+    if df[["Date", "Name"]].isna().any().any():
+        raise ValueError("Date and Name must be present for every observation")
+    for name in ("Open", "High", "Low", "Close", "Volume"):
+        df[name] = pd.to_numeric(df[name], errors="coerce")
+    # Dropping a handful of incomplete bars is safer than imputing from future
+    # observations or inventing a price for the current trading day.
+    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).copy()
+    df = df.loc[
+        (df[["Open", "High", "Low", "Close"]] > 0).all(axis=1)
+        & df["Volume"].ge(0)
+    ]
+    if df.duplicated(["Name", "Date"]).any():
+        raise ValueError("Duplicate ticker/date observations")
+    return df.sort_values(["Name", "Date"]).reset_index(drop=True)
 
-def discretize_features(df, feature_cols, bins=5):
-    """
-    Discretize continuous features into categorical bins using quantiles.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame containing the data.
-        feature_cols (list): List of feature column names to discretize.
-        bins (int): Number of quantile bins.
-        
-    Returns:
-        tuple: (DataFrame with binned features, dictionary of bin edges)
-    """
-    bin_edges = {}
-    for col in feature_cols:
-        df[col + '_binned'], bin_edges[col] = pd.qcut(df[col], q=bins, retbins=True, labels=False, duplicates='drop')
-    return df, bin_edges
 
-def generate_cpts(df, feature_cols):
-    """
-    Generate Conditional Probability Tables (CPTs) for the binned features.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame with binned features.
-        feature_cols (list): List of original numerical feature column names.
-        
-    Returns:
-        dict: A dictionary of CPTs.
-    """
-    cpts = {}
-    for col in feature_cols:
-        binned_col = col + '_binned'
-        counts = df[binned_col].value_counts().sort_index()
-        total = counts.sum()
-        probs = (counts / total).to_dict()
-        cpts[col] = probs
-    return cpts
+def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Produce one next-observed-day target per symbol, with causal indicators."""
+    missing = set(REQUIRED_COLUMNS) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+    source = df.copy()
+    source["Date"] = pd.to_datetime(source["Date"])
+    source = source.sort_values(["Name", "Date"]).reset_index(drop=True)
+    if source.duplicated(["Name", "Date"]).any():
+        raise ValueError("Duplicate ticker/date observations")
+    source = add_technical_indicators(source)
+    next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
+    source["Target_Date"] = source.groupby("Name", sort=False)["Date"].shift(-1)
+    source["Trend"] = (next_close > source["Close"]).astype("int64")
+    required = list(MODEL_FEATURES) + [
+        "Target_Date", "MA_20", "RSI_14",
+        "MACD", "MACD_Signal", "BB_Middle", "BB_Upper", "BB_Lower",
+        "Close_Lag1", "Return_Lag1",
+    ]
+    source = source.replace([np.inf, -np.inf], np.nan)
+    return source.dropna(subset=required).reset_index(drop=True)
 
-def save_processed_data(df, output_path):
-    """
-    Save the processed DataFrame to a CSV file.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame to save.
-        output_path (str): Path to the output CSV file.
-    """
-    df.to_csv(output_path, index=False)
-    print(f"Processed data saved to {output_path}")
 
-def save_cpts(cpts, output_path):
-    """
-    Save the Conditional Probability Tables (CPTs) to a JSON file.
-    
-    Parameters:
-        cpts (dict): CPTs dictionary.
-        output_path (str): Path to the output JSON file.
-    """
-    with open(output_path, 'w') as f:
-        json.dump(cpts, f, indent=4)
-    print(f"CPTs saved to {output_path}")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Prepare causal stock features")
+    parser.add_argument("--input", type=Path, default=DEFAULT_RAW_DATA)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--ticker", type=str, default=None)
+    args = parser.parse_args()
+    data = load_data(args.input)
+    if args.ticker:
+        data = data.loc[data["Name"] == args.ticker.upper()].copy()
+        if data.empty:
+            raise ValueError(f"Ticker not found: {args.ticker}")
+    result = prepare_features(data)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    result.to_csv(args.output, index=False)
+    print(f"Prepared {len(result):,} observations from {result.Name.nunique()} tickers: {args.output}")
 
-def main():
-    raw_folder = os.path.join('..', 'data', 'raw')
-    processed_folder = os.path.join('..', 'data', 'processed')
-    os.makedirs(processed_folder, exist_ok=True)
-    csv_files = glob.glob(os.path.join(raw_folder, "*.csv"))
-    if not csv_files:
-        print("No CSV files found in the raw folder.")
-        return
 
-    for file in csv_files:
-        print(f"\nProcessing file: {file}")
-        df = load_data(file)
-        print("Data loaded. Shape:", df.shape)
-        df = impute_missing(df)
-        numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        df = log_transform(df, numerical_cols)
-        df, scaler = scale_features(df, numerical_cols)
-        
-        # Compute technical indicators and add them as new columns.
-        df = add_technical_indicators(df)
-        
-        # Define the indicators for HMM fitting and drop rows with NaN in these columns
-        indicators = ['MA_20', 'RSI_14', 'MACD']
-        df = df.dropna(subset=indicators)
-        
-        # Attempt to fit HMM using the provided integration function.
-        try:
-            _, df = fit_hmm_on_indicators(df, indicators=indicators)
-        except AttributeError:
-            print("fit_hmm_on_indicators encountered an AttributeError. Falling back to manual HMM fitting.")
-            X = df[indicators].values
-            model = GaussianHMM(n_components=2, covariance_type="full", n_iter=1000)
-            model.fit(X)
-            latent_states = model.predict(X)
-            df['Market_Regime'] = latent_states
-        
-        df, bin_edges = discretize_features(df, numerical_cols, bins=5)
-        cpts = generate_cpts(df, numerical_cols)
-        filename = os.path.basename(file)
-        processed_file_path = os.path.join(processed_folder, filename)
-        cpts_file_path = os.path.join(processed_folder, filename.replace(".csv", "_CPTs.json"))
-        save_processed_data(df, processed_file_path)
-        save_cpts(cpts, cpts_file_path)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

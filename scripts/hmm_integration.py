@@ -1,31 +1,77 @@
-import pandas as pd
-from hmmlearn import hmm
+"""Hidden Markov regimes with chronological, forward-only state inference."""
 
-def fit_hmm_on_indicators(df, indicators=['MA_20', 'RSI_14', 'MACD'], n_components=3):
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+from hmmlearn.hmm import GaussianHMM
+from scipy.special import logsumexp
+
+
+DEFAULT_INDICATORS = ("MA_20", "RSI_14", "MACD")
+
+
+def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...]) -> pd.DataFrame:
+    absent = set(indicators) - set(frame.columns)
+    if absent:
+        raise ValueError(f"Missing HMM indicators: {sorted(absent)}")
+    if "Name" in frame and frame["Name"].nunique() > 1:
+        raise ValueError("Fit/infer HMM regimes for one ticker at a time")
+    ordered = frame.sort_values("Date") if "Date" in frame else frame.copy()
+    if "Date" in ordered and ordered["Date"].duplicated().any():
+        raise ValueError("Duplicate dates for a single ticker")
+    clean = ordered.dropna(subset=list(indicators)).copy()
+    if not np.isfinite(clean[list(indicators)].to_numpy(dtype=float)).all():
+        raise ValueError("Indicator values must be finite")
+    return clean
+
+
+def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
+                           indicators: tuple[str, ...] = DEFAULT_INDICATORS) -> pd.DataFrame:
+    """Assign each state's most likely value using only observations so far.
+
+    In particular, do not use HMM ``predict``/Viterbi smoothing: it uses future
+    observations to revise earlier states, invalidating historical backtests.
     """
-    Fit a Gaussian HMM on selected technical indicators to infer market regimes.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame containing technical indicator columns.
-        indicators (list): List of indicator column names to use.
-        n_components (int): Number of latent states (market regimes).
-    
-    Returns:
-        model: The fitted HMM model.
-        df (pd.DataFrame): The DataFrame with an added 'Market_Regime' column.
+    indicators = tuple(indicators)
+    clean = _validated_indicators(df, indicators)
+    output = df.copy()
+    output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
+    if clean.empty:
+        return output
+    observations = clean[list(indicators)].to_numpy(dtype=float)
+    emissions = model._compute_log_likelihood(observations)
+    transition = np.log(np.clip(model.transmat_, 1e-300, 1))
+    log_alpha = np.log(np.clip(model.startprob_, 1e-300, 1))
+    regimes = []
+    for likelihood in emissions:
+        # One forward filtering update; state t uses observations <= t.
+        if regimes:
+            log_alpha = logsumexp(log_alpha[:, None] + transition, axis=0)
+        log_alpha = log_alpha + likelihood
+        log_alpha = log_alpha - logsumexp(log_alpha)
+        regimes.append(int(np.argmax(log_alpha)))
+    output.loc[clean.index, "Market_Regime"] = pd.array(regimes, dtype="Int64")
+    return output
+
+
+def fit_hmm_on_indicators(df: pd.DataFrame,
+                          indicators: tuple[str, ...] = DEFAULT_INDICATORS,
+                          n_components: int = 3,
+                          random_state: int = 42) -> tuple[GaussianHMM, pd.DataFrame]:
+    """Fit on caller-supplied training data and infer its filtered regimes.
+
+    Holdout observations must be supplied only to ``infer_filtered_regimes``
+    using the fitted training-period model, never to this fitting function.
     """
-    # Drop rows with missing values in the selected indicators
-    df_ind = df[indicators].dropna()
-    X = df_ind.values  # Data as numpy array
-    
-    # Initialize and fit the Gaussian HMM
-    model = hmm.GaussianHMM(n_components=n_components, covariance_type="diag", n_iter=100, random_state=42)
-    latent_states = model.fit_predict(X)
-    
-    # Create a Series for latent states and align with original index
-    states_series = pd.Series(latent_states, index=df_ind.index, name='Market_Regime')
-    df = df.join(states_series)
-    
-    # Forward-fill missing regime values (from rows dropped due to NaNs)
-    df['Market_Regime'].fillna(method='ffill', inplace=True)
-    return model, df
+    indicators = tuple(indicators)
+    clean = _validated_indicators(df, indicators)
+    if n_components < 1 or len(clean) < max(n_components * 3, 10):
+        raise ValueError("Insufficient training observations for the HMM")
+    X = clean[list(indicators)].to_numpy(dtype=float)
+    model = GaussianHMM(
+        n_components=n_components, covariance_type="diag", n_iter=150,
+        tol=1e-4, random_state=random_state, min_covar=1e-4,
+    )
+    model.fit(X)
+    return model, infer_filtered_regimes(model, df, indicators)

@@ -1,308 +1,229 @@
-#!/usr/bin/env python
-"""
-Improved Model Training Script for Bayesian Network Stock Trading AI.
+"""Chronological, reproducible evaluation of stock-direction Bayesian networks.
 
-This script implements a complete plan to improve model performance by:
-1. Enhancing data preprocessing & feature engineering.
-2. Improving model structure & hyperparameter tuning.
-3. Using robust evaluation (time-series cross-validation, additional metrics).
-
-It builds two Bayesian Networks (a baseline and an enhanced model)
-and displays their performance.
+All feature engineering is causal. Discretization is learned on the training
+partition only, model selection uses validation data, and the final test period
+is neither used for fitting nor for tuning.
 """
 
-import os
-import json
-import logging
+from __future__ import annotations
+
 import argparse
-import warnings
+import json
+from dataclasses import dataclass
+from pathlib import Path
 
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
+from pgmpy.models import DiscreteBayesianNetwork
+from pgmpy.parameter_estimator import DiscreteBayesianEstimator
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import (precision_score, recall_score, f1_score,
-                             confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc)
-
-from pgmpy.models import BayesianNetwork
-from pgmpy.estimators import BayesianEstimator, HillClimbSearch, BicScore, K2Score
-from pgmpy.inference import VariableElimination
-
-from scipy.stats.mstats import winsorize
-
-warnings.filterwarnings("ignore")
-# Set logging level to WARNING to reduce terminal spam.
-logging.basicConfig(level=logging.WARNING,
-                    format='%(asctime)s [%(levelname)s] %(message)s',
-                    datefmt='%Y-%m-%d %H:%M:%S')
+from data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
 
 
-###############################
-# Data Preprocessing & Feature Engineering
-###############################
-
-def compute_atr(df, period=14):
-    high_low = df['High'] - df['Low']
-    high_close = np.abs(df['High'] - df['Close'].shift())
-    low_close = np.abs(df['Low'] - df['Close'].shift())
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr = tr.rolling(window=period, min_periods=1).mean()
-    return atr
-
-def compute_bollinger_bands(df, window=20, num_std=2):
-    sma = df['Close'].rolling(window=window, min_periods=1).mean()
-    rstd = df['Close'].rolling(window=window, min_periods=1).std()
-    upper_band = sma + num_std * rstd
-    lower_band = sma - num_std * rstd
-    return sma, upper_band, lower_band
-
-def add_technical_indicators(df):
-    df['ATR'] = compute_atr(df)
-    sma, upper_band, lower_band = compute_bollinger_bands(df)
-    df['BB_Middle'] = sma
-    df['BB_Upper'] = upper_band
-    df['BB_Lower'] = lower_band
-    df['Close_Lag1'] = df['Close'].shift(1)
-    df['Return'] = df['Close'].pct_change()
-    df['Return_Lag1'] = df['Return'].shift(1)
-    return df
-
-def apply_winsorization(df, columns, limits=(0.05, 0.05)):
-    for col in columns:
-        df[col] = winsorize(df[col], limits=limits)
-    return df
-
-def discretize_features(df, features, num_bins=7, method='quantile'):
-    for feature in features:
-        if method == 'quantile':
-            df[f"{feature}_binned"] = pd.qcut(df[feature], q=num_bins, duplicates='drop', labels=False)
-        elif method == 'equal_width':
-            df[f"{feature}_binned"] = pd.cut(df[feature], bins=num_bins, labels=False)
-        else:
-            raise ValueError("Unsupported discretization method.")
-    return df
-
-def feature_selection(df, target, threshold=0.95, preserve=[]):
-    numeric_df = df.select_dtypes(include=[np.number])
-    corr_matrix = numeric_df.corr().abs()
-    upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-    to_drop = []
-    for column in upper_tri.columns:
-        if column in preserve:
-            continue
-        if any(upper_tri[column] > threshold):
-            to_drop.append(column)
-    logging.warning(f"Features dropped: {to_drop}")
-    df = df.drop(columns=to_drop, errors='ignore')
-    return df
+BASELINE_FEATURES = ("Open", "High", "Low")
+ENHANCED_FEATURES = MODEL_FEATURES
+DEFAULT_METRICS = Path(__file__).resolve().parents[1] / "data/generated/model_metrics.json"
 
 
-###############################
-# Bayesian Network Trainer with Cross-Validation & Grid Search
-###############################
-
-class BaseModelTrainer:
-    def __init__(self, config: dict):
-        self.processed_data_path = config.get('processed_data_path')
-        self.cpts_path = config.get('cpts_path')
-        self.inference_method = config.get('inference_method', 'VE')
-        self.config = config
-
-    def load_processed_data(self) -> pd.DataFrame:
-        df = pd.read_csv(self.processed_data_path)
-        logging.warning(f"Data loaded with shape: {df.shape}")
-        return df
-
-    def load_cpts(self) -> dict:
-        with open(self.cpts_path, 'r') as f:
-            cpts = json.load(f)
-        return cpts
-
-    @staticmethod
-    def prepare_target(df: pd.DataFrame) -> pd.DataFrame:
-        df['Trend'] = (df['Close'].shift(-1) > df['Close']).astype(int)
-        df.dropna(inplace=True)
-        logging.warning(f"Target prepared. Data shape: {df.shape}")
-        return df
-
-    def evaluate_model(self, model: BayesianNetwork, test_df: pd.DataFrame,
-                       features: list, target: str) -> tuple:
-        inference = VariableElimination(model)
-        predictions = []
-        predicted_probs = []
-        actuals = test_df[target].tolist()
-        for _, row in test_df[features].iterrows():
-            evidence = row.to_dict()
-            query_result = inference.query(variables=[target], evidence=evidence, show_progress=False)
-            prob_target_1 = query_result.values[1]
-            predicted_probs.append(prob_target_1)
-            predictions.append(1 if prob_target_1 >= 0.5 else 0)
-        accuracy = np.mean(np.array(predictions) == np.array(actuals))
-        precision = precision_score(actuals, predictions)
-        recall = recall_score(actuals, predictions)
-        f1 = f1_score(actuals, predictions)
-        cm = confusion_matrix(actuals, predictions)
-        fpr, tpr, _ = roc_curve(actuals, predicted_probs)
-        roc_auc = auc(fpr, tpr)
-        return predictions, actuals, accuracy, predicted_probs
-
-class BayesianNetworkTrainer(BaseModelTrainer):
-    def __init__(self, config: dict):
-        super().__init__(config)
-        self.param_grid = {
-            'equivalent_sample_size': [5, 10, 15, 20],
-            'prior_type': ['BDeu']
-        }
-        self.num_restarts = config.get('num_restarts', 3)
-        self.scoring_method_name = config.get('scoring_method', 'BicScore')
-
-    def build_model(self, df: pd.DataFrame, features: list, target: str,
-                    estimator=BayesianEstimator, **estimator_params) -> BayesianNetwork:
-        edges = [(feature, target) for feature in features]
-        model = BayesianNetwork(edges)
-        model.fit(df[features + [target]], estimator=estimator,
-                  prior_type=estimator_params.get('prior_type', 'BDeu'),
-                  equivalent_sample_size=estimator_params.get('equivalent_sample_size', 15))
-        return model
-
-    def learn_structure(self, df: pd.DataFrame, variables: list, seed=None) -> BayesianNetwork:
-        if self.scoring_method_name == 'K2Score':
-            score = K2Score(df[variables])
-        else:
-            score = BicScore(df[variables])
-        hc = HillClimbSearch(df[variables])
-        if seed is not None:
-            np.random.seed(seed)
-        best_model = hc.estimate(scoring_method=score)
-        return best_model
-
-    def grid_search_estimator(self, df: pd.DataFrame, features: list, target: str, cv_splits=3):
-        best_score = -np.inf
-        best_params = {}
-        tscv = TimeSeriesSplit(n_splits=cv_splits)
-        for ess in self.param_grid['equivalent_sample_size']:
-            for prior in self.param_grid['prior_type']:
-                scores = []
-                for train_idx, val_idx in tscv.split(df):
-                    train_df = df.iloc[train_idx]
-                    val_df = df.iloc[val_idx]
-                    model = self.build_model(train_df, features, target,
-                                             estimator=BayesianEstimator,
-                                             equivalent_sample_size=ess,
-                                             prior_type=prior)
-                    _, _, acc, _ = self.evaluate_model(model, val_df, features, target)
-                    scores.append(acc)
-                avg_score = np.mean(scores)
-                if avg_score > best_score:
-                    best_score = avg_score
-                    best_params = {'equivalent_sample_size': ess, 'prior_type': prior}
-        logging.warning(f"Best estimator params: {best_params}, CV Accuracy: {best_score:.4f}")
-        return best_params
+@dataclass(frozen=True)
+class ChronologicalSplit:
+    train: pd.DataFrame
+    validation: pd.DataFrame
+    test: pd.DataFrame
+    train_end: pd.Timestamp
+    validation_end: pd.Timestamp
 
 
-###############################
-# Main Function: Implementation Roadmap
-###############################
+def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
+                        validation_fraction: float = 0.2) -> ChronologicalSplit:
+    """Split globally by observation date, purging cross-period target labels."""
+    if not 0 < train_fraction < 1 or not 0 < validation_fraction < 1 - train_fraction:
+        raise ValueError("Train and validation fractions must leave a test period")
+    if df.empty or "Target_Date" not in df or "Date" not in df:
+        raise ValueError("A nonempty, feature-prepared DataFrame is required")
+    dates = pd.DatetimeIndex(pd.to_datetime(df["Date"]).unique()).sort_values()
+    if len(dates) < 15:
+        raise ValueError("At least 15 distinct trading dates are required")
+    first_cut = int(len(dates) * train_fraction)
+    second_cut = int(len(dates) * (train_fraction + validation_fraction))
+    train_end, validation_end = dates[first_cut - 1], dates[second_cut - 1]
+    # A row at the split boundary could have a next-day label drawn from the
+    # following period; those labels must not be available to earlier models.
+    target_date = pd.to_datetime(df["Target_Date"])
+    date = pd.to_datetime(df["Date"])
+    train = df.loc[(date <= train_end) & (target_date <= train_end)].copy()
+    validation = df.loc[
+        (date > train_end) & (date <= validation_end) & (target_date <= validation_end)
+    ].copy()
+    test = df.loc[date > validation_end].copy()
+    if min(len(train), len(validation), len(test)) == 0:
+        raise ValueError("All three chronological partitions must contain samples")
+    return ChronologicalSplit(train, validation, test, train_end, validation_end)
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Train and evaluate an improved Bayesian Network for Stock Trading AI."
+
+class QuantileBinner:
+    """Train-fitted discretizer. No quantile is estimated from held-out rows."""
+
+    def __init__(self, num_bins: int = 4):
+        if not 2 <= num_bins <= 20:
+            raise ValueError("num_bins must be between 2 and 20")
+        self.num_bins = num_bins
+        self.edges: dict[str, np.ndarray] = {}
+
+    def fit(self, df: pd.DataFrame, features: tuple[str, ...]) -> "QuantileBinner":
+        for feature in features:
+            values = df[feature].to_numpy(dtype=float)
+            if not len(values) or not np.isfinite(values).all():
+                raise ValueError(f"Feature {feature} contains missing/nonfinite values")
+            self.edges[feature] = np.unique(
+                np.quantile(values, np.linspace(0, 1, self.num_bins + 1)[1:-1])
+            )
+        return self
+
+    def transform(self, df: pd.DataFrame, features: tuple[str, ...]) -> pd.DataFrame:
+        result = pd.DataFrame(index=df.index)
+        for feature in features:
+            if feature not in self.edges:
+                raise RuntimeError(f"Binner not fitted for {feature}")
+            values = df[feature].to_numpy(dtype=float)
+            if not np.isfinite(values).all():
+                raise ValueError(f"Feature {feature} contains missing/nonfinite values")
+            result[feature] = np.searchsorted(self.edges[feature], values, side="right")
+        return result
+
+
+def fit_network(df: pd.DataFrame, features: tuple[str, ...],
+                num_bins: int, equivalent_sample_size: int) -> DiscreteBayesianNetwork:
+    """Fit a simple, interpretable feature-to-next-day-direction network."""
+    network = DiscreteBayesianNetwork([(name, "Trend") for name in features])
+    # Specify the full bin vocabulary even when a particular training period
+    # does not observe one of its bins.
+    state_names = {name: list(range(num_bins)) for name in features}
+    state_names["Trend"] = [0, 1]
+    network.fit(
+        df[[*features, "Trend"]],
+        estimator=DiscreteBayesianEstimator(
+            prior_type="BDeu",
+            equivalent_sample_size=equivalent_sample_size,
+            state_names=state_names,
+        ),
     )
-    parser.add_argument('--processed_data_path', type=str,
-                        default=os.path.join('..', 'data', 'processed', 'all_stocks_2006-01-01_to_2018-01-01.csv'),
-                        help='Path to the processed CSV file.')
-    parser.add_argument('--cpts_path', type=str,
-                        default=os.path.join('..', 'data', 'processed', 'all_stocks_2006-01-01_to_2018-01-01_CPTs.json'),
-                        help='Path to the CPT JSON file.')
-    parser.add_argument('--num_bins', type=int, default=7,
-                        help='Number of bins for discretization.')
-    parser.add_argument('--discretization_method', type=str, choices=['quantile', 'equal_width'],
-                        default='quantile', help='Method for discretization.')
-    parser.add_argument('--inference_method', type=str, choices=['VE', 'enumeration'],
-                        default='VE', help='Inference method to use.')
-    parser.add_argument('--scoring_method', type=str, choices=['BicScore', 'K2Score'],
-                        default='BicScore', help='Scoring method for structure learning.')
-    parser.add_argument('--num_restarts', type=int, default=3,
-                        help='Number of restarts for structure learning.')
-    parser.add_argument('--cv_splits', type=int, default=3,
-                        help='Number of splits for time-series cross-validation.')
+    if not network.check_model():
+        raise RuntimeError("Bayesian network parameters are not valid")
+    return network
+
+
+def predict_up_probability(network: DiscreteBayesianNetwork, frame: pd.DataFrame) -> np.ndarray:
+    """Vectorized posterior lookup for the fully observed feature-parent graph."""
+    conditional = network.get_cpds("Trend")
+    parents = conditional.variables[1:]
+    positions = []
+    for parent in parents:
+        name_to_index = {state: i for i, state in enumerate(conditional.state_names[parent])}
+        positions.append(frame[parent].map(name_to_index).to_numpy(dtype=int))
+    up_index = conditional.state_names["Trend"].index(1)
+    return np.asarray(conditional.values[(up_index, *positions)], dtype=float)
+
+
+def classification_metrics(labels: pd.Series, probabilities: np.ndarray) -> dict[str, float]:
+    actual = labels.to_numpy(dtype=int)
+    predictions = (probabilities >= 0.5).astype(int)
+    result = {
+        "accuracy": float(accuracy_score(actual, predictions)),
+        "balanced_accuracy": float(balanced_accuracy_score(actual, predictions)),
+        "precision": float(precision_score(actual, predictions, zero_division=0)),
+        "recall": float(recall_score(actual, predictions, zero_division=0)),
+        "f1": float(f1_score(actual, predictions, zero_division=0)),
+    }
+    result["roc_auc"] = float(roc_auc_score(actual, probabilities)) if len(np.unique(actual)) == 2 else None
+    return result
+
+
+def train_and_select(split: ChronologicalSplit, features: tuple[str, ...],
+                     num_bins: int, sample_sizes: tuple[int, ...] = (5, 10, 15, 20)) -> dict:
+    """Select prior strength on validation; refit and score on test once."""
+    binner = QuantileBinner(num_bins).fit(split.train, features)
+    train = binner.transform(split.train, features)
+    train["Trend"] = split.train["Trend"].to_numpy(dtype=int)
+    validation = binner.transform(split.validation, features)
+
+    choices = []
+    for size in sample_sizes:
+        candidate = fit_network(train, features, num_bins, size)
+        probability = predict_up_probability(candidate, validation)
+        metrics = classification_metrics(split.validation["Trend"], probability)
+        choices.append((metrics["balanced_accuracy"], metrics["accuracy"], size, metrics))
+
+    # All hyperparameters are decided before looking at test performance.
+    _, _, best_size, validation_metrics = max(choices, key=lambda item: (item[0], item[1], -item[2]))
+    combined = pd.concat([split.train, split.validation], ignore_index=True)
+    final_binner = QuantileBinner(num_bins).fit(combined, features)
+    combined_discrete = final_binner.transform(combined, features)
+    combined_discrete["Trend"] = combined["Trend"].to_numpy(dtype=int)
+    final_network = fit_network(combined_discrete, features, num_bins, best_size)
+    test = final_binner.transform(split.test, features)
+    probabilities = predict_up_probability(final_network, test)
+    return {
+        "features": list(features),
+        "num_bins": num_bins,
+        "equivalent_sample_size": best_size,
+        "validation": validation_metrics,
+        "test": classification_metrics(split.test["Trend"], probabilities),
+    }
+
+
+def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
+                   tickers: tuple[str, ...] | None = None, num_bins: int = 4) -> dict:
+    data = load_data(raw_data)
+    if tickers:
+        selected = {ticker.upper() for ticker in tickers}
+        data = data.loc[data["Name"].isin(selected)].copy()
+        not_found = selected - set(data["Name"])
+        if not_found:
+            raise ValueError(f"Ticker not found: {', '.join(sorted(not_found))}")
+    frame = prepare_features(data)
+    split = chronological_split(frame)
+    baseline = train_and_select(split, BASELINE_FEATURES, num_bins)
+    enhanced = train_and_select(split, ENHANCED_FEATURES, num_bins)
+    majority_label = int(split.train["Trend"].mean() >= 0.5)
+    majority = float((split.test["Trend"] == majority_label).mean())
+    return {
+        "source": str(Path(raw_data).name),
+        "tickers": int(frame["Name"].nunique()),
+        "observations": {"train": len(split.train), "validation": len(split.validation), "test": len(split.test)},
+        "periods": {
+            "train_end": split.train_end.date().isoformat(),
+            "validation_end": split.validation_end.date().isoformat(),
+            "test_start": pd.Timestamp(split.test["Date"].min()).date().isoformat(),
+            "test_end": pd.Timestamp(split.test["Date"].max()).date().isoformat(),
+        },
+        "majority_class_test_accuracy": majority,
+        "baseline": baseline,
+        "enhanced": enhanced,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, default=DEFAULT_RAW_DATA)
+    parser.add_argument("--ticker", action="append", dest="tickers", help="Repeat to select multiple symbols")
+    parser.add_argument("--num-bins", type=int, default=4)
+    parser.add_argument("--output", type=Path, default=DEFAULT_METRICS)
     args = parser.parse_args()
-    config = vars(args)
+    result = run_experiment(args.input, tickers=tuple(args.tickers) if args.tickers else None,
+                            num_bins=args.num_bins)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2))
 
-    bn_trainer = BayesianNetworkTrainer(config)
-    df = bn_trainer.load_processed_data()
-    _ = bn_trainer.load_cpts()  # For side effects.
-    logging.warning(f"Original data shape: {df.shape}")
 
-    df = apply_winsorization(df, ['Close', 'High', 'Low'])
-    df = add_technical_indicators(df)
-    continuous_features = ['Close', 'ATR', 'BB_Middle', 'BB_Upper', 'BB_Lower', 'Return', 'Close_Lag1', 'Return_Lag1']
-    df = discretize_features(df, continuous_features, num_bins=config['num_bins'],
-                             method=config['discretization_method'])
-    df = bn_trainer.prepare_target(df)
-    preserve_cols = ['Open_binned', 'High_binned', 'Low_binned',
-                     'ATR_binned', 'Return_binned', 'Close_binned',
-                     'BB_Middle_binned', 'BB_Upper_binned', 'BB_Lower_binned',
-                     'Close_Lag1_binned', 'Return_Lag1_binned', 'Trend']
-    df = feature_selection(df, target='Trend', threshold=0.95, preserve=preserve_cols)
-
-    baseline_candidates = ['Open_binned', 'High_binned', 'Low_binned']
-    baseline_features = [col for col in baseline_candidates if col in df.columns]
-    enhanced_candidates = baseline_candidates + ['ATR_binned', 'Return_binned']
-    enhanced_features = [col for col in enhanced_candidates if col in df.columns]
-
-    logging.warning(f"Baseline features: {baseline_features}")
-    logging.warning(f"Enhanced features: {enhanced_features}")
-
-    tscv = TimeSeriesSplit(n_splits=config['cv_splits'])
-    bn_cv_scores = []
-    for train_idx, test_idx in tscv.split(df):
-        train_df = df.iloc[train_idx]
-        test_df = df.iloc[test_idx]
-        bn_model = bn_trainer.build_model(train_df, baseline_features, 'Trend',
-                                          estimator=BayesianEstimator,
-                                          equivalent_sample_size=15,
-                                          prior_type='BDeu')
-        _, _, acc, _ = bn_trainer.evaluate_model(bn_model, test_df, baseline_features, 'Trend')
-        bn_cv_scores.append(acc)
-    baseline_cv_accuracy = np.mean(bn_cv_scores)
-    logging.warning(f"Baseline BN CV Accuracy: {baseline_cv_accuracy:.4f}")
-
-    best_params = bn_trainer.grid_search_estimator(df, enhanced_features, 'Trend', cv_splits=config['cv_splits'])
-    best_structure_score = -np.inf
-    best_structure = None
-    for i in range(bn_trainer.num_restarts):
-        structure_model = bn_trainer.learn_structure(df, enhanced_features + ['Trend'], seed=i)
-        splits = list(tscv.split(df))
-        train_idx, test_idx = splits[-1]
-        train_df = df.iloc[train_idx]
-        test_df = df.iloc[test_idx]
-        enhanced_bn = BayesianNetwork(list(structure_model.edges()))
-        enhanced_bn.fit(train_df[enhanced_features + ['Trend']],
-                        estimator=BayesianEstimator,
-                        prior_type=best_params.get('prior_type', 'BDeu'),
-                        equivalent_sample_size=best_params.get('equivalent_sample_size', 15))
-        _, _, acc, _ = bn_trainer.evaluate_model(enhanced_bn, test_df, enhanced_features, 'Trend')
-        if acc > best_structure_score:
-            best_structure_score = acc
-            best_structure = structure_model
-    logging.warning(f"Best structure validation accuracy: {best_structure_score:.4f}")
-    
-    enhanced_bn_model = BayesianNetwork(list(best_structure.edges()))
-    enhanced_bn_model.fit(df[enhanced_features + ['Trend']],
-                          estimator=BayesianEstimator,
-                          prior_type=best_params.get('prior_type', 'BDeu'),
-                          equivalent_sample_size=best_params.get('equivalent_sample_size', 15))
-    
-    holdout_index = int(len(df) * 0.8)
-    train_df = df.iloc[:holdout_index]
-    test_df = df.iloc[holdout_index:]
-    
-    _, _, bn_accuracy, _ = bn_trainer.evaluate_model(enhanced_bn_model, test_df, enhanced_features, 'Trend')
-    
-    # Print final summary with accuracy for the enhanced Bayesian Network.
-    print(f"Final Holdout Accuracy -> Enhanced BN: {bn_accuracy:.4f}")
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

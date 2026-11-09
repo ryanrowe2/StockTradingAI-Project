@@ -1,156 +1,127 @@
-import numpy as np
+"""Single-symbol, long-or-flat Q-learning trading research environment.
+
+The agent can buy one share, sell its existing share, or hold. Every step is
+marked to market, with configurable transaction costs and terminal handling.
+This is an experimental simulator, not an execution or profitability claim.
+"""
+
+from __future__ import annotations
+
 import random
 
+import numpy as np
+import pandas as pd
+
+
+class SimpleTradingEnv:
+    """Sequential one-share close-to-close simulation with no leverage."""
+
+    def __init__(self, data: pd.DataFrame, transaction_cost: float = 0.001):
+        if "Close" not in data or len(data) < 2:
+            raise ValueError("The trading environment needs at least two close prices")
+        if "Name" in data and data["Name"].nunique() != 1:
+            raise ValueError("A trading episode must contain exactly one ticker")
+        if not 0 <= transaction_cost < 1:
+            raise ValueError("transaction_cost must be a fraction between 0 and 1")
+        self.data = data.sort_values("Date").reset_index(drop=True) if "Date" in data else data.reset_index(drop=True)
+        if "Date" in self.data and self.data["Date"].duplicated().any():
+            raise ValueError("Duplicate trading dates")
+        prices = self.data["Close"].to_numpy(dtype=float)
+        if not np.isfinite(prices).all() or np.any(prices <= 0):
+            raise ValueError("Close prices must be finite and positive")
+        self.transaction_cost = transaction_cost
+        self.reset()
+
+    def reset(self) -> tuple[int, ...]:
+        self.index = 0
+        self.position = 0
+        self.done = False
+        return self.get_state()
+
+    def get_state(self) -> tuple[int, ...]:
+        row = self.data.iloc[self.index]
+        fields = ("Open_binned", "High_binned", "Low_binned", "Market_Regime")
+        return tuple(int(row[field]) if field in row and pd.notna(row[field]) else 0
+                     for field in fields) + (self.position,)
+
+    def step(self, action: str) -> tuple[tuple[int, ...], float, bool, dict]:
+        if self.done:
+            raise RuntimeError("Episode finished. Call reset() before stepping again")
+        if action not in {"buy", "sell", "hold"}:
+            raise ValueError(f"Unrecognized action: {action}")
+        price = float(self.data.iloc[self.index]["Close"])
+        fee = 0.0
+        if action == "buy" and self.position == 0:
+            self.position = 1
+            fee = price * self.transaction_cost
+        elif action == "sell" and self.position == 1:
+            self.position = 0
+            fee = price * self.transaction_cost
+        next_price = float(self.data.iloc[self.index + 1]["Close"])
+        reward = self.position * (next_price - price) - fee
+        self.index += 1
+        self.done = self.index == len(self.data) - 1
+        return self.get_state(), float(reward), self.done, {"position": self.position, "fee": fee}
+
+
 class QLearningAgent:
-    """
-    A simple Q-learning agent for stock trading.
-    """
-    def __init__(self, actions=['buy', 'sell', 'hold'], alpha=0.1, gamma=0.95, epsilon=0.1):
-        self.q_table = {}  # Maps state (tuple) to {action: Q-value}
-        self.actions = actions
-        self.alpha = alpha      # Learning rate
-        self.gamma = gamma      # Discount factor
-        self.epsilon = epsilon  # Exploration rate
+    """Tabular epsilon-greedy learner with correct terminal-state updates."""
 
-    def get_state(self, state_features):
-        """
-        Convert state features into a hashable tuple representation.
-        """
-        return tuple(state_features)
+    def __init__(self, actions: tuple[str, ...] = ("buy", "sell", "hold"),
+                 alpha: float = 0.1, gamma: float = 0.95,
+                 epsilon: float = 0.1, seed: int = 42):
+        if not actions or not 0 < alpha <= 1 or not 0 <= gamma <= 1 or not 0 <= epsilon <= 1:
+            raise ValueError("Invalid Q-learning parameters")
+        self.actions = tuple(actions)
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.q_table: dict[tuple[int, ...], dict[str, float]] = {}
+        self.rng = random.Random(seed)
 
-    def choose_action(self, state_features):
-        """
-        Choose an action based on an epsilon-greedy policy.
-        """
+    def get_state(self, state_features) -> tuple[int, ...]:
+        return tuple(int(value) for value in state_features)
+
+    def _values(self, state: tuple[int, ...]) -> dict[str, float]:
+        return self.q_table.setdefault(state, {action: 0.0 for action in self.actions})
+
+    def choose_action(self, state_features, *, explore: bool = True) -> str:
         state = self.get_state(state_features)
-        if random.random() < self.epsilon or state not in self.q_table:
-            return random.choice(self.actions)
-        else:
-            return max(self.q_table[state], key=self.q_table[state].get)
+        if explore and self.rng.random() < self.epsilon:
+            return self.rng.choice(self.actions)
+        estimates = self._values(state)
+        return max(self.actions, key=estimates.__getitem__)
 
-    def update_q_value(self, state_features, action, reward, next_state_features):
-        """
-        Update Q-value for a given state-action pair using the Q-learning update rule.
-        """
+    def update_q_value(self, state_features, action: str, reward: float,
+                       next_state_features, done: bool = False) -> None:
         state = self.get_state(state_features)
-        next_state = self.get_state(next_state_features)
-        if state not in self.q_table:
-            self.q_table[state] = {a: 0.0 for a in self.actions}
-        if next_state not in self.q_table:
-            self.q_table[next_state] = {a: 0.0 for a in self.actions}
-        max_future_q = max(self.q_table[next_state].values())
-        current_q = self.q_table[state][action]
-        new_q = current_q + self.alpha * (reward + self.gamma * max_future_q - current_q)
-        self.q_table[state][action] = new_q
+        current = self._values(state)
+        if action not in current:
+            raise ValueError(f"Unrecognized action: {action}")
+        future = 0.0 if done else max(self._values(self.get_state(next_state_features)).values())
+        current[action] += self.alpha * (reward + self.gamma * future - current[action])
 
-    def simulate_episode(self, env, max_steps=100):
-        """
-        Simulate one episode in the trading environment.
-        
-        Parameters:
-            env: An environment with reset() and step(action) methods.
-            max_steps (int): Maximum steps in the episode.
-        
-        Returns:
-            float: Total reward accumulated during the episode.
-        """
+    def simulate_episode(self, env: SimpleTradingEnv, max_steps: int | None = None,
+                         *, train: bool = True) -> float:
         state = env.reset()
         total_reward = 0.0
-        for _ in range(max_steps):
-            action = self.choose_action(state)
+        steps = max_steps if max_steps is not None else len(env.data) - 1
+        for _ in range(steps):
+            action = self.choose_action(state, explore=train)
             next_state, reward, done, _ = env.step(action)
-            self.update_q_value(state, action, reward, next_state)
+            if train:
+                self.update_q_value(state, action, reward, next_state, done)
             state = next_state
             total_reward += reward
             if done:
                 break
-        return total_reward
+        return float(total_reward)
 
-# A simple trading environment for testing the RL agent
-class SimpleTradingEnv:
-    """
-    A simple simulation environment for stock trading.
-    """
-    def __init__(self, data):
-        """
-        Parameters:
-            data (pd.DataFrame): Processed DataFrame containing at least 'Close', 
-                                 'Open_binned', 'High_binned', 'Low_binned', and 'Market_Regime' columns.
-        """
-        self.data = data.reset_index(drop=True)
-        self.index = 0
 
-    def reset(self):
-        self.index = 0
-        return self.get_state()
-
-    def step(self, action):
-        """
-        Simulate a single trading step.
-        For simplicity, reward is defined as the difference in 'Close' price when buying.
-        """
-        current_price = self.data.loc[self.index, 'Close']
-        self.index += 1
-        done = self.index >= len(self.data) - 1
-        next_price = self.data.loc[self.index, 'Close'] if not done else current_price
-        reward = (next_price - current_price) if action == 'buy' else 0
-        return self.get_state(), reward, done, {}
-
-    def get_state(self):
-        """
-        Return the current state as a tuple of (Open_binned, High_binned, Low_binned, Market_Regime).
-        """
-        row = self.data.loc[self.index]
-        open_bin = row.get('Open_binned', 0)
-        high_bin = row.get('High_binned', 0)
-        low_bin = row.get('Low_binned', 0)
-        market_regime = row.get('Market_Regime', 0)
-        return (open_bin, high_bin, low_bin, market_regime)
-
-# Enhanced testing code for the RL agent.
-if __name__ == '__main__':
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    # Create a dummy DataFrame for demonstration purposes.
-    # In practice, replace this with your actual processed data.
-    data = {
-        'Close': [100, 102, 101, 103, 105, 104, 106, 108, 107, 109, 110, 108, 111, 113, 112],
-        'Open_binned': [2] * 15,
-        'High_binned': [2] * 15,
-        'Low_binned': [2] * 15,
-        'Market_Regime': [1] * 15
-    }
-    df_dummy = pd.DataFrame(data)
-    
-    # Initialize the simple trading environment and Q-learning agent.
-    env = SimpleTradingEnv(df_dummy)
-    agent = QLearningAgent(alpha=0.1, gamma=0.95, epsilon=0.1)
-    
-    # Define the number of episodes and maximum steps per episode.
-    episodes = 50
-    max_steps = len(df_dummy)  # Use the full length of the data for each episode.
-    
-    # Lists to store episode rewards.
-    episode_rewards = []
-    
-    # Run episodes and collect rewards.
-    for ep in range(episodes):
-        total_reward = agent.simulate_episode(env, max_steps=max_steps)
-        episode_rewards.append(total_reward)
-        print(f"Episode {ep+1}/{episodes}: Total Reward = {total_reward:.2f}")
-    
-    # Calculate summary statistics.
-    avg_reward = np.mean(episode_rewards)
-    std_reward = np.std(episode_rewards)
-    print(f"\nAverage Reward over {episodes} episodes: {avg_reward:.2f} ± {std_reward:.2f}")
-    
-    # Plot the learning curve.
-    plt.figure(figsize=(8, 5))
-    plt.plot(range(1, episodes + 1), episode_rewards, marker='o', linestyle='-', color='b')
-    plt.xlabel('Episode')
-    plt.ylabel('Total Reward')
-    plt.title('Q-Learning Agent Performance')
-    plt.grid(True)
-    plt.show()
+if __name__ == "__main__":
+    demonstration = pd.DataFrame({"Close": [100, 102, 101, 103, 105, 104, 106]})
+    env = SimpleTradingEnv(demonstration)
+    agent = QLearningAgent()
+    for _ in range(50):
+        agent.simulate_episode(env)
+    print(f"Demonstration episode reward (learning disabled): {agent.simulate_episode(env, train=False):.2f}")
