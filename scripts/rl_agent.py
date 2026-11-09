@@ -23,8 +23,11 @@ class SimpleTradingEnv:
                  state_columns: tuple[str, ...] | None = None):
         if not {"Open", "Close"}.issubset(data.columns) or len(data) < 2:
             raise ValueError("The trading environment needs at least two daily open/close bars")
-        if "Name" in data and data["Name"].nunique() != 1:
-            raise ValueError("A trading episode must contain exactly one ticker")
+        if "Name" in data:
+            symbols = data["Name"]
+            if (symbols.isna().any() or symbols.astype(str).str.strip().eq("").any()
+                    or symbols.nunique() != 1):
+                raise ValueError("A trading episode must contain exactly one ticker with a valid name")
         if not 0 <= transaction_cost < 1:
             raise ValueError("transaction_cost must be a fraction between 0 and 1")
         self.data = data.copy()
@@ -150,12 +153,20 @@ class QLearningAgent:
     def update_q_value(self, state_features, action: str, reward: float,
                        next_state_features, done: bool = False) -> None:
         state = self.get_state(state_features)
-        current = self._values(state)
-        if action not in current or action not in self._valid_actions(state):
+        if action not in self._valid_actions(state):
             raise ValueError(f"Unrecognized action: {action}")
         next_state = self.get_state(next_state_features)
+        next_actions = () if done else self._valid_actions(next_state)
+        try:
+            reward = float(reward)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Reward must be finite") from exc
+        if not np.isfinite(reward):
+            raise ValueError("Reward must be finite")
+        # Validate everything before creating a new Q-table entry.
         future = (0.0 if done else max(self._values(next_state)[candidate]
-                                      for candidate in self._valid_actions(next_state)))
+                                      for candidate in next_actions))
+        current = self._values(state)
         current[action] += self.alpha * (reward + self.gamma * future - current[action])
 
     def simulate_episode(self, env: SimpleTradingEnv, max_steps: int | None = None,

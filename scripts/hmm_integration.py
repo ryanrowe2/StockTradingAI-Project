@@ -15,8 +15,11 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...]) -> p
     absent = set(indicators) - set(frame.columns)
     if absent:
         raise ValueError(f"Missing HMM indicators: {sorted(absent)}")
-    if "Name" in frame and frame["Name"].nunique() > 1:
-        raise ValueError("Fit/infer HMM regimes for one ticker at a time")
+    if "Name" in frame:
+        symbols = frame["Name"]
+        if (symbols.isna().any() or symbols.astype(str).str.strip().eq("").any()
+                or symbols.nunique() != 1):
+            raise ValueError("Fit/infer HMM regimes for one ticker with a valid name at a time")
     ordered = frame.copy()
     if "Date" in ordered:
         ordered["Date"] = pd.to_datetime(ordered["Date"], format="mixed", errors="coerce")

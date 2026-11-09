@@ -84,13 +84,15 @@ class QuantileBinner:
         self.edges: dict[str, np.ndarray] = {}
 
     def fit(self, df: pd.DataFrame, features: tuple[str, ...]) -> "QuantileBinner":
+        new_edges = {}
         for feature in features:
             values = df[feature].to_numpy(dtype=float)
             if not len(values) or not np.isfinite(values).all():
                 raise ValueError(f"Feature {feature} contains missing/nonfinite values")
-            self.edges[feature] = np.unique(
+            new_edges[feature] = np.unique(
                 np.quantile(values, np.linspace(0, 1, self.num_bins + 1)[1:-1])
             )
+        self.edges = new_edges
         return self
 
     def transform(self, df: pd.DataFrame, features: tuple[str, ...]) -> pd.DataFrame:

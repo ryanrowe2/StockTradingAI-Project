@@ -85,6 +85,16 @@ def test_direct_indicator_api_orders_parsed_dates():
         add_technical_indicators(bars.assign(Date=["invalid", "2020-1-2", "2020-1-3"]))
 
 
+def test_direct_indicator_api_rejects_missing_symbols_and_duplicate_dates():
+    bars = synthetic_bars(3).loc[lambda frame: frame["Name"] == "AAA"].reset_index(drop=True)
+    with pytest.raises(ValueError, match="ticker name"):
+        add_technical_indicators(bars.assign(Name=["AAA", None, "AAA"]))
+    with pytest.raises(ValueError, match="ticker name"):
+        add_technical_indicators(bars.assign(Name=["AAA", " ", "AAA"]))
+    with pytest.raises(ValueError, match="Duplicate ticker/date"):
+        add_technical_indicators(bars.assign(Date=[bars.loc[0, "Date"]] * len(bars)))
+
+
 def test_model_features_are_invariant_to_ticker_price_scale():
     bars = synthetic_bars()
     original = prepare_features(bars).query("Name == 'AAA'")
@@ -177,6 +187,19 @@ def test_binner_rejects_invalid_bin_counts_at_construction(value):
 
 def test_binner_accepts_numpy_integer_counts():
     assert QuantileBinner(np.int64(3)).num_bins == 3
+
+
+def test_binner_refit_replaces_thresholds_atomically():
+    binner = QuantileBinner(3).fit(pd.DataFrame({"A": [1, 2, 3, 4]}), ("A",))
+    previous = binner.edges["A"].copy()
+    with pytest.raises(ValueError, match="nonfinite"):
+        binner.fit(pd.DataFrame({"B": [1., 2., 3., 4.], "C": [1., np.nan, 3., 4.]}), ("B", "C"))
+    assert list(binner.edges) == ["A"]
+    np.testing.assert_array_equal(binner.edges["A"], previous)
+    binner.fit(pd.DataFrame({"B": [10, 20, 30, 40]}), ("B",))
+    assert list(binner.edges) == ["B"]
+    with pytest.raises(RuntimeError, match="not fitted"):
+        binner.transform(pd.DataFrame({"A": [3]}), ("A",))
 
 
 def test_network_predictions_and_metrics_are_finite():
@@ -279,6 +302,31 @@ def test_trading_sorts_parsed_dates_and_rejects_invalid_or_duplicate_dates():
         SimpleTradingEnv(bars.assign(Date=["2020-1-2", "2020-01-02", "2020-1-3"]))
 
 
+def test_trading_rejects_incomplete_ticker_identity():
+    bars = pd.DataFrame({
+        "Date": pd.bdate_range("2020-01-01", periods=3),
+        "Name": ["AAA", None, "AAA"],
+        "Open": [10., 11., 12.], "Close": [11., 12., 13.],
+    })
+    with pytest.raises(ValueError, match="one ticker"):
+        SimpleTradingEnv(bars)
+    with pytest.raises(ValueError, match="one ticker"):
+        SimpleTradingEnv(bars.assign(Name=["AAA", "", "AAA"]))
+
+
+def test_hmm_rejects_incomplete_ticker_identity():
+    from hmm_integration import _validated_indicators
+    frame = pd.DataFrame({
+        "Date": pd.bdate_range("2020-01-01", periods=3),
+        "Name": ["AAA", None, "AAA"],
+        "MA_20": [1., 2., 3.],
+    })
+    with pytest.raises(ValueError, match="one ticker"):
+        _validated_indicators(frame, ("MA_20",))
+    with pytest.raises(ValueError, match="one ticker"):
+        _validated_indicators(frame.assign(Name=["AAA", " ", "AAA"]), ("MA_20",))
+
+
 @pytest.mark.parametrize("actions", [
     ("dance",), ("buy", "hold", "dance"), ("buy", "buy", "hold"),
     ("buy",), ("sell",), (),
@@ -308,6 +356,21 @@ def test_policy_masks_invalid_actions_and_bootstrapping():
     exploratory = QLearningAgent(epsilon=1.0)
     assert {exploratory.choose_action((0,)) for _ in range(50)} <= {"buy", "hold"}
     assert {exploratory.choose_action((1,)) for _ in range(50)} <= {"sell", "hold"}
+
+
+def test_rejected_q_update_is_atomic_and_cannot_change_frozen_policy():
+    agent = QLearningAgent(epsilon=0)
+    assert agent.choose_action((0,), explore=False) == "hold"
+    with pytest.raises(ValueError, match="Unrecognized action"):
+        agent.update_q_value((0,), "sell", 1.0, (0,))
+    assert agent.q_table == {}
+    assert agent.choose_action((0,), explore=False) == "hold"
+    with pytest.raises(ValueError, match="current position"):
+        agent.update_q_value((0,), "buy", 1.0, (2,))
+    assert agent.q_table == {}
+    with pytest.raises(ValueError, match="Reward must be finite"):
+        agent.update_q_value((0,), "buy", float("nan"), (1,))
+    assert agent.q_table == {}
 
 
 def test_rl_terminal_update_does_not_bootstrap():
