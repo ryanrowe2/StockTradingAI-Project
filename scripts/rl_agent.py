@@ -9,6 +9,7 @@ This is an experimental simulator, not an execution or profitability claim.
 from __future__ import annotations
 
 import random
+from numbers import Integral
 
 import numpy as np
 import pandas as pd
@@ -174,6 +175,12 @@ class QLearningAgent:
 
     def simulate_episode(self, env: SimpleTradingEnv, max_steps: int | None = None,
                          *, train: bool = True) -> float:
+        if max_steps is not None and (
+            not isinstance(max_steps, Integral)
+            or isinstance(max_steps, (bool, np.bool_))
+            or max_steps < 0
+        ):
+            raise ValueError("max_steps must be a nonnegative integer")
         state = env.reset()
         total_reward = 0.0
         steps = max_steps if max_steps is not None else len(env.data) - 1

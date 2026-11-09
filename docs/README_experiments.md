@@ -36,8 +36,11 @@ calendar dates (including non-zero-padded months/days), finite numeric values,
 positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)`
 observations. Relative dates, numeric timestamps, timezones, and intraday
 times are rejected to preserve one observation per trading day. Incomplete or
-contradictory bars are excluded without guessing replacement prices. The
-pipeline computes indicators on each ticker's chronological series independently:
+contradictory bars are excluded without guessing replacement prices. Feature
+preparation rejects an input ticker if insufficient valid price history remains
+after indicator warm-up, so no ticker is silently omitted from the prepared data.
+
+The pipeline computes indicators on each ticker's chronological series independently:
 
 | Indicator | Definition / implementation |
 | --- | --- |
@@ -134,6 +137,10 @@ r_t = \mathrm{position}_{t}(\mathrm{Open}_{t+1}-\mathrm{Close}_t)
 $$
 
 Q-values are updated using the discounted next-state value for non-terminal steps. At the final step, the next-state bootstrap value is zero. To score the holdout period, the notebook disables both exploration and Q-table updates and compares one-share dollar profit/loss with a next-open buy-and-hold entry.
+
+An optional `max_steps` argument permits nonnegative integer episode limits;
+invalid values are rejected before resetting the environment.
+
 Both strategies are marked to market at the last observed close. Positions
 still held at that close remain open; no hypothetical final sale or exit fee
 is included in either strategy's reported P/L.

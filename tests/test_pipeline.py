@@ -67,6 +67,15 @@ def test_feature_preparation_rejects_history_shorter_than_indicator_warmup():
         prepare_features(synthetic_bars(25))
 
 
+def test_feature_preparation_rejects_ticker_lost_during_warmup():
+    bars = synthetic_bars()
+    bbb_early_dates = bars.loc[bars["Name"] == "BBB", "Date"].nsmallest(25)
+    mixed = bars.loc[(bars["Name"] == "AAA") |
+                     ((bars["Name"] == "BBB") & bars["Date"].isin(bbb_early_dates))]
+    with pytest.raises(ValueError, match=r"ticker\(s\) BBB"):
+        prepare_features(mixed)
+
+
 def test_technical_indicators_do_not_change_when_future_is_modified():
     data = synthetic_bars()
     original = add_technical_indicators(data)
@@ -554,6 +563,29 @@ def test_rl_terminal_update_does_not_bootstrap():
     agent.q_table[(1,)] = {"buy": 100.0, "sell": 20.0, "hold": 1.0}
     agent.update_q_value((0,), "buy", 7.0, (1,), done=True)
     assert agent.q_table[(0,)]["buy"] == 7.0
+
+
+@pytest.mark.parametrize("invalid", [-3, -1, 1.5, True, np.bool_(True), "2"])
+def test_simulate_episode_rejects_invalid_step_limit_without_resetting(invalid):
+    env = SimpleTradingEnv(pd.DataFrame({
+        "Open": [10., 11., 12.], "Close": [10., 11., 12.],
+    }))
+    env.step("hold")
+    previous_state = (env.index, env.position, env.done)
+    agent = QLearningAgent()
+    with pytest.raises(ValueError, match="max_steps must be a nonnegative integer"):
+        agent.simulate_episode(env, max_steps=invalid)
+    assert (env.index, env.position, env.done) == previous_state
+
+
+def test_simulate_episode_allows_zero_and_numpy_integer_step_limits():
+    bars = pd.DataFrame({"Open": [10., 11., 12.], "Close": [10., 11., 12.]})
+    env = SimpleTradingEnv(bars)
+    agent = QLearningAgent(epsilon=0)
+    assert agent.simulate_episode(env, train=False, max_steps=0) == 0.0
+    assert env.index == 0
+    assert agent.simulate_episode(env, train=False, max_steps=np.int64(1)) == 0.0
+    assert env.index == 1
 
 
 def test_policy_evaluation_never_modifies_q_table():

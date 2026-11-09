@@ -89,6 +89,12 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
             "No usable feature observations remain after indicator warm-up; "
             "provide a longer price history"
         )
+    missing_tickers = sorted(set(source["Name"]) - set(prepared["Name"]))
+    if missing_tickers:
+        raise ValueError(
+            "No usable feature observations remain for ticker(s) "
+            f"{', '.join(missing_tickers)}; provide longer price histories"
+        )
     return prepared
 
 
