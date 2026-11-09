@@ -128,7 +128,14 @@ class QLearningAgent:
         self.rng = random.Random(seed)
 
     def get_state(self, state_features) -> tuple[int, ...]:
-        return tuple(int(value) for value in state_features)
+        try:
+            state = tuple(state_features)
+        except TypeError as exc:
+            raise ValueError("State components must be integers") from exc
+        if any(not isinstance(value, Integral) or isinstance(value, (bool, np.bool_))
+               for value in state):
+            raise ValueError("State components must be integers")
+        return tuple(int(value) for value in state)
 
     def _values(self, state: tuple[int, ...]) -> dict[str, float]:
         return self.q_table.setdefault(state, {action: 0.0 for action in self.actions})

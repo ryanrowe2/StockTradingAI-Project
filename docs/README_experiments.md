@@ -39,6 +39,7 @@ times are rejected to preserve one observation per trading day. Incomplete or
 contradictory bars are excluded without guessing replacement prices. Feature
 preparation rejects an input ticker if insufficient valid price history remains
 after indicator warm-up, so no ticker is silently omitted from the prepared data.
+Validation also rejects a ticker if every one of its price bars is invalid.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
@@ -71,6 +72,8 @@ The experiment proceeds as follows:
 
 1. **Prepare:** read validated raw observations and construct ticker-safe features and next-observation labels.
 2. **Partition by date:** split the combined market calendar into 60% training, 20% validation, and 20% test. Rows whose target date crosses a training or validation boundary are excluded from those earlier partitions.
+   Every ticker must retain observations in all three partitions; missing ticker
+   coverage produces an explicit error naming the affected symbols and periods.
 3. **Fit discretization:** calculate quantile edges on training observations; apply exactly those edges to validation features.
 4. **Fit candidates:** build a discrete Bayesian network with feature-to-`Trend` edges for each feature set. Estimate CPTs with a BDeu prior and candidate equivalent sample sizes of `5, 10, 15, 20`.
 5. **Select:** choose prior strength using validation balanced accuracy, then accuracy as a tie-breaker.
@@ -86,7 +89,7 @@ These are fixed, interpretable directed graphs. The scale-independent price feat
 
 **Metrics and outputs**
 
-The training script prints and saves JSON metrics under `data/generated/model_metrics.json`, including accuracy, balanced accuracy, precision, recall, F1, ROC AUC, validation scores, selected prior strength, date boundaries, and sample counts.
+The training script prints and saves JSON metrics under `data/generated/model_metrics.json`, including accuracy, balanced accuracy, precision, recall, F1, ROC AUC, validation scores, selected prior strength, date boundaries, sample counts, and per-partition ticker counts (`tickers_per_partition`).
 
 For the included combined source, the evaluation periods are:
 
@@ -128,6 +131,9 @@ The `SimpleTradingEnv` has three actions:
 - **Sell:** exit the position when long; unavailable while flat.
 - **Hold:** leave the position unchanged.
 
+Q-learning state components must be integers. The agent rejects fractional,
+string, and boolean components instead of silently converting them to bins.
+
 Decisions made after observing a daily close are filled at the next trading session's open. Holdings existing before an action remain exposed to the overnight price change. The reward for a step is:
 
 $$
@@ -164,6 +170,8 @@ python -m scripts.refresh_notebooks
 ```
 
 `python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them, compares all saved output types (including numerical text and rich results), fully decodes the saved PNGs, and checks for both broad and localized visual changes against the newly generated charts.
+The `reproduce_notebook(path, check=True)` Python helper resolves relative data
+paths from the notebook's directory and restores the caller's working directory.
 
 ## References
 

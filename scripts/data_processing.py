@@ -43,6 +43,7 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     df["Name"] = df["Name"].astype(str).str.strip().str.upper()
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
+    input_tickers = set(df["Name"])
     numeric_columns = ("Open", "High", "Low", "Close", "Volume")
     for name in numeric_columns:
         df[name] = pd.to_numeric(df[name], errors="coerce")
@@ -62,6 +63,12 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     df = df.loc[finite & positive & coherent].copy()
     if df.empty:
         raise ValueError("No valid OHLCV observations remain")
+    missing_tickers = sorted(input_tickers - set(df["Name"]))
+    if missing_tickers:
+        raise ValueError(
+            "No valid OHLCV observations remain for ticker(s) "
+            f"{', '.join(missing_tickers)}"
+        )
     return df.sort_values(["Name", "Date"]).reset_index(drop=True)
 
 

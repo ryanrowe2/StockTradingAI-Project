@@ -97,41 +97,49 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
         save = not check
     if check and save:
         raise ValueError("Notebook verification cannot save or overwrite files")
+    path = Path(path).resolve()
     notebook = nbformat.read(path, as_version=4)
     variables = {"__name__": "__main__", "display": _display}
     execution_count = 0
-    for cell in notebook.cells:
-        if cell.cell_type != "code":
-            continue
-        execution_count += 1
-        original_outputs = list(cell.outputs)
-        source = cell.source.replace("%matplotlib inline", "")
-        text_output = io.StringIO()
-        try:
-            with redirect_stdout(text_output):
-                exec(compile(source, str(path), "exec"), variables)
-        except Exception as error:
-            raise RuntimeError(f"Notebook {path.name}, cell {execution_count}") from error
-        outputs = []
-        if text_output.getvalue():
-            outputs.append(nbformat.v4.new_output(
-                "stream", name="stdout", text=text_output.getvalue(),
-            ))
-        for number in plt.get_fignums():
-            figure = plt.figure(number)
-            buffer = io.BytesIO()
-            figure.savefig(buffer, format="png", dpi=110, bbox_inches="tight")
-            outputs.append(nbformat.v4.new_output(
-                "display_data", data={
-                    "image/png": base64.b64encode(buffer.getvalue()).decode("ascii"),
-                    "text/plain": "Experiment visualization",
-                }, metadata={},
-            ))
-            plt.close(figure)
-        if check:
-            _verify_outputs(original_outputs, outputs, path, execution_count)
-        cell.outputs = outputs
-        cell.execution_count = execution_count
+    previous_directory = Path.cwd()
+    try:
+        # Relative data paths inside a notebook resolve beside that notebook,
+        # regardless of where a caller invokes this helper.
+        os.chdir(path.parent)
+        for cell in notebook.cells:
+            if cell.cell_type != "code":
+                continue
+            execution_count += 1
+            original_outputs = list(cell.outputs)
+            source = cell.source.replace("%matplotlib inline", "")
+            text_output = io.StringIO()
+            try:
+                with redirect_stdout(text_output):
+                    exec(compile(source, str(path), "exec"), variables)
+            except Exception as error:
+                raise RuntimeError(f"Notebook {path.name}, cell {execution_count}") from error
+            outputs = []
+            if text_output.getvalue():
+                outputs.append(nbformat.v4.new_output(
+                    "stream", name="stdout", text=text_output.getvalue(),
+                ))
+            for number in plt.get_fignums():
+                figure = plt.figure(number)
+                buffer = io.BytesIO()
+                figure.savefig(buffer, format="png", dpi=110, bbox_inches="tight")
+                outputs.append(nbformat.v4.new_output(
+                    "display_data", data={
+                        "image/png": base64.b64encode(buffer.getvalue()).decode("ascii"),
+                        "text/plain": "Experiment visualization",
+                    }, metadata={},
+                ))
+                plt.close(figure)
+            if check:
+                _verify_outputs(original_outputs, outputs, path, execution_count)
+            cell.outputs = outputs
+            cell.execution_count = execution_count
+    finally:
+        os.chdir(previous_directory)
     nbformat.validate(notebook)
     if save:
         nbformat.write(notebook, path)
@@ -145,7 +153,6 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="Execute without overwriting notebooks")
     args = parser.parse_args()
     sys.path.insert(0, str(ROOT))
-    os.chdir(NOTEBOOKS)
     for path in sorted(NOTEBOOKS.glob("*.ipynb")):
         reproduce_notebook(path, save=not args.check, check=args.check)
 

@@ -35,6 +35,9 @@ flowchart TD
 ```
 
 Each ticker's indicators and next-day labels are computed independently. Date boundaries are shared across tickers, so the partitions correspond to actual historical market periods.
+An experiment rejects a ticker with no usable validated history or without
+observations in each chronological partition, and reports ticker coverage for
+training, validation, and test separately.
 
 ## Core implementations
 
@@ -123,6 +126,8 @@ python scripts/model_training.py --ticker AAPL --output data/generated/aapl_mode
 ```
 
 Generated feature tables and model metrics are saved under `data/generated/`. These artifacts can be regenerated directly from the included raw data.
+The input validator raises a clear error if all valid price bars for any ticker
+are discarded, rather than silently excluding that ticker.
 
 For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
 environment, install `requirements-repro-py312.txt` instead of the flexible

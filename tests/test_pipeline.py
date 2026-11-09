@@ -76,6 +76,20 @@ def test_feature_preparation_rejects_ticker_lost_during_warmup():
         prepare_features(mixed)
 
 
+def test_validation_rejects_ticker_lost_to_invalid_bars(tmp_path: Path):
+    bars = synthetic_bars()
+    bars.loc[bars["Name"] == "BBB", "High"] = 0.0
+    expected = r"No valid OHLCV observations remain for ticker\(s\) BBB"
+    with pytest.raises(ValueError, match=expected):
+        validate_bars(bars)
+    with pytest.raises(ValueError, match=expected):
+        prepare_features(bars)
+    csv = tmp_path / "mixed_validity.csv"
+    bars.to_csv(csv, index=False)
+    with pytest.raises(ValueError, match=expected):
+        load_data(csv)
+
+
 def test_technical_indicators_do_not_change_when_future_is_modified():
     data = synthetic_bars()
     original = add_technical_indicators(data)
@@ -236,6 +250,17 @@ def test_chronological_split_purges_future_labels_and_symbols_remain_aligned():
     assert set(split.train["Name"]) == {"AAA", "BBB"}
     assert set(split.validation["Name"]) == {"AAA", "BBB"}
     assert set(split.test["Name"]) == {"AAA", "BBB"}
+
+
+def test_chronological_split_rejects_missing_ticker_coverage():
+    bars = synthetic_bars()
+    early_bbb = bars.loc[bars["Name"] == "BBB", "Date"].nsmallest(55)
+    short_bbb = bars.loc[(bars["Name"] == "AAA") |
+                         ((bars["Name"] == "BBB") & bars["Date"].isin(early_bbb))]
+    features = prepare_features(short_bbb)
+    assert set(features["Name"]) == {"AAA", "BBB"}
+    with pytest.raises(ValueError, match="Missing ticker coverage.*validation: BBB; test: BBB"):
+        chronological_split(features)
 
 
 def test_binner_learns_thresholds_only_from_training_data():
@@ -528,6 +553,25 @@ def test_qlearning_allows_legal_custom_action_sets():
     assert agent.choose_action((1,), explore=False) == "sell"
 
 
+@pytest.mark.parametrize("invalid", [
+    (1.2, 0), (1.9, 0), (1.0, 0), ("1", 0), (True, 0),
+    (np.bool_(True), 0), (np.inf, 0), (None, 0),
+])
+def test_qlearning_state_rejects_noninteger_components_atomically(invalid):
+    agent = QLearningAgent()
+    with pytest.raises(ValueError, match="State components must be integers"):
+        agent.get_state(invalid)
+    with pytest.raises(ValueError, match="State components must be integers"):
+        agent.choose_action(invalid)
+    with pytest.raises(ValueError, match="State components must be integers"):
+        agent.update_q_value((0, 0), "hold", 0.0, invalid)
+    assert agent.q_table == {}
+
+
+def test_qlearning_state_accepts_numpy_integer_components():
+    assert QLearningAgent().get_state((np.int64(3), np.int64(0))) == (3, 0)
+
+
 def test_policy_masks_invalid_actions_and_bootstrapping():
     agent = QLearningAgent(alpha=1, gamma=0.95, epsilon=0)
     agent.q_table[(0,)] = {"buy": 3.0, "sell": 1000.0, "hold": 1.0}
@@ -620,6 +664,7 @@ def test_end_to_end_on_independent_dates_and_valid_notebooks(tmp_path: Path):
     synthetic_bars().to_csv(csv, index=False)
     output = run_experiment(csv, num_bins=3)
     assert output["tickers"] == 2
+    assert output["tickers_per_partition"] == {"train": 2, "validation": 2, "test": 2}
     assert min(output["observations"].values()) > 0
     for model in ("baseline", "enhanced"):
         assert 0 <= output[model]["test"]["accuracy"] <= 1
@@ -688,6 +733,33 @@ def test_programmatic_notebook_verification_cannot_overwrite_files(tmp_path: Pat
     assert path.read_bytes() == original
     with pytest.raises(ValueError, match="cannot save or overwrite"):
         reproduce_notebook(path, check=True, save=True)
+
+
+def test_programmatic_notebook_execution_resolves_relative_paths_and_restores_cwd(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    original_cwd = Path.cwd()
+    notebook_dir = tmp_path / "notebooks"
+    notebook_dir.mkdir()
+    (notebook_dir / "input.txt").write_text("verified", encoding="utf-8")
+    notebook = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source="from pathlib import Path\nprint(Path('input.txt').read_text())",
+        execution_count=1,
+        outputs=[nbformat.v4.new_output("stream", name="stdout", text="verified\n")],
+    )])
+    path = notebook_dir / "relative.ipynb"
+    nbformat.write(notebook, path)
+    reproduce_notebook(path, check=True)
+    assert Path.cwd() == original_cwd
+
+    failed_path = notebook_dir / "failure.ipynb"
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source="raise RuntimeError('expected failure')",
+    )]), failed_path)
+    with pytest.raises(RuntimeError, match="Notebook failure.ipynb, cell 1"):
+        reproduce_notebook(failed_path, check=True)
+    assert Path.cwd() == original_cwd
 
 
 def test_notebook_check_rejects_corrupted_or_materially_changed_pngs():

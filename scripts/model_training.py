@@ -72,6 +72,18 @@ def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
     test = df.loc[date > validation_end].copy()
     if min(len(train), len(validation), len(test)) == 0:
         raise ValueError("All three chronological partitions must contain samples")
+    if "Name" in df.columns:
+        requested = set(df["Name"])
+        missing = {
+            label: sorted(requested - set(partition["Name"]))
+            for label, partition in (("train", train), ("validation", validation), ("test", test))
+        }
+        if any(missing.values()):
+            details = "; ".join(
+                f"{label}: {', '.join(symbols)}"
+                for label, symbols in missing.items() if symbols
+            )
+            raise ValueError(f"Missing ticker coverage in chronological partitions: {details}")
     return ChronologicalSplit(train, validation, test, train_end, validation_end)
 
 
@@ -207,6 +219,11 @@ def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
     return {
         "source": str(Path(raw_data).name),
         "tickers": int(frame["Name"].nunique()),
+        "tickers_per_partition": {
+            "train": int(split.train["Name"].nunique()),
+            "validation": int(split.validation["Name"].nunique()),
+            "test": int(split.test["Name"].nunique()),
+        },
         "observations": {"train": len(split.train), "validation": len(split.validation), "test": len(split.test)},
         "periods": {
             "train_end": split.train_end.date().isoformat(),
