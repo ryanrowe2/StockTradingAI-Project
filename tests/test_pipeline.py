@@ -62,6 +62,11 @@ def test_target_and_indicators_never_cross_symbol_boundaries():
         assert group["Target_Date"].max() <= input_group["Date"].max()
 
 
+def test_feature_preparation_rejects_history_shorter_than_indicator_warmup():
+    with pytest.raises(ValueError, match="No usable feature observations remain"):
+        prepare_features(synthetic_bars(25))
+
+
 def test_technical_indicators_do_not_change_when_future_is_modified():
     data = synthetic_bars()
     original = add_technical_indicators(data)
@@ -289,10 +294,15 @@ def test_hmm_notebook_keeps_causal_observations_purged_from_supervised_splits():
     labeled = pd.concat([split.train, split.validation, split.test], ignore_index=True)
     omitted_dates = stock.loc[~stock["Date"].isin(labeled["Date"]), "Date"]
     assert len(omitted_dates) == 2
+    complete_training = stock.loc[stock["Date"] <= split.train_end]
+    assert len(complete_training) == len(split.train) + 1
 
     notebook = nbformat.read(ROOT / "notebooks/HMM_and_RL_Experiments.ipynb", as_version=4)
     source = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
+    assert "hmm_training = stock.loc[stock['Date'] <= split.train_end]" in source
+    assert "fit_hmm_on_indicators(hmm_training" in source
     assert "infer_filtered_regimes(hmm_model, stock)" in source
+    assert "train_regimes = history_regimes.loc[history_regimes['Date'].isin(split.train['Date'])]" in source
     assert "infer_filtered_regimes(hmm_model, history)" not in source
 
 
@@ -403,7 +413,8 @@ def test_hmm_fit_completes_without_exhausting_iteration_limit():
 def test_historical_hmm_fit_reaches_configured_tolerance():
     data = load_data(DEFAULT_RAW_DATA)
     stock = prepare_features(data.loc[data["Name"] == "AAPL"])
-    model, _ = fit_hmm_on_indicators(chronological_split(stock).train, n_components=3)
+    train_end = chronological_split(stock).train_end
+    model, _ = fit_hmm_on_indicators(stock.loc[stock["Date"] <= train_end], n_components=3)
     assert model.monitor_.iter < model.n_iter
     assert abs(model.monitor_.history[-1] - model.monitor_.history[-2]) < model.tol
 
@@ -604,6 +615,19 @@ def test_saved_experiment_notebooks_contain_visual_evidence():
                for cell in evaluation.cells for output in cell.get("outputs", []))
 
 
+def test_readme_trading_result_matches_the_published_notebook():
+    import nbformat
+
+    notebook = nbformat.read(ROOT / "notebooks/HMM_and_RL_Experiments.ipynb", as_version=4)
+    lines = "\n".join(str(output.get("text", "")) for cell in notebook.cells
+                      for output in cell.get("outputs", [])).splitlines()
+    prefix = "Frozen policy holdout P/L, one-share dollar units: "
+    result = next(line for line in lines if line.startswith(prefix))
+    pnl = float(result[len(prefix):])
+    displayed = f"**{'+' if pnl >= 0 else '-'}${abs(pnl):.2f}**"
+    assert displayed in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
 def test_notebook_check_detects_stale_published_text():
     from scripts.refresh_notebooks import _verify_outputs
 
@@ -614,6 +638,24 @@ def test_notebook_check_detects_stale_published_text():
     with pytest.raises(RuntimeError, match="Published chart count differs"):
         _verify_outputs([dict(output_type="display_data", data={"image/png": "unused"})],
                         [], Path("example.ipynb"), 1)
+
+
+def test_programmatic_notebook_verification_cannot_overwrite_files(tmp_path: Path):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    notebook = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        source="print('verified')", execution_count=1,
+        outputs=[nbformat.v4.new_output("stream", name="stdout", text="verified\n")],
+    )])
+    path = tmp_path / "check.ipynb"
+    nbformat.write(notebook, path)
+    original = path.read_bytes()
+
+    reproduce_notebook(path, check=True)
+    assert path.read_bytes() == original
+    with pytest.raises(ValueError, match="cannot save or overwrite"):
+        reproduce_notebook(path, check=True, save=True)
 
 
 def test_notebook_check_rejects_corrupted_or_materially_changed_pngs():

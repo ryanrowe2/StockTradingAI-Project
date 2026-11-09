@@ -91,7 +91,7 @@ same later test period, after validation-based parameter selection:
 
 Neither Bayesian network beat the majority-class benchmark on this holdout.
 In the separate AAPL trading notebook, the frozen Q-learning policy earned
-**+$15.91** in one-share, dollar-denominated holdout P/L, compared with
+**+$0.30** in one-share, dollar-denominated holdout P/L, compared with
 **+$54.86** for the next-open buy-and-hold comparator. These historical
 experiments demonstrate the implementation and its limitations; they do not
 establish predictive superiority or deployable trading profitability.

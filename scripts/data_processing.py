@@ -83,7 +83,13 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
         "Close_Lag1", "Return_Lag1",
     ]
     source = source.replace([np.inf, -np.inf], np.nan)
-    return source.dropna(subset=required).reset_index(drop=True)
+    prepared = source.dropna(subset=required).reset_index(drop=True)
+    if prepared.empty:
+        raise ValueError(
+            "No usable feature observations remain after indicator warm-up; "
+            "provide a longer price history"
+        )
+    return prepared
 
 
 def main() -> None:

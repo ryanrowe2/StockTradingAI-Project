@@ -91,8 +91,12 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
             raise RuntimeError(f"Published chart differs in {path.name}, cell {cell_number}")
 
 
-def reproduce_notebook(path: Path, *, save: bool = True,
+def reproduce_notebook(path: Path, *, save: bool | None = None,
                        check: bool = False) -> nbformat.NotebookNode:
+    if save is None:
+        save = not check
+    if check and save:
+        raise ValueError("Notebook verification cannot save or overwrite files")
     notebook = nbformat.read(path, as_version=4)
     variables = {"__name__": "__main__", "display": _display}
     execution_count = 0

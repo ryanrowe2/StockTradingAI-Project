@@ -108,7 +108,7 @@ P(z_t\mid x_{1:t}) \propto P(x_t\mid z_t)\sum_{z_{t-1}}
 P(z_t\mid z_{t-1})P(z_{t-1}\mid x_{1:t-1}).
 $$
 
-Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Holdout filtering uses the entire causally computed indicator history, including the two boundary-day observations excluded from the supervised training/validation splits because their labels cross a split boundary. The HMM parameters are fitted exclusively on training data; these additional historical observations only provide filtering context for later regimes. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
+Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. The HMM is fitted on all causal indicator observations through the training cutoff, including the final training day whose next-day label is excluded from supervised training. Forward filtering then uses the entire indicator history, including both supervised-split boundary days, while the Q-learning training sequence retains the label-purged training rows. No validation or test observation contributes to HMM parameter fitting. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
 Gaussian emission likelihoods are calculated from the fitted model's public
 mean and covariance parameters, without relying on internal hmmlearn methods.
 Impossible initial states and transitions retain zero probability. When an
