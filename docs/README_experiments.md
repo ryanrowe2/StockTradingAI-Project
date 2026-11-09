@@ -12,6 +12,10 @@ python -m venv .venv
 python -m pip install -r requirements-dev.txt
 ```
 
+For interactive notebook use, optionally install JupyterLab in the activated
+environment with `python -m pip install jupyterlab`, then launch `jupyter lab`
+from the repository root. JupyterLab is not required for scripted reproduction.
+
 To reproduce the exact dependency versions used for the published numerical
 results on Python 3.12/Linux, install `requirements-repro-py312.txt` instead.
 That file includes pinned transitive dependencies; the normal requirements
@@ -24,7 +28,7 @@ The combined historical source is `data/raw/all_stocks_2006-01-01_to_2018-01-01.
 ```bash
 python scripts/data_processing.py
 # Single-ticker example:
-python scripts/data_processing.py --ticker AAPL
+python scripts/data_processing.py --ticker AAPL --output data/generated/aapl_stock_features.csv
 ```
 
 The source CSV is validated for required columns, explicit ISO year-first
@@ -57,7 +61,7 @@ The generated feature table is saved to `data/generated/stock_features.csv` by d
 ```bash
 python scripts/model_training.py
 # Optional subset:
-python scripts/model_training.py --ticker AAPL --num-bins 4
+python scripts/model_training.py --ticker AAPL --num-bins 4 --output data/generated/aapl_model_metrics.json
 ```
 
 The experiment proceeds as follows:
@@ -104,7 +108,7 @@ P(z_t\mid x_{1:t}) \propto P(x_t\mid z_t)\sum_{z_{t-1}}
 P(z_t\mid z_{t-1})P(z_{t-1}\mid x_{1:t-1}).
 $$
 
-Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Holdout filtering uses the preceding training and validation observations as historical context while keeping the HMM parameters fitted exclusively on training data. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
+Each reported regime therefore depends on observations through time `t`, with no dependence on later observations. Holdout filtering uses the entire causally computed indicator history, including the two boundary-day observations excluded from the supervised training/validation splits because their labels cross a split boundary. The HMM parameters are fitted exclusively on training data; these additional historical observations only provide filtering context for later regimes. Regime identifiers are statistical latent-state labels and can change in meaning between independently fitted models.
 Gaussian emission likelihoods are calculated from the fitted model's public
 mean and covariance parameters, without relying on internal hmmlearn methods.
 Impossible initial states and transitions retain zero probability. When an

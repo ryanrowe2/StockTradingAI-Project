@@ -91,7 +91,7 @@ same later test period, after validation-based parameter selection:
 
 Neither Bayesian network beat the majority-class benchmark on this holdout.
 In the separate AAPL trading notebook, the frozen Q-learning policy earned
-**+$11.68** in one-share, dollar-denominated holdout P/L, compared with
+**+$15.91** in one-share, dollar-denominated holdout P/L, compared with
 **+$54.86** for the next-open buy-and-hold comparator. These historical
 experiments demonstrate the implementation and its limitations; they do not
 establish predictive superiority or deployable trading profitability.
@@ -119,7 +119,7 @@ python scripts/data_processing.py
 python scripts/model_training.py
 
 # Optional: run a quicker single-ticker experiment.
-python scripts/model_training.py --ticker AAPL
+python scripts/model_training.py --ticker AAPL --output data/generated/aapl_model_metrics.json
 ```
 
 Generated feature tables and model metrics are saved under `data/generated/`. These artifacts can be regenerated directly from the included raw data.
@@ -144,7 +144,14 @@ python -m pytest tests -q
 | [Model Training & Evaluation](notebooks/Model_Training_Evaluation.ipynb) | Reproduce the chronological Bayesian-network comparison |
 | [HMM & Q-learning Experiments](notebooks/HMM_and_RL_Experiments.ipynb) | Visualize filtered regimes and compare an experimental trading policy with buy-and-hold |
 
-The notebooks include saved output tables and plots for immediate viewing on GitHub. Open them from the `notebooks/` folder in Jupyter with the project environment selected. Reproduce their outputs with `python -m scripts.refresh_notebooks`. See the [experiment reproduction guide](docs/README_experiments.md) for technical details and exact experiment settings.
+The notebooks include saved output tables and plots for immediate viewing on GitHub. To run them interactively, optionally install and launch JupyterLab from the repository root after activating the project environment:
+
+```bash
+python -m pip install jupyterlab
+jupyter lab
+```
+
+Open the files in `notebooks/` and select the project environment as the kernel. Reproduce the published outputs with `python -m scripts.refresh_notebooks`. See the [experiment reproduction guide](docs/README_experiments.md) for technical details and exact experiment settings.
 
 ## Repository structure
 

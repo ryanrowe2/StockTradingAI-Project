@@ -281,6 +281,21 @@ def test_hmm_filtering_is_prefix_invariant():
     assert prefix["Market_Regime"].tolist() == full["Market_Regime"].iloc[:72].tolist()
 
 
+def test_hmm_notebook_keeps_causal_observations_purged_from_supervised_splits():
+    import nbformat
+
+    stock = prepare_features(synthetic_bars()).query("Name == 'AAA'").reset_index(drop=True)
+    split = chronological_split(stock)
+    labeled = pd.concat([split.train, split.validation, split.test], ignore_index=True)
+    omitted_dates = stock.loc[~stock["Date"].isin(labeled["Date"]), "Date"]
+    assert len(omitted_dates) == 2
+
+    notebook = nbformat.read(ROOT / "notebooks/HMM_and_RL_Experiments.ipynb", as_version=4)
+    source = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
+    assert "infer_filtered_regimes(hmm_model, stock)" in source
+    assert "infer_filtered_regimes(hmm_model, history)" not in source
+
+
 def test_gaussian_log_emissions_use_public_model_parameters():
     from scipy.stats import norm
 
