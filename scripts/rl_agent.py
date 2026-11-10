@@ -18,11 +18,11 @@ import pandas as pd
 
 if __package__:
     from .date_validation import parse_daily_dates
-    from .session_validation import session_positions, validate_session_positions
+    from .session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
-    from session_validation import session_positions, validate_session_positions
+    from session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -180,14 +180,23 @@ class SimpleTradingEnv:
 
 
 def contiguous_trading_segments(data: pd.DataFrame) -> list[pd.DataFrame]:
-    """Create independently tradable episodes without crossing missing sessions."""
+    """Create single-symbol episodes without crossing missing market sessions."""
     if data.empty:
         return []
-    ordered = data.sort_values("Date") if "Date" in data else data
+    ordered = data.copy()
+    if "Name" in ordered:
+        ordered["Name"] = normalize_ticker_symbols(
+            ordered["Name"], context="Trading episodes require valid ticker names",
+        )
+    ordered = ordered.sort_values("Date") if "Date" in ordered else ordered
     validate_session_positions(ordered)
-    positions = session_positions(ordered)
-    boundaries = positions.diff().ne(1).cumsum()
-    return [group.copy() for _, group in ordered.groupby(boundaries) if len(group) >= 2]
+    symbol_groups = (group for _, group in ordered.groupby("Name", sort=False)) \
+        if "Name" in ordered else (ordered,)
+    segments = []
+    for symbol in symbol_groups:
+        boundaries = (~adjacent_session_flags(session_positions(symbol))).cumsum()
+        segments.extend(group.copy() for _, group in symbol.groupby(boundaries) if len(group) >= 2)
+    return segments
 
 
 class QLearningAgent:

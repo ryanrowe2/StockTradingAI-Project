@@ -72,8 +72,15 @@ def inferred_equity_sessions(dates: pd.DatetimeIndex, *,
     """
     if dates.empty:
         return pd.DatetimeIndex([])
+    first = dates.min() if start is None else start
+    if first < pd.Timestamp("1971-01-01"):
+        # Earlier NYSE holidays and special schedules were materially different
+        # (including the 1968 Wednesday closures). Inferring a modern calendar
+        # would silently invent sessions. Historical callers must provide
+        # independently verified market-session ordinals instead.
+        raise ValueError("NYSE dates before 1971 require verified Session_Number metadata")
     scheduled = _scheduled_sessions(
-        dates.min() if start is None else start,
+        first,
         dates.max() if end is None else end,
     )
     return scheduled.union(dates.unique()).sort_values()

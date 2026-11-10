@@ -16,12 +16,14 @@ import pandas as pd
 
 if __package__:
     from .data_processing import DEFAULT_RAW_DATA, TARGET_DEFINITIONS, load_data, prepare_features
+    from .date_validation import parse_daily_dates
     from .model_training import (
         BASELINE_FEATURES, ENHANCED_FEATURES, ChronologicalSplit,
         classification_metrics, train_and_select,
     )
 else:
     from data_processing import DEFAULT_RAW_DATA, TARGET_DEFINITIONS, load_data, prepare_features
+    from date_validation import parse_daily_dates
     from model_training import (
         BASELINE_FEATURES, ENHANCED_FEATURES, ChronologicalSplit,
         classification_metrics, train_and_select,
@@ -29,6 +31,13 @@ else:
 
 
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "data/generated/walk_forward_metrics.json"
+
+
+def _validate_bootstrap_configuration(block_sessions: int, bootstrap_samples: int) -> None:
+    if (not isinstance(block_sessions, int) or isinstance(block_sessions, bool)
+            or block_sessions < 1 or not isinstance(bootstrap_samples, int)
+            or isinstance(bootstrap_samples, bool) or bootstrap_samples < 100):
+        raise ValueError("block_sessions must be positive and bootstrap_samples at least 100")
 
 
 def paired_block_accuracy_intervals(scored: pd.DataFrame, *,
@@ -40,10 +49,7 @@ def paired_block_accuracy_intervals(scored: pd.DataFrame, *,
     This is descriptive uncertainty conditional on the fixed research design;
     it does not supply a guarantee of profitability or future generalization.
     """
-    if (not isinstance(block_sessions, int) or isinstance(block_sessions, bool)
-            or block_sessions < 1 or not isinstance(bootstrap_samples, int)
-            or isinstance(bootstrap_samples, bool) or bootstrap_samples < 100):
-        raise ValueError("block_sessions must be positive and bootstrap_samples at least 100")
+    _validate_bootstrap_configuration(block_sessions, bootstrap_samples)
     if scored.empty:
         raise ValueError("Cannot bootstrap an empty holdout")
     required = {"Date", "actual", "majority", "baseline_prob", "enhanced_prob"}
@@ -60,10 +66,9 @@ def paired_block_accuracy_intervals(scored: pd.DataFrame, *,
     if (not np.isfinite(probabilities).all()
             or ((probabilities < 0) | (probabilities > 1)).any()):
         raise ValueError("Bootstrap probabilities must be finite values in [0, 1]")
-    days = pd.DatetimeIndex(scored["Date"].unique()).sort_values()
-    if days.hasnans:
-        raise ValueError("Bootstrap dates must be present")
-    block_id = days.get_indexer(scored["Date"]) // block_sessions
+    dates = parse_daily_dates(scored["Date"], context="Bootstrap dates")
+    days = pd.DatetimeIndex(dates.unique()).sort_values()
+    block_id = days.get_indexer(dates) // block_sessions
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")
     expected = (scored["actual"] == scored["majority"]).to_numpy(dtype=int)
@@ -101,6 +106,7 @@ def walk_forward_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
         raise ValueError(f"target must be one of {sorted(TARGET_DEFINITIONS)}")
     if not isinstance(folds, int) or isinstance(folds, bool) or not 1 <= folds <= 5:
         raise ValueError("folds must be an integer between 1 and 5")
+    _validate_bootstrap_configuration(block_sessions, bootstrap_samples)
     data = load_data(raw_data, tickers=tickers)
     prepared = prepare_features(data, target=target)
     dates = pd.DatetimeIndex(prepared["Date"].unique()).sort_values()
@@ -108,9 +114,8 @@ def walk_forward_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
         raise ValueError("Walk-forward evaluation requires at least 80 eligible dates")
     date = prepared["Date"]
     target_date = prepared["Target_Date"]
-    fold_reports = []
-    scored_folds = []
-    scored_row_indices: set[int] = set()
+    # Check every proposed holdout before any potentially expensive fitting.
+    fold_partitions = []
     for number in range(folds):
         train_end = dates[(len(dates) * (4 + number)) // 10 - 1]
         validation_end = dates[(len(dates) * (5 + number)) // 10 - 1]
@@ -124,9 +129,19 @@ def walk_forward_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
         ].copy()
         if min(len(train), len(validation), len(test)) == 0:
             raise ValueError(f"Fold {number + 1} has an empty chronological partition")
+        if test["Date"].nunique() <= block_sessions:
+            raise ValueError(
+                f"Fold {number + 1} has too few test dates for two "
+                f"{block_sessions}-session bootstrap blocks"
+            )
         symbols = set(prepared["Name"])
         if any(set(part["Name"]) != symbols for part in (train, validation, test)):
             raise ValueError(f"Fold {number + 1} has incomplete ticker coverage")
+        fold_partitions.append((number, train_end, validation_end, test_end, train, validation, test))
+    fold_reports = []
+    scored_folds = []
+    scored_row_indices: set[int] = set()
+    for number, train_end, validation_end, test_end, train, validation, test in fold_partitions:
         if scored_row_indices.intersection(test.index):
             raise RuntimeError("Walk-forward test folds must not overlap")
         scored_row_indices.update(test.index)

@@ -2097,3 +2097,137 @@ def test_block_bootstrap_rejects_one_independent_date_block():
     })
     with pytest.raises(ValueError, match="at least two chronological date blocks"):
         paired_block_accuracy_intervals(scored, block_sessions=10, bootstrap_samples=100)
+
+
+def test_block_bootstrap_rejects_intraday_timestamps_as_sessions():
+    dates = [day + pd.Timedelta(hours=hour)
+             for day in pd.bdate_range("2026-01-05", periods=8) for hour in (10, 15)]
+    scored = pd.DataFrame({
+        "Date": dates, "actual": [0, 1] * 8, "majority": [0] * 16,
+        "baseline_prob": [0.8] * 16, "enhanced_prob": [0.2] * 16,
+    })
+    with pytest.raises(ValueError, match="Bootstrap dates"):
+        paired_block_accuracy_intervals(scored, block_sessions=10, bootstrap_samples=100)
+
+
+def test_custom_source_ordinals_remain_stable_when_selecting_later_ticker(tmp_path: Path):
+    source = pd.DataFrame({
+        "Name": ["BBB"] * 4 + ["AAA"] * 2,
+        "Date": ["2025-01-17", "2025-01-21", "2025-01-22", "2025-01-23",
+                 "2025-01-22", "2025-01-23"],
+        "Open": [100] * 6, "High": [101] * 6,
+        "Low": [99] * 6, "Close": [100] * 6, "Volume": [1000] * 6,
+    })
+    csv = tmp_path / "late_ticker.csv"
+    source.to_csv(csv, index=False)
+    combined = load_data(csv)
+    selected = load_data(csv, tickers=("AAA",))
+    pd.testing.assert_frame_equal(
+        selected, combined.loc[combined.Name == "AAA"].reset_index(drop=True),
+    )
+    assert selected.Session_Number.tolist() == [2, 3]
+
+
+def test_selected_modern_ticker_ignores_unrelated_unverified_historical_dates(tmp_path: Path):
+    source = pd.DataFrame({
+        "Name": ["AAA", "AAA", "BBB", "BBB"],
+        "Date": ["2025-01-17", "2025-01-21", "1968-07-09", "1968-07-11"],
+        "Open": [100] * 4, "High": [101] * 4,
+        "Low": [99] * 4, "Close": [100] * 4, "Volume": [1000] * 4,
+    })
+    csv = tmp_path / "historic_and_modern.csv"
+    source.to_csv(csv, index=False)
+    with pytest.raises(ValueError, match="before 1971"):
+        load_data(csv)
+    assert load_data(csv, tickers=("AAA",)).Session_Number.tolist() == [0, 1]
+
+
+def test_pre_1971_nyse_dates_require_verified_calendar():
+    # During the 1968 paperwork crisis, 1968-07-10 was an NYSE closure.
+    bars = pd.DataFrame({
+        "Name": ["AAA", "AAA"], "Date": ["1968-07-09", "1968-07-11"],
+        "Open": [100, 101], "High": [101, 102],
+        "Low": [99, 100], "Close": [100, 101], "Volume": [1000, 1000],
+    })
+    with pytest.raises(ValueError, match="before 1971 require verified Session_Number"):
+        validate_bars(bars)
+    assert validate_bars(bars.assign(Session_Number=[0, 1])).Session_Number.tolist() == [0, 1]
+
+
+def test_trading_segments_never_combine_different_symbols():
+    bars = pd.DataFrame({
+        "Name": ["AAA", "BBB", "AAA", "BBB"],
+        "Date": pd.to_datetime(["2025-01-21", "2025-01-21",
+                                "2025-01-22", "2025-01-22"]),
+        "Session_Number": [0, 0, 1, 1],
+    })
+    segments = contiguous_trading_segments(bars)
+    assert len(segments) == 2
+    assert {tuple(group.Name) for group in segments} == {("AAA", "AAA"), ("BBB", "BBB")}
+    undated = bars.drop(columns="Date").sort_values("Name")
+    assert len(contiguous_trading_segments(undated)) == 2
+
+
+def test_next_session_targets_remain_exact_with_large_uint64_ordinals():
+    count = 90
+    dates = pd.bdate_range("2025-01-02", periods=count)
+    close = 100 + 0.1 * np.arange(count)
+    bars = pd.DataFrame({
+        "Name": ["AAA"] * count, "Date": dates,
+        "Session_Number": (2**53 + 1 + np.arange(count)).astype("uint64"),
+        "Open": close, "High": close + 1, "Low": close - 1,
+        "Close": close, "Volume": [1000] * count,
+    })
+    prepared = prepare_features(bars)
+    assert len(prepared) > 40
+    assert (prepared.Target_Date > prepared.Date).all()
+    assert prepared.Trend.eq(1).all()
+
+
+def test_exchange_metadata_shares_session_gaps_only_within_same_exchange(tmp_path: Path):
+    source = pd.DataFrame({
+        "Name": ["AAA"] * 2 + ["BBB"] * 2 + ["CCC"] * 3,
+        "Exchange": ["NYSE"] * 2 + ["LSE"] * 5,
+        "Date": ["2025-01-17", "2025-01-21",
+                 "2025-01-17", "2025-01-21",
+                 "2025-01-17", "2025-01-20", "2025-01-21"],
+        "Open": [100] * 7, "High": [101] * 7,
+        "Low": [99] * 7, "Close": [100] * 7, "Volume": [1000] * 7,
+    })
+    csv = tmp_path / "exchange_calendar.csv"
+    source.to_csv(csv, index=False)
+    combined = load_data(csv)
+    assert combined.loc[combined.Name == "AAA", "Session_Number"].tolist() == [0, 1]
+    assert combined.loc[combined.Name == "BBB", "Session_Number"].tolist() == [0, 2]
+    assert combined.loc[combined.Name == "CCC", "Session_Number"].tolist() == [0, 1, 2]
+    for symbol in ("AAA", "BBB", "CCC"):
+        pd.testing.assert_frame_equal(
+            load_data(csv, tickers=(symbol,)),
+            combined.loc[combined.Name == symbol].reset_index(drop=True),
+        )
+    invalid = source.copy()
+    invalid.loc[(invalid.Name == "BBB") & (invalid.Date == "2025-01-21"),
+                "Exchange"] = "NYSE"
+    with pytest.raises(ValueError, match="exactly one Exchange"):
+        validate_bars(invalid)
+
+
+def test_walk_forward_rejects_too_few_bootstrap_dates_before_training(monkeypatch):
+    from walk_forward_evaluation import walk_forward_experiment as evaluate
+    import walk_forward_evaluation as walk_module
+
+    count = 115
+    index = np.arange(count)
+    close = 100 + index * 0.08 + 2 * np.sin(index * 0.35)
+    bars = validate_bars(pd.DataFrame({
+        "Date": pd.bdate_range("2020-01-02", periods=count),
+        "Name": ["AAA"] * count, "Open": close - 0.2,
+        "High": close + 1, "Low": close - 1,
+        "Close": close, "Volume": [1000] * count,
+    }))
+    assert len(prepare_features(bars)) >= 80
+    monkeypatch.setattr(walk_module, "load_data", lambda *args, **kwargs: bars)
+    monkeypatch.setattr(walk_module, "train_and_select",
+                        lambda *args, **kwargs: pytest.fail("Model training began too soon"))
+    with pytest.raises(ValueError, match="too few test dates"):
+        evaluate("synthetic.csv", folds=1, bootstrap_samples=100)

@@ -8,12 +8,12 @@ import pandas as pd
 if __package__:
     from .date_validation import parse_daily_dates
     from .price_validation import valid_price_bars
-    from .session_validation import session_positions, validate_session_positions
+    from .session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
     from price_validation import valid_price_bars
-    from session_validation import session_positions, validate_session_positions
+    from session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -46,7 +46,7 @@ def compute_macd(
 def _one_symbol_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     frame = frame.copy()
     previous_close = frame["Close"].shift(1)
-    adjacent = session_positions(frame).diff().eq(1)
+    adjacent = adjacent_session_flags(session_positions(frame))
     # The first valid bar after a discarded market session has no known
     # single-session close-to-close change. Do not fabricate one from two
     # nonadjacent observed closes.

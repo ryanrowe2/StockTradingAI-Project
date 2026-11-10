@@ -43,12 +43,14 @@ correspond to the same historical market periods. All bundled ticker CSVs use
 the observed-session calendar of the complete 31-stock source. It retains
 dates attached to valid ticker identifiers even when their prices are unusable,
 but excludes malformed dates and invalid ticker identifiers.
-Date-only custom equity data use scheduled NYSE sessions, including effective-
-dated holidays and exceptional historical closures. Weekdays explicitly present
-for a different exchange are added only to that ticker's inferred calendar;
-they cannot create a fictitious gap for another stock. Different exchanges can
-also provide independent, verified per-ticker `Session_Number` metadata.
-Close-to-close daily
+Date-only custom equity data from 1971 onward use scheduled NYSE sessions,
+including effective-dated holidays and exceptional closures. An optional
+`Exchange` column groups stocks on the same market, so an observed exchange
+session can expose a missing bar in another stock without contaminating a
+different exchange's calendar. Without `Exchange`, observed extra weekdays are
+retained only for the ticker that traded them. Callers can also supply verified
+`Session_Number` metadata, required for historical pre-1971 NYSE dates where
+automatic inference cannot safely reconstruct the older schedule. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
 HMM fitting uses separate complete contiguous sequences; forward filtering
 restarts after incomplete observations or missing source sessions, so both use
@@ -143,8 +145,9 @@ additional validation should be interpreted as a guaranteed performance gain.
 | Next-open-to-close | 51.40% | 51.68% | 51.30% | −0.48 to +1.03 percentage points |
 
 Both baseline accuracy lifts are small and their intervals include zero. The
-bootstrap validates binary labels and finite probability values in [0, 1], and
-requires at least two distinct date blocks before reporting intervals. This
+bootstrap validates binary labels, strictly daily dates, and finite probability
+values in [0, 1], and requires at least two distinct date blocks before
+reporting intervals. Fold feasibility is checked before model fitting. This
 provides additional historical evidence without establishing a reproducible
 advantage over the naive classifier. The full fold-by-fold scores and bootstrap
 configuration are reproduced by the walk-forward command below.
@@ -199,10 +202,12 @@ are excluded without modifying the raw files.
 An additional `Session_Number` column preserves market-session positions through
 this exclusion. The bundled individual stock files use the complete dataset's
 observed-session calendar. Other CSVs, including new files inside `data/raw/`,
-use an NYSE-holiday-aware per-ticker calendar that retains explicitly observed
-weekdays only for that ticker. Supplied session positions are checked for
-ordering and uniqueness within each ticker and for weekday dates; different
-exchanges may use their own verified positions.
+use an NYSE-holiday-aware calendar that retains explicitly observed extra
+weekdays within a declared `Exchange`, or within one ticker when no exchange
+is specified. Full-source dates anchor inferred ordinals even when loading a
+ticker subset. Supplied session positions are checked for chronological
+uniqueness within each ticker or declared exchange and for weekday dates;
+large unsigned positions are compared as exact integers, without float loss.
 A close-to-close return crossing an excluded session is unavailable for
 single-day modeling rather than compressed into one day's return. Such a row
 also receives no next-session direction label and is excluded from supervised

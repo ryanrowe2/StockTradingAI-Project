@@ -18,14 +18,14 @@ if __package__:
     from .technical_indicators import add_technical_indicators
     from .date_validation import parse_daily_dates
     from .price_validation import valid_price_bars
-    from .session_validation import session_positions, validate_session_positions
+    from .session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from .ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
     from price_validation import valid_price_bars
-    from session_validation import session_positions, validate_session_positions
+    from session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 
@@ -88,6 +88,43 @@ def _is_bundled_raw_csv(filepath: str | Path) -> bool:
             and path.name in _BUNDLED_RAW_NAMES)
 
 
+def _custom_source_session_positions(source: pd.DataFrame,
+                                     selected_mask: pd.Series) -> pd.Series:
+    """Infer selected sessions from the full source's valid market-date context.
+
+    Malformed records for unrelated symbols must not invalidate a selected
+    ticker. An exchange label, when supplied, allows other symbols on that
+    exchange to establish a missing market session.
+    """
+    raw_dates = source["Date"].astype("string")
+    explicit = raw_dates.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").fillna(False)
+    parsed = pd.to_datetime(raw_dates.where(explicit), format="mixed", errors="coerce")
+    valid = (valid_ticker_symbols(source["Name"])
+             & parsed.notna() & parsed.dt.dayofweek.lt(5))
+    reference = source.loc[valid].copy()
+    if reference.empty:
+        raise ValueError("No usable market dates remain for session inference")
+    reference["Date"] = parsed.loc[valid]
+    reference["Name"] = reference["Name"].astype(str).str.strip().str.upper()
+    # An unrelated pre-1971 record must not make a selected modern ticker
+    # depend on an historical calendar that requires verified metadata.
+    if parsed.loc[selected_mask].min() >= pd.Timestamp("1971-01-01"):
+        reference = reference.loc[reference["Date"] >= pd.Timestamp("1971-01-01")]
+    start, end = reference["Date"].min(), reference["Date"].max()
+    if "Exchange" in source:
+        wanted = (source.loc[selected_mask, "Exchange"].astype("string")
+                  .str.strip().str.upper().unique())
+        labels = reference["Exchange"].astype("string").str.strip().str.upper()
+        reference = reference.loc[labels.isin(wanted)]
+    else:
+        reference = reference.loc[selected_mask]
+    inferred = session_positions(reference, calendar_start=start, calendar_end=end)
+    selected = inferred.reindex(source.index[selected_mask])
+    if selected.isna().any():
+        raise ValueError("Selected observations must have valid weekday market dates")
+    return selected.astype("int64")
+
+
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     """Retain complete, coherent daily price bars with verified dates and symbols.
 
@@ -132,6 +169,7 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
     # Stock symbols such as "NA" are valid identifiers. Pandas' default NA
     # tokens would silently turn them into missing ticker names.
     source = pd.read_csv(filepath, keep_default_na=False)
+    bundled = _is_bundled_raw_csv(filepath)
     if tickers is not None:
         if not tickers or any(not isinstance(ticker, str) or not ticker.strip()
                               for ticker in tickers):
@@ -143,8 +181,17 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
         not_found = selected - set(normalized_names.dropna())
         if not_found:
             raise ValueError(f"Ticker not found: {', '.join(sorted(not_found))}")
-        source = source.loc[normalized_names.isin(selected)].copy()
-    if SESSION_COLUMN not in source and _is_bundled_raw_csv(filepath):
+        selected_mask = normalized_names.isin(selected)
+        if SESSION_COLUMN not in source and not bundled and "Date" in source:
+            # Selected dates are validated first; malformed unrelated source
+            # dates are ignored when establishing the reference calendar.
+            parse_daily_dates(source.loc[selected_mask, "Date"], context="Every Date")
+            selected_positions = _custom_source_session_positions(source, selected_mask)
+            source = source.loc[selected_mask].copy()
+            source[SESSION_COLUMN] = selected_positions.to_numpy(dtype="int64")
+        else:
+            source = source.loc[selected_mask].copy()
+    if SESSION_COLUMN not in source and bundled:
         # Both the complete source and every bundled per-symbol CSV must use
         # exactly the same reference calendar, even on dates absent for a symbol.
         dates = parse_daily_dates(source["Date"], context="Every Date")
@@ -169,8 +216,9 @@ def prepare_features(df: pd.DataFrame, *,
     source = prepare_indicator_history(df)
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
     next_open = source.groupby("Name", sort=False)["Open"].shift(-1)
-    next_session = source.groupby("Name", sort=False)[SESSION_COLUMN].shift(-1)
-    adjacent_target = next_session.sub(source[SESSION_COLUMN]).eq(1)
+    adjacent_target = source.groupby("Name", sort=False)[SESSION_COLUMN].transform(
+        lambda positions: adjacent_session_flags(positions, forward=True)
+    )
     source["Target_Date"] = (source.groupby("Name", sort=False)["Date"]
                              .shift(-1).where(adjacent_target))
     reference_price = source["Close"] if target == "close_to_close" else next_open
