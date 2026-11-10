@@ -8,12 +8,17 @@ import numpy as np
 import pandas as pd
 
 if __package__:
+    from .date_validation import parse_daily_dates
     from .market_calendar import inferred_equity_sessions, validate_nyse_open_dates
 else:
+    from date_validation import parse_daily_dates
     from market_calendar import inferred_equity_sessions, validate_nyse_open_dates
 
 
 SESSION_COLUMN = "Session_Number"
+# Saturday morning trading ended in 1952; the last actual Saturday session was
+# May 24, before the summer Saturday shutdown and permanent discontinuation.
+_LAST_NYSE_SATURDAY_SESSION = pd.Timestamp("1952-05-24")
 
 
 def _normalized_exchange_labels(frame: pd.DataFrame) -> pd.Series | None:
@@ -59,7 +64,7 @@ def session_positions(frame: pd.DataFrame, *,
         return frame[SESSION_COLUMN]
     if "Date" not in frame:
         return pd.Series(np.arange(len(frame), dtype=np.int64), index=frame.index)
-    dates = pd.DatetimeIndex(frame["Date"])
+    dates = pd.DatetimeIndex(parse_daily_dates(frame["Date"], context="Trading dates"))
     if (dates.dayofweek >= 5).any():
         raise ValueError("Trading dates must fall on weekdays; supply a verified market calendar")
     if dates.empty:
@@ -95,6 +100,11 @@ def validate_session_positions(frame: pd.DataFrame, *,
     requested.
     """
     if "Date" in frame:
+        # Check the daily identity before duplicate or ordinal comparisons.
+        # Otherwise, two times (or differently formatted strings) on the same
+        # calendar day can masquerade as separate trading sessions.
+        frame = frame.copy()
+        frame["Date"] = parse_daily_dates(frame["Date"], context="Trading dates")
         identity = ["Name", "Date"] if "Name" in frame else ["Date"]
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
@@ -111,8 +121,12 @@ def validate_session_positions(frame: pd.DataFrame, *,
 
     if "Date" in frame:
         dates = pd.DatetimeIndex(frame["Date"])
-        if (dates.dayofweek >= 5).any():
-            raise ValueError("Trading dates must fall on weekdays even with Session_Number")
+        historic_saturday = ((dates.dayofweek == 5)
+                             & (dates <= _LAST_NYSE_SATURDAY_SESSION))
+        if ((dates.dayofweek >= 5) & ~historic_saturday).any():
+            raise ValueError(
+                "Trading dates must fall on weekdays, except verified historical Saturday sessions"
+            )
         exchange_labels = _normalized_exchange_labels(frame)
         if exchange_labels is not None:
             nyse = exchange_labels.isin(("NYSE", "XNYS"))

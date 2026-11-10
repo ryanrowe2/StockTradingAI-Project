@@ -35,7 +35,9 @@ The source CSV is validated for required columns, explicit ISO year-first
 calendar dates (including non-zero-padded months/days), finite numeric values,
 positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)`
 observations. Relative dates, numeric timestamps, timezones, and intraday
-times are rejected to preserve one observation per trading day. Incomplete or
+times are rejected to preserve one observation per trading day. NumPy dates
+with only year, month, or week precision are rejected rather than assigning
+an invented calendar day. Incomplete or
 contradictory bars are excluded without guessing replacement prices. Feature
 preparation rejects an input ticker if insufficient valid price history remains
 after indicator warm-up, so no ticker is silently omitted from the prepared data.
@@ -63,8 +65,10 @@ that exchange, while preventing foreign-exchange dates from contaminating NYSE
 history. When the declared exchange is `NYSE` or `XNYS`, observations on
 known closed-market dates are rejected, with or without supplied ordinals.
 Without `Exchange`, extra observed weekdays remain ticker-specific;
-for exact non-NYSE calendars, provide verified `Session_Number`. Weekend rows are
-rejected even when session positions are supplied. Invalid source identifiers
+for exact non-NYSE calendars, provide verified `Session_Number`. Historical NYSE
+Saturday trading is supported through its last actual Saturday session on
+1952-05-24, but only with independently verified `Session_Number` metadata;
+later Saturdays and all Sundays are rejected. Invalid source identifiers
 do not contribute dates to the calendar. Literal symbols such as `NA` remain ticker identifiers instead
 of being parsed as missing values, while missing-name placeholders such as
 `N/A`, `NaN`, `NULL`, `<NA>`, and malformed symbols are rejected by all four
@@ -84,7 +88,7 @@ valid dates anchor ordinals before ticker selection, so the same custom stock
 has identical session numbers in full and selected CSV loads. Positions survive
 price exclusion and subsetting, allowing indicators, HMM boundaries, and the
 trading simulator to detect missing sessions. Supplied positions must have an
-increasing one-to-one correspondence with weekday market dates within each
+increasing one-to-one correspondence with valid daily market dates within each
 ticker or declared exchange; different exchanges can use different ordinals
 for the same date. Adjacent ordinals are compared using exact Python integers
 to preserve even large valid 64-bit values during target construction.

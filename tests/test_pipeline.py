@@ -35,7 +35,9 @@ from model_training import (  # noqa: E402
     classification_metrics, fit_network, predict_up_probability, run_experiment,
 )
 from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
-from session_validation import adjacent_session_flags  # noqa: E402
+from session_validation import (  # noqa: E402
+    adjacent_session_flags, session_positions, validate_session_positions,
+)
 from technical_indicators import add_technical_indicators  # noqa: E402
 from walk_forward_evaluation import (  # noqa: E402
     paired_block_accuracy_intervals, walk_forward_experiment,
@@ -2340,3 +2342,72 @@ def test_empty_session_adjacency_has_empty_boolean_result(forward):
     result = adjacent_session_flags(positions, forward=forward)
     assert result.empty and result.dtype == bool
     pd.testing.assert_index_equal(result.index, positions.index)
+
+
+@pytest.mark.parametrize("exchange", [None, "NYSE", "XNYS"])
+def test_verified_historical_saturday_trading_is_accepted(exchange):
+    # The NYSE traded on Saturday, January 6, 1951. Supplied ordinals are
+    # required for pre-1971 sessions and allow that historical trading week.
+    bars = pd.DataFrame({
+        "Name": ["IBM", "IBM"], "Date": ["1951-01-05", "1951-01-06"],
+        "Open": [10.0, 10.2], "High": [10.5, 10.7],
+        "Low": [9.8, 10.0], "Close": [10.3, 10.5],
+        "Volume": [100, 120], "Session_Number": [400, 401],
+    })
+    if exchange is not None:
+        bars["Exchange"] = exchange
+    validated = validate_bars(bars)
+    assert validated["Session_Number"].tolist() == [400, 401]
+    indicators = add_technical_indicators(validated)
+    assert indicators["Return"].iloc[1] == pytest.approx(10.5 / 10.3 - 1)
+    assert SimpleTradingEnv(validated).step("buy")[2]
+    with pytest.raises(ValueError, match="before 1971|weekdays"):
+        validate_bars(bars.drop(columns="Session_Number"))
+
+
+def test_historical_summer_saturday_after_last_nyse_session_is_rejected():
+    # Saturday trading did not resume after the summer 1952 shutdown.
+    bars = pd.DataFrame({
+        "Name": ["IBM", "IBM"], "Date": ["1952-06-06", "1952-06-07"],
+        "Open": [10.0, 10.0], "High": [11.0, 11.0],
+        "Low": [9.0, 9.0], "Close": [10.0, 10.0],
+        "Volume": [100, 100], "Session_Number": [500, 501],
+    })
+    with pytest.raises(ValueError, match="weekdays"):
+        validate_bars(bars)
+
+
+@pytest.mark.parametrize("value", [
+    np.datetime64("2020"), np.datetime64("2020-07"),
+    np.datetime64("2020-07-03", "W"),
+])
+def test_numpy_coarse_precision_never_invents_trading_days(value):
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        parse_daily_dates(pd.Series([value], dtype=object))
+    accepted = np.datetime64("2020-07-03", "D")
+    assert parse_daily_dates(pd.Series([accepted], dtype=object)).iloc[0] == pd.Timestamp("2020-07-03")
+
+
+def test_direct_session_utilities_reject_intraday_trading_dates():
+    intraday = pd.DataFrame({
+        "Name": ["IBM", "IBM"],
+        "Date": pd.to_datetime(["2024-06-03 09:30:00", "2024-06-03 16:00:00"]),
+    })
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        session_positions(intraday)
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        validate_session_positions(intraday)
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        validate_session_positions(intraday.assign(Session_Number=[1, 2]))
+
+
+def test_direct_session_validation_identifies_equivalent_iso_dates():
+    frame = pd.DataFrame({
+        "Name": ["IBM", "IBM"],
+        "Date": ["2024-6-3", "2024-06-03"],
+        "Session_Number": [1, 2],
+    })
+    original = frame.copy(deep=True)
+    with pytest.raises(ValueError, match="Duplicate ticker/date"):
+        validate_session_positions(frame)
+    pd.testing.assert_frame_equal(frame, original)

@@ -24,7 +24,11 @@ def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series
     def is_explicit_day(value: object) -> bool:
         if isinstance(value, str):
             return bool(_ISO_DAY.fullmatch(value))
-        if isinstance(value, (date, datetime, np.datetime64)):
+        if isinstance(value, np.datetime64):
+            # NumPy silently supplies a day for year-, month-, and week-level
+            # dates. Those values do not identify an observed daily session.
+            return np.datetime_data(value.dtype)[0] not in {"Y", "M", "W"}
+        if isinstance(value, (date, datetime)):
             return getattr(value, "tzinfo", None) is None
         return False
 

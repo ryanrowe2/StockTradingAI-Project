@@ -55,6 +55,10 @@ retained only for the ticker that traded them. Callers can also supply verified
 `Session_Number` metadata, required for historical pre-1971 NYSE dates where
 automatic inference cannot safely reconstruct the older schedule. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
+Verified session ordinals also support historical NYSE Saturday trading through
+its last Saturday session on May 24, 1952; later weekends are rejected.
+Direct session utilities require daily dates, and NumPy dates with only year,
+month, or week precision cannot silently become market sessions.
 Direct multi-ticker indicator and trading-episode utilities infer shared
 exchange calendars before splitting the source into individual stocks.
 Trading episodes reject duplicate ticker/date records and sort parsed dates,
@@ -213,7 +217,8 @@ use an NYSE-holiday-aware calendar that retains explicitly observed extra
 weekdays within a declared `Exchange`, or within one ticker when no exchange
 is specified. Full-source dates anchor inferred ordinals even when loading a
 ticker subset. Supplied session positions are checked for chronological
-uniqueness within each ticker or declared exchange and for weekday dates;
+uniqueness within each ticker or declared exchange and for valid daily dates,
+including historically verified Saturday trading before summer 1952;
 large unsigned positions are compared as exact integers, without float loss.
 Identical duplicate ticker/date records are rejected, and empty ordinal
 sequences produce empty adjacency flags.
