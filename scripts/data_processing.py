@@ -204,9 +204,13 @@ def validate_raw_bar_records(records: Iterable[Mapping[str, object]]) -> pd.Data
         raise ValueError("A nonempty collection of raw price records is required")
     if any(not isinstance(row, Mapping) or "Date" not in row for row in rows):
         raise ValueError("Every raw price record must provide a Date")
-    dates = parse_daily_dates(
-        pd.Series([row["Date"] for row in rows], dtype=object), context="Every Date",
-    )
+    raw_dates = [row["Date"] for row in rows]
+    # A Timestamp has already discarded its original source precision. Raw
+    # records must retain genuine date-only scalars; an independently verified
+    # pandas timestamp belongs in validate_bars(..., verified_datetime_dates=True).
+    if any(isinstance(value, pd.Timestamp) for value in raw_dates):
+        raise ValueError("Every Date must be an original date-only scalar, not a pandas Timestamp")
+    dates = parse_daily_dates(pd.Series(raw_dates, dtype=object), context="Every Date")
     frame = pd.DataFrame.from_records(rows)
     frame["Date"] = dates.to_numpy()
     return validate_bars(frame, verified_datetime_dates=True)

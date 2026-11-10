@@ -39,7 +39,9 @@ times are rejected to preserve one observation per trading day. To reject
 NumPy dates with only year, month, or week precision, pass the original
 unconverted record mappings to `validate_raw_bar_records(records)` in
 `scripts/data_processing.py`; this checks each original scalar before pandas
-can assign an invented day. Once an ordinary DataFrame constructor has
+can assign an invented day. Raw ingestion also rejects NumPy sub-day timestamp
+units, Python `datetime` values, and pandas `Timestamp` objects even when their
+clock reads midnight. Once an ordinary DataFrame constructor has
 converted a coarse NumPy date into a timestamp, its original precision is
 irrecoverable. To avoid silently accepting this ambiguity, `validate_bars()`
 rejects existing pandas datetime64/Timestamp dates unless the caller explicitly
@@ -58,7 +60,9 @@ features = prepare_features(raw, verified_datetime_dates=True)
 Keep the opt-in disabled when the original dates have not been checked.
 Both preparation entry points now enforce the raw validator's date-provenance
 policy. The standalone NYSE calendar validator treats missing (`NaT`) dates
-as invalid instead of identifying them as historical sessions.
+as invalid instead of identifying them as historical sessions. It also rejects
+pre-1971 Sundays and Saturdays after May 24, 1952; earlier sessions still
+require independently verified market ordinals.
 Incomplete or
 contradictory bars are excluded without guessing replacement prices. Feature
 preparation rejects an input ticker if insufficient valid price history remains

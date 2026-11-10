@@ -23,6 +23,9 @@ from pandas.tseries.holiday import (
 from pandas.tseries.offsets import CustomBusinessDay, DateOffset
 
 
+LAST_NYSE_SATURDAY_SESSION = pd.Timestamp("1952-05-24")
+
+
 class _NYSEHolidays(AbstractHolidayCalendar):
     rules = [
         Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),
@@ -70,8 +73,11 @@ def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIn
 def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
     """Identify known NYSE sessions; pre-1971 dates require external ordinals."""
     modern = dates >= pd.Timestamp("1971-01-01")
-    # NaT is neither a historical session nor a modern scheduled session.
-    valid = ~pd.isna(dates)
+    # Pre-1971 holiday schedules still require verified ordinals, but Sunday
+    # was never a session, and Saturday trading stopped after May 24, 1952.
+    historical_saturday = ((dates.dayofweek == 5)
+                           & (dates <= LAST_NYSE_SATURDAY_SESSION))
+    valid = (~pd.isna(dates) & ((dates.dayofweek < 5) | historical_saturday))
     if modern.any():
         observed = dates[modern]
         scheduled = _scheduled_sessions(observed.min(), observed.max())

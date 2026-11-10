@@ -63,6 +63,8 @@ its last Saturday session on May 24, 1952; later weekends are rejected.
 Direct session utilities require daily dates. For raw NumPy date scalars, use
 `validate_raw_bar_records(records)` **before constructing a pandas DataFrame**:
 it rejects year-, month-, or week-precision dates rather than inventing a day.
+It also rejects finer-than-day NumPy timestamps and Python midnight datetime
+values, since a midnight clock time does not attest to original daily precision.
 Ordinary pandas construction may silently expand such scalars into a complete
 timestamp, permanently discarding their original precision; a validator
 receiving that already-converted DataFrame cannot reconstruct it. Therefore
@@ -79,6 +81,8 @@ raw-record API. When selecting a ticker from a custom CSV, an unrelated NYSE
 ticker's impossible closed-market observation is excluded from shared calendar
 inference, while the selected ticker's own invalid dates are still rejected.
 The standalone NYSE calendar validator also rejects missing (`NaT`) dates.
+It rejects pre-1971 Sundays and Saturdays after the final May 1952 Saturday
+session; other pre-1971 sessions still require verified market ordinals.
 Direct multi-ticker indicator and trading-episode utilities infer shared
 exchange calendars before splitting the source into individual stocks.
 Trading episodes reject duplicate ticker/date records and sort parsed dates,

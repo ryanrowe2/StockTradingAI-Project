@@ -13,13 +13,15 @@ _ISO_DAY = re.compile(r"\d{4}-\d{1,2}-\d{1,2}\Z")
 
 
 def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series:
-    """Accept ISO year-first dates or date objects, never timestamps or relative text.
+    """Accept ISO dates, date objects, and previously normalized pandas dates.
 
     A daily bar represents a calendar day. Allowing an intraday time creates
     multiple observations for one session; allowing words such as ``today`` or
     numeric epoch values silently makes historical experiments nonreproducible.
-    For untrusted NumPy inputs, validate original scalars before pandas
+    For untrusted NumPy inputs, require day-precision scalars before pandas
     DataFrame construction: converted timestamps no longer retain precision.
+    Pandas Timestamps support internal, already-validated date columns; public
+    ingestion requires explicit source verification before accepting them.
     """
     message = f"{context} must be present, parseable ISO calendar dates without times or timezones"
 
@@ -27,11 +29,15 @@ def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series
         if isinstance(value, str):
             return bool(_ISO_DAY.fullmatch(value))
         if isinstance(value, np.datetime64):
-            # NumPy silently supplies a day for year-, month-, and week-level
-            # dates. Those values do not identify an observed daily session.
-            return np.datetime_data(value.dtype)[0] not in {"Y", "M", "W"}
-        if isinstance(value, (date, datetime)):
-            return getattr(value, "tzinfo", None) is None
+            # Both coarse units and midnight intraday timestamps violate the
+            # raw daily-date contract, despite normalizing to a midnight day.
+            return np.datetime_data(value.dtype) == ("D", 1)
+        if isinstance(value, pd.Timestamp):
+            return value.tzinfo is None
+        if isinstance(value, datetime):
+            return False
+        if isinstance(value, date):
+            return True
         return False
 
     if values.isna().any() or not values.map(is_explicit_day).all():

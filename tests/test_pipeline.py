@@ -8,7 +8,7 @@ import io
 import importlib
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -2485,6 +2485,40 @@ def test_raw_bar_ingestion_preserves_and_rejects_coarse_date_precision(coarse):
     ])
     assert valid.Date.dt.strftime("%Y-%m-%d").tolist() == ["2024-04-05", "2024-04-08"]
     assert valid.Session_Number.tolist() == [0, 1]
+
+
+@pytest.mark.parametrize("non_daily", [
+    np.datetime64("2024-04-05", "2D"),
+    np.datetime64("2024-04-05T00:00:00", "s"),
+    np.datetime64("2024-04-05T00:00:00.000", "ms"),
+    datetime(2024, 4, 5, 0, 0),
+    pd.Timestamp("2024-04-05"),
+])
+def test_raw_bar_ingestion_rejects_midnight_timestamps(non_daily):
+    record = {
+        "Date": non_daily, "Name": "IBM", "Open": 10.0, "High": 12.0,
+        "Low": 9.0, "Close": 11.0, "Volume": 100,
+    }
+    with pytest.raises(ValueError, match="date-only|parseable ISO calendar dates"):
+        validate_raw_bar_records([record])
+    # A genuine day-precision NumPy scalar remains a valid raw input.
+    valid = validate_raw_bar_records([
+        {**record, "Date": np.datetime64("2024-04-05", "D")},
+    ])
+    assert valid.Date.iloc[0] == pd.Timestamp("2024-04-05")
+
+
+@pytest.mark.parametrize("closed", [
+    "1965-07-04",  # Sunday, never a NYSE session.
+    "1952-06-14",  # Saturday after the final 1952 Saturday session.
+])
+def test_historical_nyse_mask_rejects_impossible_weekends(closed):
+    dates = pd.DatetimeIndex([closed])
+    assert nyse_open_mask(dates).tolist() == [False]
+    with pytest.raises(ValueError, match="closed-market date"):
+        validate_nyse_open_dates(dates)
+    # Saturday sessions genuinely occurred before May 24, 1952.
+    assert nyse_open_mask(pd.DatetimeIndex(["1951-01-06"])).tolist() == [True]
 
 
 def test_validate_bars_does_not_trust_pandas_coerced_numpy_months():

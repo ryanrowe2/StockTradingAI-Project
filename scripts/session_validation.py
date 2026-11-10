@@ -9,18 +9,17 @@ import pandas as pd
 
 if __package__:
     from .date_validation import parse_daily_dates
-    from .market_calendar import inferred_equity_sessions, validate_nyse_open_dates
+    from .market_calendar import (
+        LAST_NYSE_SATURDAY_SESSION, inferred_equity_sessions, validate_nyse_open_dates,
+    )
 else:
     from date_validation import parse_daily_dates
-    from market_calendar import inferred_equity_sessions, validate_nyse_open_dates
+    from market_calendar import (
+        LAST_NYSE_SATURDAY_SESSION, inferred_equity_sessions, validate_nyse_open_dates,
+    )
 
 
 SESSION_COLUMN = "Session_Number"
-# Saturday morning trading ended in 1952; the last actual Saturday session was
-# May 24, before the summer Saturday shutdown and permanent discontinuation.
-_LAST_NYSE_SATURDAY_SESSION = pd.Timestamp("1952-05-24")
-
-
 def _normalized_exchange_labels(frame: pd.DataFrame) -> pd.Series | None:
     """Validate optional exchange identities used to share market calendars."""
     if "Exchange" not in frame:
@@ -122,7 +121,7 @@ def validate_session_positions(frame: pd.DataFrame, *,
     if "Date" in frame:
         dates = pd.DatetimeIndex(frame["Date"])
         historic_saturday = ((dates.dayofweek == 5)
-                             & (dates <= _LAST_NYSE_SATURDAY_SESSION))
+                             & (dates <= LAST_NYSE_SATURDAY_SESSION))
         if ((dates.dayofweek >= 5) & ~historic_saturday).any():
             raise ValueError(
                 "Trading dates must fall on weekdays, except verified historical Saturday sessions"
