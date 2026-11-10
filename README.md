@@ -68,11 +68,17 @@ timestamp, permanently discarding their original precision; a validator
 receiving that already-converted DataFrame cannot reconstruct it. Therefore
 `validate_bars()` rejects pandas datetime64/Timestamp dates by default;
 `verified_datetime_dates=True` is an explicit attestation for callers who
-independently checked their original date precision. ISO daily strings, Python
+independently checked their original date precision. Both
+`prepare_indicator_history()` and `prepare_features()` enforce the same default:
+they no longer bypass date provenance checks. When passing an already-validated
+DataFrame returned by `load_data()`, explicitly set
+`verified_datetime_dates=True` on either preparation function; unverified raw
+pandas timestamps must not use that opt-in. ISO daily strings, Python
 date objects, and explicit NumPy day-precision values are safe inputs to the
 raw-record API. When selecting a ticker from a custom CSV, an unrelated NYSE
 ticker's impossible closed-market observation is excluded from shared calendar
 inference, while the selected ticker's own invalid dates are still rejected.
+The standalone NYSE calendar validator also rejects missing (`NaT`) dates.
 Direct multi-ticker indicator and trading-episode utilities infer shared
 exchange calendars before splitting the source into individual stocks.
 Trading episodes reject duplicate ticker/date records and sort parsed dates,

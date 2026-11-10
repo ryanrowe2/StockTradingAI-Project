@@ -70,7 +70,8 @@ def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIn
 def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
     """Identify known NYSE sessions; pre-1971 dates require external ordinals."""
     modern = dates >= pd.Timestamp("1971-01-01")
-    valid = np.ones(len(dates), dtype=bool)
+    # NaT is neither a historical session nor a modern scheduled session.
+    valid = ~pd.isna(dates)
     if modern.any():
         observed = dates[modern]
         scheduled = _scheduled_sessions(observed.min(), observed.max())

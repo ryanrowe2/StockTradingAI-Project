@@ -147,6 +147,8 @@ def validate_bars(df: pd.DataFrame, *, verified_datetime_dates: bool = False) ->
     Pandas datetime64/Timestamp values have irretrievably lost their original
     precision; callers must explicitly attest to having verified source dates.
     """
+    if not isinstance(verified_datetime_dates, (bool, np.bool_)):
+        raise ValueError("verified_datetime_dates must be a boolean")
     missing = set(REQUIRED_COLUMNS) - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
@@ -250,16 +252,21 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
 
 def prepare_features(df: pd.DataFrame, *,
                      features: tuple[str, ...] = MODEL_FEATURES,
-                     target: str = "close_to_close") -> pd.DataFrame:
+                     target: str = "close_to_close",
+                     verified_datetime_dates: bool = False) -> pd.DataFrame:
     """Produce causal next-session targets with only requested model features required.
 
     ``next_open_to_close`` aligns the target with an order submitted after the
     current close and filled at the next open. The historical close-to-close
     label remains the default for backward-compatible published experiments.
+    Source-verified datetime DataFrames, including results from ``load_data``,
+    require explicit ``verified_datetime_dates=True`` at this public boundary.
     """
     if target not in TARGET_DEFINITIONS:
         raise ValueError(f"target must be one of {sorted(TARGET_DEFINITIONS)}")
-    source = prepare_indicator_history(df)
+    source = prepare_indicator_history(
+        df, verified_datetime_dates=verified_datetime_dates,
+    )
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
     next_open = source.groupby("Name", sort=False)["Open"].shift(-1)
     adjacent_target = source.groupby("Name", sort=False)[SESSION_COLUMN].transform(
@@ -288,14 +295,18 @@ def prepare_features(df: pd.DataFrame, *,
     return prepared
 
 
-def prepare_indicator_history(df: pd.DataFrame) -> pd.DataFrame:
+def prepare_indicator_history(df: pd.DataFrame, *,
+                              verified_datetime_dates: bool = False) -> pd.DataFrame:
     """Retain validated, causally calculated price history, including its last bar.
 
     Unlike supervised feature preparation, this does not remove rows solely
     because their next-session prediction target is unavailable. It also retains
-    missing-indicator rows to preserve HMM sequence boundaries.
+    missing-indicator rows to preserve HMM sequence boundaries. The caller must
+    explicitly attest to the provenance of already-coerced pandas dates.
     """
-    return add_technical_indicators(validate_bars(df, verified_datetime_dates=True))
+    return add_technical_indicators(
+        validate_bars(df, verified_datetime_dates=verified_datetime_dates)
+    )
 
 
 def main() -> None:
@@ -305,7 +316,7 @@ def main() -> None:
     parser.add_argument("--ticker", type=str, default=None)
     args = parser.parse_args()
     data = load_data(args.input, tickers=(args.ticker,) if args.ticker is not None else None)
-    result = prepare_features(data)
+    result = prepare_features(data, verified_datetime_dates=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(args.output, index=False)
     count = result.Name.nunique()

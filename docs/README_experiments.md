@@ -44,6 +44,21 @@ converted a coarse NumPy date into a timestamp, its original precision is
 irrecoverable. To avoid silently accepting this ambiguity, `validate_bars()`
 rejects existing pandas datetime64/Timestamp dates unless the caller explicitly
 attests to verified source precision with `verified_datetime_dates=True`.
+The same explicit attestation applies to `prepare_features()` and
+`prepare_indicator_history()` when their input dates are pandas timestamps,
+including a DataFrame that `load_data()` has already validated. For example:
+
+```python
+from scripts.data_processing import DEFAULT_RAW_DATA, load_data, prepare_features
+
+raw = load_data(DEFAULT_RAW_DATA)
+features = prepare_features(raw, verified_datetime_dates=True)
+```
+
+Keep the opt-in disabled when the original dates have not been checked.
+Both preparation entry points now enforce the raw validator's date-provenance
+policy. The standalone NYSE calendar validator treats missing (`NaT`) dates
+as invalid instead of identifying them as historical sessions.
 Incomplete or
 contradictory bars are excluded without guessing replacement prices. Feature
 preparation rejects an input ticker if insufficient valid price history remains

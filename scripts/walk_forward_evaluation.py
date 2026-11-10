@@ -108,7 +108,7 @@ def walk_forward_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
         raise ValueError("folds must be an integer between 1 and 5")
     _validate_bootstrap_configuration(block_sessions, bootstrap_samples)
     data = load_data(raw_data, tickers=tickers)
-    prepared = prepare_features(data, target=target)
+    prepared = prepare_features(data, target=target, verified_datetime_dates=True)
     dates = pd.DatetimeIndex(prepared["Date"].unique()).sort_values()
     if len(dates) < 80:
         raise ValueError("Walk-forward evaluation requires at least 80 eligible dates")

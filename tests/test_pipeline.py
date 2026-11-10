@@ -23,7 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from data_processing import (  # noqa: E402
-    DEFAULT_RAW_DATA, load_data, prepare_features, prepare_indicator_history,
+    DEFAULT_RAW_DATA, load_data,
+    prepare_features as _prepare_features,
+    prepare_indicator_history as _prepare_indicator_history,
     validate_bars, validate_raw_bar_records,
 )
 from date_validation import parse_daily_dates  # noqa: E402
@@ -35,6 +37,7 @@ from model_training import (  # noqa: E402
     BASELINE_FEATURES, QuantileBinner, chronological_split,
     classification_metrics, fit_network, predict_up_probability, run_experiment,
 )
+from market_calendar import nyse_open_mask, validate_nyse_open_dates  # noqa: E402
 from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
 from session_validation import (  # noqa: E402
     adjacent_session_flags, session_positions, validate_session_positions,
@@ -43,6 +46,16 @@ from technical_indicators import add_technical_indicators  # noqa: E402
 from walk_forward_evaluation import (  # noqa: E402
     paired_block_accuracy_intervals, walk_forward_experiment,
 )
+
+
+def prepare_features(*args, **kwargs):
+    # Synthetic test fixtures use explicitly day-precise pandas timestamps.
+    return _prepare_features(*args, verified_datetime_dates=True, **kwargs)
+
+
+def prepare_indicator_history(*args, **kwargs):
+    # The CSV loader likewise validates original dates before conversion.
+    return _prepare_indicator_history(*args, verified_datetime_dates=True, **kwargs)
 
 
 def synthetic_bars(days: int = 130) -> pd.DataFrame:
@@ -2494,6 +2507,48 @@ def test_validate_bars_does_not_trust_pandas_coerced_numpy_months():
     assert len(validate_bars(coerced, verified_datetime_dates=True)) == 2
     explicit_days = coerced.assign(Date=["2024-04-01", "2024-05-01"])
     assert len(validate_bars(explicit_days)) == 2
+
+
+def test_feature_preparation_does_not_override_date_source_verification():
+    raw = [
+        {
+            "Date": np.datetime64(month), "Name": "IBM",
+            "Open": 10.0, "High": 12.0, "Low": 9.0,
+            "Close": 11.0, "Volume": 100,
+        }
+        for month in ("2024-04", "2024-05")
+    ]
+    coerced = pd.DataFrame(raw)
+    assert coerced.Date.dt.strftime("%Y-%m-%d").tolist() == [
+        "2024-04-01", "2024-05-01",
+    ]
+    for prepare in (_prepare_indicator_history, _prepare_features):
+        with pytest.raises(ValueError, match="unknown original precision"):
+            prepare(coerced)
+
+    # Explicit daily source strings require no opt-in, and verified pandas
+    # inputs can still be used after a deliberate caller attestation.
+    assert len(_prepare_indicator_history(
+        coerced.assign(Date=["2024-04-01", "2024-05-01"])
+    )) == 2
+    assert len(_prepare_indicator_history(
+        coerced, verified_datetime_dates=True
+    )) == 2
+
+
+@pytest.mark.parametrize("invalid_flag", ["true", 1, None])
+def test_date_source_attestation_must_be_a_boolean(invalid_flag):
+    bars = synthetic_bars(2)
+    with pytest.raises(ValueError, match="verified_datetime_dates must be a boolean"):
+        validate_bars(bars, verified_datetime_dates=invalid_flag)
+
+
+def test_nyse_calendar_never_marks_missing_dates_as_open():
+    days = pd.DatetimeIndex([pd.NaT, pd.Timestamp("2024-01-16"),
+                             pd.Timestamp("2024-01-15")])
+    assert nyse_open_mask(days).tolist() == [False, True, False]
+    with pytest.raises(ValueError, match="closed-market date"):
+        validate_nyse_open_dates(pd.DatetimeIndex([pd.NaT]))
 
 
 @pytest.mark.parametrize("exchange", ["NYSE", "XNYS"])

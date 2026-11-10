@@ -242,7 +242,7 @@ def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
                    tickers: tuple[str, ...] | None = None, num_bins: int = 4,
                    target: str = "close_to_close") -> dict:
     data = load_data(raw_data, tickers=tickers)
-    frame = prepare_features(data, target=target)
+    frame = prepare_features(data, target=target, verified_datetime_dates=True)
     split = chronological_split(frame)
     baseline = train_and_select(split, BASELINE_FEATURES, num_bins)
     enhanced = train_and_select(split, ENHANCED_FEATURES, num_bins)
