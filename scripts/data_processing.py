@@ -18,6 +18,7 @@ import pandas as pd
 if __package__:
     from .technical_indicators import add_technical_indicators
     from .date_validation import parse_daily_dates
+    from .market_calendar import nyse_open_mask
     from .price_validation import valid_price_bars
     from .session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
@@ -25,6 +26,7 @@ if __package__:
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
+    from market_calendar import nyse_open_mask
     from price_validation import valid_price_bars
     from session_validation import adjacent_session_flags, session_positions, validate_session_positions
     from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
@@ -117,6 +119,17 @@ def _custom_source_session_positions(source: pd.DataFrame,
                   .str.strip().str.upper().unique())
         labels = reference["Exchange"].astype("string").str.strip().str.upper()
         reference = reference.loc[labels.isin(wanted)]
+        # Same-exchange peers help reveal missing real sessions, but a peer's
+        # fabricated trade on a closed NYSE day is not market-calendar evidence.
+        # Keep selected records intact so their own invalid dates still fail.
+        labels = labels.loc[reference.index]
+        nyse_peers = labels.isin(("NYSE", "XNYS")) & ~reference.index.isin(
+            source.index[selected_mask]
+        )
+        if nyse_peers.any():
+            peer_dates = pd.DatetimeIndex(reference.loc[nyse_peers, "Date"])
+            invalid_peers = reference.loc[nyse_peers].index[~nyse_open_mask(peer_dates)]
+            reference = reference.drop(index=invalid_peers)
     else:
         reference = reference.loc[selected_mask]
     inferred = session_positions(reference, calendar_start=start, calendar_end=end)
@@ -126,15 +139,26 @@ def _custom_source_session_positions(source: pd.DataFrame,
     return selected.astype("int64")
 
 
-def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
+def validate_bars(df: pd.DataFrame, *, verified_datetime_dates: bool = False) -> pd.DataFrame:
     """Retain complete, coherent daily price bars with verified dates and symbols.
 
     A contradictory OHLC record cannot be repaired reliably without an
     independent price source, so it is excluded from reproducible experiments.
+    Pandas datetime64/Timestamp values have irretrievably lost their original
+    precision; callers must explicitly attest to having verified source dates.
     """
     missing = set(REQUIRED_COLUMNS) - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
+    supplied_dates = df["Date"]
+    ambiguous_precision = (pd.api.types.is_datetime64_any_dtype(supplied_dates.dtype)
+                           or supplied_dates.map(lambda value: isinstance(value, pd.Timestamp)).any())
+    if ambiguous_precision and not verified_datetime_dates:
+        raise ValueError(
+            "Pandas datetime dates have unknown original precision; supply explicit "
+            "ISO daily dates, use validate_raw_bar_records on raw NumPy dates, or "
+            "set verified_datetime_dates=True after checking the source precision"
+        )
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
     df["Name"] = normalize_ticker_symbols(
@@ -183,7 +207,7 @@ def validate_raw_bar_records(records: Iterable[Mapping[str, object]]) -> pd.Data
     )
     frame = pd.DataFrame.from_records(rows)
     frame["Date"] = dates.to_numpy()
-    return validate_bars(frame)
+    return validate_bars(frame, verified_datetime_dates=True)
 
 
 def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -> pd.DataFrame:
@@ -271,7 +295,7 @@ def prepare_indicator_history(df: pd.DataFrame) -> pd.DataFrame:
     because their next-session prediction target is unavailable. It also retains
     missing-indicator rows to preserve HMM sequence boundaries.
     """
-    return add_technical_indicators(validate_bars(df))
+    return add_technical_indicators(validate_bars(df, verified_datetime_dates=True))
 
 
 def main() -> None:

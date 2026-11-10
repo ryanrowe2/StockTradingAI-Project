@@ -65,9 +65,14 @@ Direct session utilities require daily dates. For raw NumPy date scalars, use
 it rejects year-, month-, or week-precision dates rather than inventing a day.
 Ordinary pandas construction may silently expand such scalars into a complete
 timestamp, permanently discarding their original precision; a validator
-receiving that already-converted DataFrame cannot reconstruct it. ISO daily
-strings, Python date objects, and explicit NumPy day-precision values are safe
-inputs to the raw-record API.
+receiving that already-converted DataFrame cannot reconstruct it. Therefore
+`validate_bars()` rejects pandas datetime64/Timestamp dates by default;
+`verified_datetime_dates=True` is an explicit attestation for callers who
+independently checked their original date precision. ISO daily strings, Python
+date objects, and explicit NumPy day-precision values are safe inputs to the
+raw-record API. When selecting a ticker from a custom CSV, an unrelated NYSE
+ticker's impossible closed-market observation is excluded from shared calendar
+inference, while the selected ticker's own invalid dates are still rejected.
 Direct multi-ticker indicator and trading-episode utilities infer shared
 exchange calendars before splitting the source into individual stocks.
 Trading episodes reject duplicate ticker/date records and sort parsed dates,

@@ -41,7 +41,9 @@ unconverted record mappings to `validate_raw_bar_records(records)` in
 `scripts/data_processing.py`; this checks each original scalar before pandas
 can assign an invented day. Once an ordinary DataFrame constructor has
 converted a coarse NumPy date into a timestamp, its original precision is
-irrecoverable and the general DataFrame validator cannot detect that coercion.
+irrecoverable. To avoid silently accepting this ambiguity, `validate_bars()`
+rejects existing pandas datetime64/Timestamp dates unless the caller explicitly
+attests to verified source precision with `verified_datetime_dates=True`.
 Incomplete or
 contradictory bars are excluded without guessing replacement prices. Feature
 preparation rejects an input ticker if insufficient valid price history remains
@@ -72,6 +74,9 @@ known closed-market dates are rejected, with or without supplied ordinals.
 From 1971 onward, supplied NYSE ordinals must also advance by the exact number
 of scheduled market sessions between observations, preventing missing trading
 days from being concealed by compressed consecutive session numbers.
+For custom CSV ticker selection, impossible NYSE dates belonging only to
+unselected peers are ignored as calendar evidence; valid same-exchange dates
+still reveal missing sessions in the selected ticker.
 Without `Exchange`, extra observed weekdays remain ticker-specific;
 for exact non-NYSE calendars, provide verified `Session_Number`. Historical NYSE
 Saturday trading is supported through its last actual Saturday session on

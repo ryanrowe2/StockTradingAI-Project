@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import numpy as np
 import pandas as pd
 from pandas.tseries.holiday import (
     AbstractHolidayCalendar,
@@ -66,17 +67,24 @@ def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIn
     return pd.bdate_range(start, end, freq=CustomBusinessDay(holidays=closure_days))
 
 
+def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
+    """Identify known NYSE sessions; pre-1971 dates require external ordinals."""
+    modern = dates >= pd.Timestamp("1971-01-01")
+    valid = np.ones(len(dates), dtype=bool)
+    if modern.any():
+        observed = dates[modern]
+        scheduled = _scheduled_sessions(observed.min(), observed.max())
+        valid[modern] = observed.isin(scheduled)
+    return valid
+
+
 def validate_nyse_open_dates(dates: pd.DatetimeIndex) -> None:
     """Reject recorded NYSE trades on known closed dates from 1971 onward.
 
     Earlier verified sessions remain caller-supplied because the modern calendar
     deliberately cannot infer the NYSE's pre-1971 historical schedule.
     """
-    modern = dates[dates >= pd.Timestamp("1971-01-01")]
-    if modern.empty:
-        return
-    scheduled = _scheduled_sessions(modern.min(), modern.max())
-    impossible = modern.difference(scheduled)
+    impossible = dates[~nyse_open_mask(dates)]
     if not impossible.empty:
         raise ValueError(
             f"NYSE observations contain a closed-market date: {impossible[0].date()}"

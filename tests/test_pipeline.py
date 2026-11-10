@@ -94,7 +94,7 @@ def test_validation_rejects_ticker_lost_to_invalid_bars(tmp_path: Path):
     bars.loc[bars["Name"] == "BBB", "High"] = 0.0
     expected = r"No valid OHLCV observations remain for ticker\(s\) BBB"
     with pytest.raises(ValueError, match=expected):
-        validate_bars(bars)
+        validate_bars(bars, verified_datetime_dates=True)
     with pytest.raises(ValueError, match=expected):
         prepare_features(bars)
     csv = tmp_path / "mixed_validity.csv"
@@ -197,7 +197,7 @@ def test_missing_raw_market_session_is_not_used_as_a_daily_return_or_rsi():
     bad_day = bars.loc[45, "Date"]
     next_day = bars.loc[46, "Date"]
     bars.loc[45, "High"] = 0.0
-    clean = validate_bars(bars)
+    clean = validate_bars(bars, verified_datetime_dates=True)
     assert bad_day not in set(clean["Date"])
     before = clean.loc[clean["Date"] < bad_day, "Session_Number"].iloc[-1]
     after = clean.loc[clean["Date"] == next_day, "Session_Number"].iloc[0]
@@ -358,11 +358,11 @@ def test_validate_bars_rejects_conflicting_source_session_calendar():
     collision = bars.copy()
     collision.loc[collision.Date == dates[2], "Session_Number"] = 1
     with pytest.raises(ValueError, match="Session_Number"):
-        validate_bars(collision)
+        validate_bars(collision, verified_datetime_dates=True)
     descending = bars.copy()
     descending["Session_Number"] = descending.Session_Number.map({0: 2, 1: 1, 2: 0})
     with pytest.raises(ValueError, match="Session_Number"):
-        validate_bars(descending)
+        validate_bars(descending, verified_datetime_dates=True)
 
 
 def test_historical_supervised_targets_are_next_market_session_only():
@@ -2228,7 +2228,7 @@ def test_walk_forward_rejects_too_few_bootstrap_dates_before_training(monkeypatc
         "Name": ["AAA"] * count, "Open": close - 0.2,
         "High": close + 1, "Low": close - 1,
         "Close": close, "Volume": [1000] * count,
-    }))
+    }), verified_datetime_dates=True)
     assert len(prepare_features(bars)) >= 80
     monkeypatch.setattr(walk_module, "load_data", lambda *args, **kwargs: bars)
     monkeypatch.setattr(walk_module, "train_and_select",
@@ -2296,7 +2296,7 @@ def _extra_same_exchange_market_date() -> pd.DataFrame:
 def test_direct_indicators_preserve_peer_observed_exchange_session_gaps():
     source = _extra_same_exchange_market_date()
     direct = add_technical_indicators(source)
-    validated = add_technical_indicators(validate_bars(source))
+    validated = add_technical_indicators(validate_bars(source, verified_datetime_dates=True))
     for frame in (direct, validated):
         aaa = frame.loc[frame.Name == "AAA"].sort_values("Date")
         assert aaa.Session_Number.tolist() == [0, 2, 3]
@@ -2472,3 +2472,47 @@ def test_raw_bar_ingestion_preserves_and_rejects_coarse_date_precision(coarse):
     ])
     assert valid.Date.dt.strftime("%Y-%m-%d").tolist() == ["2024-04-05", "2024-04-08"]
     assert valid.Session_Number.tolist() == [0, 1]
+
+
+def test_validate_bars_does_not_trust_pandas_coerced_numpy_months():
+    rows = [
+        {
+            "Date": np.datetime64(month), "Name": "IBM",
+            "Open": 10.0, "High": 12.0, "Low": 9.0,
+            "Close": 11.0, "Volume": 100,
+        }
+        for month in ("2024-04", "2024-05")
+    ]
+    coerced = pd.DataFrame(rows)
+    assert pd.api.types.is_datetime64_any_dtype(coerced["Date"].dtype)
+    with pytest.raises(ValueError, match="unknown original precision"):
+        validate_bars(coerced)
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        validate_raw_bar_records(rows)
+    # Already-coerced inputs require an explicit caller assertion; source date
+    # precision can no longer be recovered from pandas timestamp values.
+    assert len(validate_bars(coerced, verified_datetime_dates=True)) == 2
+    explicit_days = coerced.assign(Date=["2024-04-01", "2024-05-01"])
+    assert len(validate_bars(explicit_days)) == 2
+
+
+@pytest.mark.parametrize("exchange", ["NYSE", "XNYS"])
+def test_ticker_selection_ignores_impossible_same_exchange_peer_dates(tmp_path, exchange):
+    data = pd.DataFrame({
+        "Name": ["AAA", "AAA", "BBB", "BBB"],
+        "Date": ["2024-01-12", "2024-01-16", "2024-01-15", "2024-01-17"],
+        "Exchange": [exchange] * 4,
+        "Open": [10.0] * 4, "High": [12.0] * 4,
+        "Low": [9.0] * 4, "Close": [11.0] * 4, "Volume": [100] * 4,
+    })
+    csv = tmp_path / "shared_exchange_closed_peer.csv"
+    data.to_csv(csv, index=False)
+    selected = load_data(csv, tickers=("AAA",))
+    assert selected["Date"].dt.strftime("%Y-%m-%d").tolist() == [
+        "2024-01-12", "2024-01-16",
+    ]
+    assert selected["Session_Number"].tolist() == [0, 1]
+    # A closed-day observation remains invalid when it belongs to the
+    # ticker the caller specifically requested.
+    with pytest.raises(ValueError, match="closed-market date"):
+        load_data(csv, tickers=("BBB",))
