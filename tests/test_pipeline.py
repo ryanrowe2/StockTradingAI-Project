@@ -242,7 +242,7 @@ def test_load_data_validates_and_removes_incomplete_rows(tmp_path: Path):
     assert not loaded.duplicated(["Name", "Date"]).any()
 
 
-def test_selected_ticker_ignores_unrelated_invalid_bars_and_dates(tmp_path: Path, monkeypatch):
+def test_selected_ticker_ignores_unrelated_invalid_bars_and_dates(tmp_path: Path, monkeypatch, capsys):
     from data_processing import main as prepare_main
 
     bars = synthetic_bars()
@@ -267,6 +267,7 @@ def test_selected_ticker_ignores_unrelated_invalid_bars_and_dates(tmp_path: Path
         "data_processing.py", "--input", str(csv), "--ticker", "AAA", "--output", str(output),
     ])
     prepare_main()
+    assert "from 1 ticker:" in capsys.readouterr().out
     assert set(pd.read_csv(output)["Name"]) == {"AAA"}
 
     with pytest.raises(ValueError, match="Ticker not found: MISSING"):
@@ -301,6 +302,46 @@ def test_historical_aapl_subset_and_full_source_have_identical_features():
     pd.testing.assert_frame_equal(prepare_indicator_history(full_aapl),
                                   prepare_indicator_history(selected))
     pd.testing.assert_frame_equal(prepare_features(full_aapl), prepare_features(selected))
+
+
+def test_every_bundled_individual_stock_file_uses_combined_market_calendar():
+    complete = load_data(DEFAULT_RAW_DATA)
+    for file in sorted(DEFAULT_RAW_DATA.parent.glob("*_2006-01-01_to_2018-01-01.csv")):
+        if file == DEFAULT_RAW_DATA:
+            continue
+        symbol = file.name.split("_", 1)[0]
+        individual = load_data(file)
+        reference = complete.loc[complete.Name == symbol].reset_index(drop=True)
+        pd.testing.assert_frame_equal(individual, reference)
+        pd.testing.assert_frame_equal(
+            prepare_features(individual), prepare_features(reference),
+        )
+
+
+def test_invalid_unrelated_weekend_does_not_shift_selected_stock_sessions(tmp_path: Path):
+    source = synthetic_bars(100)
+    clean_csv = tmp_path / "clean.csv"
+    source.to_csv(clean_csv, index=False)
+    expected = load_data(clean_csv, tickers=("AAA",))
+    corrupted = pd.concat([source, source.iloc[:1].assign(
+        Name="BBB", Date=pd.Timestamp("2019-01-05"), High=-10.0,
+    )], ignore_index=True)
+    corrupt_csv = tmp_path / "corrupted.csv"
+    corrupted.to_csv(corrupt_csv, index=False)
+    actual = load_data(corrupt_csv, tickers=("AAA",))
+    pd.testing.assert_frame_equal(actual, expected)
+    pd.testing.assert_frame_equal(prepare_features(actual), prepare_features(expected))
+
+
+def test_model_specific_feature_warmup_does_not_require_unused_indicators():
+    clean = load_data(DEFAULT_RAW_DATA)
+    assert len(prepare_features(clean)) == 92_284
+    assert len(prepare_features(clean, features=BASELINE_FEATURES)) == 93_028
+    default = prepare_features(clean)
+    assert default[list(BASELINE_FEATURES)].notna().all().all()
+    assert default["MACD_Pct"].notna().all()
+    with pytest.raises(ValueError, match="Model features"):
+        prepare_features(clean, features=("Not_A_Model_Feature",))
 
 
 def test_validate_bars_rejects_conflicting_source_session_calendar():
@@ -529,12 +570,14 @@ def test_hmm_notebook_keeps_causal_observations_purged_from_supervised_splits():
     assert "hmm_training = history.loc[history['Date'] <= split.train_end]" in source
     assert "fit_hmm_on_indicators(hmm_training" in source
     assert "infer_filtered_regimes(hmm_model, history)" in source
-    assert "train_regimes = history_regimes.loc[history_regimes['Date'].isin(split.train.loc[split.train['Name'] == 'AAPL', 'Date'])]" in source
+    assert "train_regimes = history_regimes.loc[history_regimes['Date'].isin(split.train.loc[split.train['Name'] == 'AAPL', 'Date'])" in source
+    assert "history_regimes[list((*hmm_features, 'Return'))].notna().all(axis=1)" in source
     assert "indicator_history = prepare_indicator_history" in source
     assert "split = chronological_split(features)" in source
     assert "history_regimes['Date'] > split.validation_end" in source
     assert "training.groupby(training['Session_Number'].diff().ne(1).cumsum())" in source
     assert "train_envs = [SimpleTradingEnv(group" in source
+    assert "xlabel='Training pass'" in source
 
 
 def test_hmm_gap_filtering_restarts_segments_with_and_without_missing_rows():
@@ -740,7 +783,10 @@ def test_historical_hmm_fit_reaches_configured_tolerance():
     data = load_data(DEFAULT_RAW_DATA)
     stock = prepare_features(data.loc[data["Name"] == "AAPL"])
     train_end = chronological_split(stock).train_end
-    model, _ = fit_hmm_on_indicators(stock.loc[stock["Date"] <= train_end], n_components=3)
+    complete_indicators = stock.loc[stock["Date"] <= train_end].dropna(
+        subset=["MA_20", "RSI_14", "MACD"]
+    )
+    model, _ = fit_hmm_on_indicators(complete_indicators, n_components=3)
     assert model.monitor_.iter < model.n_iter
     assert abs(model.monitor_.history[-1] - model.monitor_.history[-2]) < model.tol
 
@@ -834,8 +880,11 @@ def test_trading_sorts_parsed_dates_and_rejects_invalid_or_duplicate_dates():
         "Open": [110.0, 90.0, 100.0], "Close": [115.0, 95.0, 105.0],
     })
     original_dates = bars["Date"].tolist()
-    env = SimpleTradingEnv(bars)
-    assert env.data["Date"].dt.day.tolist() == [2, 3, 10]
+    with pytest.raises(ValueError, match="consecutive market sessions"):
+        SimpleTradingEnv(bars)
+    contiguous = bars.assign(Date=["2020-1-6", "2020-1-2", "2020-1-3"])
+    env = SimpleTradingEnv(contiguous)
+    assert env.data["Date"].dt.day.tolist() == [2, 3, 6]
     assert bars["Date"].tolist() == original_dates
     with pytest.raises(ValueError, match="parseable"):
         SimpleTradingEnv(bars.assign(Date=["invalid", "2020-1-2", "2020-1-3"]))
@@ -1538,7 +1587,7 @@ def test_shared_ticker_validator_preserves_legitimate_na_symbol():
     indicator_frame = add_technical_indicators(legitimate)
     assert set(indicator_frame["Name"]) == {"NA"}
     assert set(_validated_indicators(indicator_frame, ("MA_20", "RSI_14", "MACD"))["Name"]) == {"NA"}
-    env = SimpleTradingEnv(legitimate.iloc[:4], state_columns=())
+    env = SimpleTradingEnv(legitimate.sort_values("Date").iloc[:4], state_columns=())
     assert set(env.data["Name"]) == {"NA"}
 
 
@@ -1558,3 +1607,128 @@ def test_eda_notebook_uses_validated_percent_returns_and_reports_exclusions():
     assert "returns" in histograms[0].source
     assert "ticker_returns" in boxplots[0].source
     assert "df['Close']" not in histograms[0].source + boxplots[0].source
+
+
+def test_direct_indicators_detect_missing_weekdays_without_session_metadata():
+    bars = synthetic_bars(85).query("Name == 'AAA'").sort_values("Date").reset_index(drop=True)
+    missing_date = bars.loc[45, "Date"]
+    next_date = bars.loc[46, "Date"]
+    with_metadata = bars.assign(Session_Number=np.arange(len(bars)))
+    shortened = bars.loc[bars.Date != missing_date].copy()
+    shortened_with_metadata = with_metadata.loc[with_metadata.Date != missing_date].copy()
+    result = add_technical_indicators(shortened)
+    reference = add_technical_indicators(shortened_with_metadata)
+    crossing = result.loc[result.Date == next_date].iloc[0]
+    assert pd.isna(crossing["Return"])
+    assert pd.isna(crossing["RSI_14"])
+    assert pd.isna(crossing["ATR"])
+    for name in ("Return", "RSI_14", "ATR", "Return_Lag1"):
+        pd.testing.assert_series_equal(result[name], reference[name], check_names=False)
+
+
+def test_direct_hmm_restarts_at_missing_weekday_without_session_metadata():
+    class AlternatingModel:
+        covariance_type = "diag"
+        means_ = np.array([[0.], [0.]])
+        covars_ = np.array([[[1.]], [[1.]]])
+        startprob_ = np.array([1., 0.])
+        transmat_ = np.array([[0., 1.], [1., 0.]])
+
+    frame = pd.DataFrame({
+        "Date": ["2024-02-26", "2024-02-28"],
+        "MA_20": [0., 0.],
+    })
+    result = infer_filtered_regimes(AlternatingModel(), frame, ("MA_20",))
+    assert result.Market_Regime.tolist() == [0, 0]
+
+
+def test_direct_hmm_fitting_splits_weekday_gaps_without_session_metadata(monkeypatch):
+    from hmmlearn.hmm import GaussianHMM
+
+    source = prepare_features(synthetic_bars(130)).query("Name == 'AAA'")
+    source = source.dropna(subset=["MA_20", "RSI_14", "MACD"])
+    source = source.drop(columns="Session_Number").sort_values("Date").reset_index(drop=True)
+    source = source.drop(index=source.index[50]).reset_index(drop=True)
+    lengths_seen = []
+    original_fit = GaussianHMM.fit
+
+    def recording_fit(self, values, lengths=None):
+        lengths_seen.append(lengths)
+        return original_fit(self, values, lengths=lengths)
+
+    monkeypatch.setattr(GaussianHMM, "fit", recording_fit)
+    fit_hmm_on_indicators(source, n_components=2)
+    assert len(lengths_seen[0]) == 2
+    assert sum(lengths_seen[0]) == len(source)
+
+
+def test_direct_trading_rejects_weekday_gap_without_session_metadata():
+    frame = pd.DataFrame({
+        "Date": ["2024-02-26", "2024-02-28"],
+        "Open": [10., 11.], "Close": [11., 12.],
+    })
+    with pytest.raises(ValueError, match="consecutive market sessions"):
+        SimpleTradingEnv(frame)
+    frame["Session_Number"] = [0, 1]
+    assert len(SimpleTradingEnv(frame).data) == 2
+
+
+@pytest.mark.parametrize("invalid", [0, -1, -0.5, np.nan, np.inf, True, "5"])
+def test_bdeu_prior_strength_rejects_invalid_values(invalid):
+    frame = pd.DataFrame({"Return": [0, 1] * 10, "Trend": [0, 1] * 10})
+    with pytest.raises(ValueError, match="equivalent_sample_size"):
+        fit_network(frame, ("Return",), 2, invalid)
+
+
+@pytest.mark.parametrize("invalid", [2, "bad", None, np.nan])
+def test_network_predictions_reject_unknown_categorical_evidence(invalid):
+    frame = pd.DataFrame({"Return": [0, 1] * 10, "Trend": [0, 1] * 10})
+    fitted = fit_network(frame, ("Return",), 2, 5)
+    with pytest.raises(ValueError, match="Unknown Bayesian-network states for Return"):
+        predict_up_probability(fitted, pd.DataFrame({"Return": [0, invalid]}))
+    with pytest.raises(ValueError, match="Missing Bayesian-network parent feature"):
+        predict_up_probability(fitted, pd.DataFrame({"Other": [0]}))
+
+
+@pytest.mark.parametrize("symbol", ["<NA>", "123", "-AAPL", "AAPL!", "...", "A B"])
+def test_ticker_validation_rejects_malformed_nonplaceholder_names(symbol):
+    frame = synthetic_bars(40).query("Name == 'AAA'").assign(Name=symbol)
+    with pytest.raises(ValueError, match="ticker name"):
+        add_technical_indicators(frame)
+
+
+def test_ticker_validation_accepts_delimited_share_classes():
+    frame = synthetic_bars(40).query("Name == 'AAA'").assign(Name="brk.b")
+    assert set(add_technical_indicators(frame).Name) == {"BRK.B"}
+
+
+@pytest.mark.parametrize("field", ["alpha", "gamma", "epsilon"])
+@pytest.mark.parametrize("value", [True, False, np.bool_(True)])
+def test_q_learning_rejects_boolean_hyperparameters(field, value):
+    with pytest.raises(ValueError, match="Invalid Q-learning parameters"):
+        QLearningAgent(**{field: value})
+
+
+def test_notebook_execution_restores_environment_variables(tmp_path: Path, monkeypatch):
+    import nbformat
+    from scripts.refresh_notebooks import reproduce_notebook
+
+    monkeypatch.setenv("STOCK_TRADING_AUDIT_EXISTING", "original")
+    monkeypatch.delenv("STOCK_TRADING_AUDIT_NEW", raising=False)
+    original = os.environ.copy()
+    for failing in (False, True):
+        source = (
+            "import os\n"
+            "os.environ['STOCK_TRADING_AUDIT_EXISTING'] = 'modified'\n"
+            "os.environ['STOCK_TRADING_AUDIT_NEW'] = 'added'"
+        )
+        if failing:
+            source += "\nraise RuntimeError('expected failure')"
+        path = tmp_path / f"environment_{failing}.ipynb"
+        nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(source)]), path)
+        if failing:
+            with pytest.raises(RuntimeError, match="Notebook environment_True.ipynb"):
+                reproduce_notebook(path, save=False)
+        else:
+            reproduce_notebook(path, save=False)
+        assert dict(os.environ) == original

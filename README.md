@@ -39,12 +39,15 @@ Each ticker's indicators and next-session labels are computed independently. Tic
 identifiers are normalized consistently, including for direct indicator calls;
 literal symbols such as `NA` are preserved during CSV loading. Date boundaries
 are shared across the Bayesian and AAPL trading experiments, so their partitions
-correspond to the same historical market periods. Source-observed market-session
-positions use the entire source's valid market dates, even when selecting one
-ticker before validating its prices. Close-to-close daily returns, RSI changes,
-and prediction targets do not bridge missing sessions. HMM fitting and forward
-filtering restart at incomplete observations or missing source sessions, so
-both use the same contiguous-sequence model. Target dates must follow their
+correspond to the same historical market periods. All bundled ticker CSVs use
+the verified observed-session calendar of the complete 31-stock source.
+Custom data without exchange-session positions conservatively count weekdays,
+so an omitted weekday cannot silently become an adjacent session; exchange
+holidays may require explicit `Session_Number` metadata. Close-to-close daily
+returns, RSI changes, and prediction targets do not bridge missing sessions.
+HMM fitting uses separate complete contiguous sequences; forward filtering
+restarts after incomplete observations or missing source sessions, so both use
+the same boundary policy. Target dates must follow their
 feature dates by exactly one recorded market session.
 An experiment rejects a ticker with no usable validated history or without
 observations in each chronological partition, and reports ticker coverage for
@@ -69,7 +72,15 @@ Two discrete Bayesian networks support a controlled feature-set comparison:
 
 Both use an explicit feature-to-target directed graph. Price-relative features allow observations from differently priced stocks to share meaningful bins. The training workflow estimates conditional probability tables with a **Bayesian Dirichlet equivalent uniform (BDeu) prior** and selects equivalent sample size using validation data.
 
-Both feature sets use the same chronological partitions. For validation-based model selection, quantile bins are fitted on training data only. After selecting the prior strength, the bins and model are refitted on the combined training and validation observations before the final test evaluation. The report includes accuracy, balanced accuracy, precision, recall, F1, ROC AUC, and a majority-class benchmark.
+Both feature sets use the same chronological partitions and comparable
+observations. Feature preparation requires only the enhanced model's columns;
+it does not discard rows because unrelated diagnostic indicators are missing.
+The `prepare_features(..., features=...)` option also permits a larger
+baseline-only eligible sample. For validation-based model selection, quantile
+bins are fitted on training data only. After selecting the prior strength, the
+bins and model are refitted on combined training and validation observations
+before final test evaluation. The report includes accuracy, balanced accuracy,
+precision, recall, F1, ROC AUC, and a majority-class benchmark.
 
 **Implementation:** [`scripts/model_training.py`](scripts/model_training.py)
 
@@ -100,14 +111,14 @@ same later test period, after validation-based parameter selection:
 
 | Predictor | Test accuracy | Test ROC AUC |
 | --- | ---: | ---: |
-| Training-majority benchmark | **52.19%** | — |
-| Baseline Bayesian network | 51.79% | 0.515 |
-| Enhanced Bayesian network | 51.02% | 0.508 |
+| Training-majority benchmark | **52.09%** | — |
+| Baseline Bayesian network | 51.72% | 0.511 |
+| Enhanced Bayesian network | 50.96% | 0.506 |
 
 Neither Bayesian network beat the majority-class benchmark on this holdout.
 In the separate AAPL trading notebook, the frozen Q-learning policy earned
-**-$2.45** in one-share, dollar-denominated holdout P/L, compared with
-**+$52.68** for the next-open buy-and-hold comparator. These historical
+**+$29.10** in one-share, dollar-denominated holdout P/L, compared with
+**+$53.07** for the next-open buy-and-hold comparator. These historical
 experiments demonstrate the implementation and its limitations; they do not
 establish predictive superiority or deployable trading profitability.
 
@@ -133,7 +144,7 @@ python scripts/data_processing.py
 # Train, select, and evaluate Bayesian networks on the historical dataset.
 python scripts/model_training.py
 
-# Optional: run a quicker single-ticker experiment.
+# Optional: run a quicker single-ticker experiment with its own split dates.
 python scripts/model_training.py --ticker AAPL --output data/generated/aapl_model_metrics.json
 ```
 
@@ -144,16 +155,23 @@ When `--ticker` is specified, selection happens before price-bar validation,
 so invalid records belonging only to other symbols do not block the experiment.
 CSV parsing preserves legitimate ticker strings such as `NA`, which pandas
 otherwise interprets as missing values, while rejecting explicit placeholders
-such as `N/A`, `NaN`, and `NULL`. The same ticker-name validation applies to
+such as `N/A`, `NaN`, `NULL`, and `<NA>`, plus malformed symbols. The same
+ticker-name validation applies to
 direct indicator, HMM, and trading-environment calls. Of the 93,612 source
 records, 93,435 pass OHLCV validation; 177 incomplete or contradictory rows
 are excluded without modifying the raw files.
-An additional `Session_Number` column preserves source-market-session positions
-through this exclusion, using the source-wide calendar even for selected tickers.
+An additional `Session_Number` column preserves market-session positions through
+this exclusion. The bundled individual stock files use the complete dataset's
+verified observed-session calendar; custom CSVs without supplied positions use
+conservative weekday positions to identify missing weekdays.
 A close-to-close return crossing an excluded session is unavailable for
 single-day modeling rather than compressed into one day's return. Such a row
 also receives no next-session direction label and is excluded from supervised
 training and evaluation.
+The optional AAPL-only model run derives its chronological split boundaries
+from AAPL's own eligible dates: in this version, training ends 2013-04-01 and
+validation ends 2015-08-17, versus 2013-03-28 and 2015-08-13 in the 31-stock
+comparison. Its metrics are therefore not an identical-period replication.
 
 For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
 environment, install `requirements-repro-py312.txt` instead of the flexible
@@ -165,6 +183,7 @@ For tests, install the development requirements and run:
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest tests -q
+python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
 ```
 
 ### Interactive notebooks

@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from numbers import Integral
+from numbers import Integral, Real
 from pathlib import Path
 
 import numpy as np
@@ -134,6 +134,11 @@ class QuantileBinner:
 def fit_network(df: pd.DataFrame, features: tuple[str, ...],
                 num_bins: int, equivalent_sample_size: int) -> DiscreteBayesianNetwork:
     """Fit a simple, interpretable feature-to-next-session-direction network."""
+    if (not isinstance(equivalent_sample_size, Real)
+            or isinstance(equivalent_sample_size, (bool, np.bool_))
+            or not np.isfinite(equivalent_sample_size)
+            or equivalent_sample_size <= 0):
+        raise ValueError("BDeu equivalent_sample_size must be a finite positive number")
     network = DiscreteBayesianNetwork([(name, "Trend") for name in features])
     # Specify the full bin vocabulary even when a particular training period
     # does not observe one of its bins.
@@ -159,7 +164,13 @@ def predict_up_probability(network: DiscreteBayesianNetwork, frame: pd.DataFrame
     positions = []
     for parent in parents:
         name_to_index = {state: i for i, state in enumerate(conditional.state_names[parent])}
-        positions.append(frame[parent].map(name_to_index).to_numpy(dtype=int))
+        if parent not in frame:
+            raise ValueError(f"Missing Bayesian-network parent feature: {parent}")
+        mapped = frame[parent].map(name_to_index)
+        if mapped.isna().any():
+            invalid = frame.loc[mapped.isna(), parent].head(3).tolist()
+            raise ValueError(f"Unknown Bayesian-network states for {parent}: {invalid}")
+        positions.append(mapped.to_numpy(dtype=int))
     up_index = conditional.state_names["Trend"].index(1)
     return np.asarray(conditional.values[(up_index, *positions)], dtype=float)
 

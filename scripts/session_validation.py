@@ -4,10 +4,32 @@ from __future__ import annotations
 
 from itertools import pairwise
 
+import numpy as np
 import pandas as pd
 
 
 SESSION_COLUMN = "Session_Number"
+
+
+def session_positions(frame: pd.DataFrame) -> pd.Series:
+    """Return supplied session ordinals or conservative weekday positions.
+
+    A date-only caller has not supplied an exchange calendar. Counting every
+    weekday prevents an omitted weekday from silently becoming an adjacent
+    session. Genuine exchange holidays can create conservative gaps; callers
+    needing exact exchange adjacency should supply ``Session_Number``.
+    """
+    if SESSION_COLUMN in frame:
+        return frame[SESSION_COLUMN]
+    if "Date" not in frame:
+        return pd.Series(np.arange(len(frame), dtype=np.int64), index=frame.index)
+    dates = pd.DatetimeIndex(frame["Date"])
+    if (dates.dayofweek >= 5).any():
+        raise ValueError("Trading dates must fall on weekdays; supply a verified market calendar")
+    if dates.empty:
+        return pd.Series(dtype=np.int64, index=frame.index)
+    weekdays = pd.bdate_range(dates.min(), dates.max())
+    return pd.Series(weekdays.get_indexer(dates), index=frame.index, dtype=np.int64)
 
 
 def validate_session_positions(frame: pd.DataFrame, *,

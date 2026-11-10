@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 
-MISSING_TICKER_MARKERS = frozenset({"", "N/A", "NAN", "NULL", "NONE"})
+MISSING_TICKER_MARKERS = frozenset({"", "N/A", "NAN", "NULL", "NONE", "<NA>"})
 
 
 def normalize_ticker_symbols(symbols: pd.Series, *, context: str) -> pd.Series:
@@ -13,6 +13,7 @@ def normalize_ticker_symbols(symbols: pd.Series, *, context: str) -> pd.Series:
     if symbols.isna().any():
         raise ValueError(context)
     normalized = symbols.astype(str).str.strip().str.upper()
-    if normalized.isin(MISSING_TICKER_MARKERS).any():
+    valid_format = normalized.str.fullmatch(r"[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)*")
+    if normalized.isin(MISSING_TICKER_MARKERS).any() or not valid_format.all():
         raise ValueError(context)
     return normalized

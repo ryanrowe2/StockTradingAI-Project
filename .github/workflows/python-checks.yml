@@ -28,6 +28,10 @@ jobs:
           fi
       - name: Run regression tests
         run: python -m pytest tests -q
+      - name: Check Python syntax and static lint
+        run: |
+          python -m compileall -q scripts tests
+          python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
       - name: Verify pinned published experiments
         if: matrix.python-version == '3.12'
         run: |

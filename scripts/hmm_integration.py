@@ -10,11 +10,11 @@ from scipy.stats import multivariate_normal
 
 if __package__:
     from .date_validation import parse_daily_dates
-    from .session_validation import validate_session_positions
+    from .session_validation import session_positions, validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
-    from session_validation import validate_session_positions
+    from session_validation import session_positions, validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -98,6 +98,7 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
     # frames can have repeated index labels, which are unsafe for .loc writes.
     rows = df.reset_index(drop=True)
     ordered = _validated_indicators(rows, indicators, keep_missing=True)
+    positions = session_positions(ordered)
     output = rows.copy()
     if "Name" in output:
         output["Name"] = ordered["Name"]
@@ -122,8 +123,7 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
         # Fitting treats complete contiguous segments as independent HMM
         # sequences. Filtering must use the *same* boundary rule, restarting
         # after missing indicators or missing source-market sessions.
-        current_session = (int(ordered.loc[row_index, "Session_Number"])
-                           if "Session_Number" in ordered else step)
+        current_session = int(positions.iloc[step])
         if has_observation:
             if previous_observed_session is not None:
                 if missing_since_observation or current_session != previous_observed_session + 1:
@@ -170,13 +170,10 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
         n_components=n_components, covariance_type="diag", n_iter=500,
         tol=1e-4, random_state=random_state, min_covar=1e-4,
     )
-    if "Session_Number" in clean:
-        positions = clean["Session_Number"].tolist()
-        boundaries = np.array([0] + [i for i in range(1, len(positions))
-                                     if positions[i] != positions[i - 1] + 1])
-        lengths = np.diff(np.r_[boundaries, len(clean)]).tolist()
-    else:
-        lengths = [len(clean)]
+    positions = session_positions(clean).tolist()
+    boundaries = np.array([0] + [i for i in range(1, len(positions))
+                                 if positions[i] != positions[i - 1] + 1])
+    lengths = np.diff(np.r_[boundaries, len(clean)]).tolist()
     if sum(length - 1 for length in lengths) < n_components:
         raise ValueError("Insufficient consecutive-session transitions for the HMM")
     model.fit(X, lengths=lengths)

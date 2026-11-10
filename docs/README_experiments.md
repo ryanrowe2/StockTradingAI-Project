@@ -41,23 +41,30 @@ preparation rejects an input ticker if insufficient valid price history remains
 after indicator warm-up, so no ticker is silently omitted from the prepared data.
 Validation also rejects a ticker if every one of its price bars is invalid.
 Single-ticker selection is applied before validating OHLCV records and dates,
-so unrelated symbols cannot cause a selected ticker's run to fail. Valid dates
-observed in the original source are nevertheless retained in the selected
-ticker's market-session calendar, making its features identical to those in a
-full-source run. Literal symbols such as `NA` remain ticker identifiers instead of being parsed as
-missing values, while missing-name placeholders such as `N/A`, `NaN`, and
-`NULL` are rejected by all four input paths: raw data validation, direct
+so unrelated symbols cannot cause a selected ticker's run to fail. Every
+bundled per-ticker CSV uses the full 31-stock dataset's reference calendar,
+assembled from its validated weekday OHLCV observations. Therefore its labels
+and session positions agree with the same ticker selected from the combined
+source, even when individual stock files omit sessions. For custom sources,
+missing `Session_Number` metadata triggers conservative weekday positions;
+weekend rows are rejected and missing weekdays are never compressed into one
+session. Some exchange holidays can be treated as gaps without an explicit
+exchange calendar; provide verified `Session_Number` for exact exchange-specific
+adjacency. Invalid records from unrelated tickers do not contribute dates to
+the calendar. Literal symbols such as `NA` remain ticker identifiers instead
+of being parsed as missing values, while missing-name placeholders such as
+`N/A`, `NaN`, `NULL`, `<NA>`, and malformed symbols are rejected by all four
+input paths: raw data validation, direct
 indicator calculation, HMM fitting/inference, and trading environments.
 All paths normalize whitespace and case before checking ticker identity.
 In the included 93,612-row source, 93,435 bars pass OHLCV validation;
 177 incomplete or inconsistent records are excluded without imputation.
-Before exclusion, validation assigns `Session_Number` from the sorted
-source-observed market dates. The CSV loader preserves that source-wide calendar
-when filtering to one or more tickers, while ignoring malformed dates in
-unrelated ticker records. Session positions survive exclusion and subsetting,
+Before exclusion, validation assigns `Session_Number` from the bundled
+reference calendar or conservative weekday ordinals. Session positions survive
+exclusion and subsetting,
 allowing indicators, HMM segment boundaries, and the trading simulator to detect
-missing sessions. The source calendar does not claim to reconstruct dates
-absent from every ticker's input. Supplied session positions are checked for a
+missing sessions. Custom input dates with no session column use weekday
+positions for those same calculations. Supplied session positions are checked for a
 globally increasing one-to-one correspondence with market dates.
 Direct indicator calls validate positive, finite, internally coherent OHLC
 prices, normalize accepted numeric strings, and check supplied session positions;
@@ -87,7 +94,15 @@ The target never mixes one-session and multi-session horizons. Moving averages,
 EMA/MACD, and Bollinger Bands retain their explicitly observation-based windows
 without invented prices.
 
-The generated feature table is saved to `data/generated/stock_features.csv` by default. Raw stock prices retain their original units; transformations learned from data are handled in the model-training step.
+The generated feature table is saved to `data/generated/stock_features.csv` by
+default. Feature preparation requires only `Target_Date` and the requested model
+features, not unrelated indicators. The default four-feature enhanced sample
+contains 92,284 eligible observations; passing
+`features=BASELINE_FEATURES` retains all 93,028 baseline-eligible rows. The
+published two-model comparison deliberately uses the enhanced-eligible rows
+for both models so the test samples match. Raw stock prices retain their
+original units; transformations learned from data are handled in the
+model-training step.
 
 The [EDA notebook](../notebooks/EDA_Preprocessing.ipynb) displays the raw
 missingness and the validator's retained/excluded row counts. Its histogram
@@ -102,6 +117,12 @@ python scripts/model_training.py
 # Optional subset:
 python scripts/model_training.py --ticker AAPL --num-bins 4 --output data/generated/aapl_model_metrics.json
 ```
+
+The optional AAPL-only experiment calculates its own chronological boundaries:
+training through 2013-04-01 and validation through 2015-08-17. The published
+31-ticker experiment uses 2013-03-28 and 2015-08-13 respectively. These
+different date windows mean the single-ticker metrics are not an identical-
+period comparison against the full-source experiment.
 
 The experiment proceeds as follows:
 
@@ -130,9 +151,9 @@ For the included combined source, the evaluation periods are:
 
 | Partition | Observations | Date boundary |
 | --- | ---: | --- |
-| Training | 53,646 | Through 2013-04-03 |
-| Validation | 18,412 | 2013-04-04 through 2015-08-14 |
-| Test | 18,138 | 2015-08-17 through 2017-12-28 |
+| Training | 55,202 | Through 2013-03-28 |
+| Validation | 18,526 | 2013-03-29 through 2015-08-13 |
+| Test | 18,494 | 2015-08-14 through 2017-12-28 |
 
 The [model evaluation notebook](../notebooks/Model_Training_Evaluation.ipynb) runs the same experiment and displays both models' metrics side by side.
 
@@ -143,9 +164,10 @@ Open [HMM_and_RL_Experiments.ipynb](../notebooks/HMM_and_RL_Experiments.ipynb).
 The notebook selects **AAPL**, computes indicators, and uses the same global
 market-date train/validation/test boundaries as the Bayesian experiment.
 A three-state diagonal-covariance Gaussian HMM is fitted to the training
-period's `MA_20`, `RSI_14`, and `MACD`. HMM fitting requires complete indicator
-observations: the notebook omits missing-emission rows from the fitting matrix,
-and `fit_hmm_on_indicators` supplies contiguous-sequence lengths so no learned
+period's `MA_20`, `RSI_14`, and `MACD`. Direct HMM fitting requires complete
+indicator observations and explicitly raises on missing emissions. The notebook
+first drops incomplete rows from its fitting matrix; `fit_hmm_on_indicators`
+then supplies contiguous-sequence lengths so no learned
 transition crosses an excluded source session or missing indicator period.
 Forward filtering applies the same boundary policy: each complete contiguous
 segment begins with the HMM's initial-state probabilities.
@@ -175,6 +197,9 @@ residuals before squaring to avoid avoidable intermediate overflow.
 ## 4. Q-learning experiment
 
 The same notebook fits three-bin quantiles on AAPL's training-period consecutive-session return and RSI, combines those two binned features with the filtered HMM regime and the current position, and trains the tabular policy for 75 passes across separate contiguous training segments. A gap in the feature-eligible rows ends an episode instead of allowing execution several market sessions later. Each segment starts flat; its final position is marked to market without an assumed sale. These columns, `Return_binned`, `RSI_14_binned`, and `Market_Regime`, also form the environment's default state schema when present.
+The training chart's horizontal axis counts **75 training passes**, each
+aggregating the rewards of all segment episodes in that pass; it does not count
+individual segment episodes.
 
 The `SimpleTradingEnv` has three actions:
 
@@ -208,7 +233,11 @@ including the final session without a following prediction target. Positions
 still held at that close remain open; no hypothetical final sale or exit fee
 is included in either strategy's reported P/L.
 
-The implementation is intentionally a transparent research simulator; it can be extended with portfolio sizing, risk controls, and realistic order execution.
+With the corrected feature sample, the AAPL frozen policy produced **+$29.10**
+in one-share holdout P/L, versus **+$53.07** from the next-open buy-and-hold
+comparator. The implementation is intentionally a transparent research
+simulator; it can be extended with portfolio sizing, risk controls, and realistic
+order execution.
 
 ## 5. Verification
 
@@ -216,9 +245,20 @@ Run the regression tests:
 
 ```bash
 python -m pytest tests -q
+python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
 ```
 
-The test suite covers finite OHLCV and date validation, global market-session uniqueness, single-ticker versus combined-source feature parity, next-session labels, numeric-string input normalization, per-ticker indicators, price-scale invariance, chronological target boundaries, training-only binning, Bayesian CPT predictions, package imports, unsigned HMM session validation, segment-consistent prefix-invariant HMM filtering, legal trading actions, consecutive trading steps, next-open rewards and transaction costs, immutable holdout evaluation, terminal Q-learning updates, complete synthetic-data experiments, and saved notebook outputs.
+The test suite covers finite OHLCV and date validation, global market-session
+uniqueness, all bundled individual-stock versus combined-source feature parity,
+invalid unrelated dates, direct weekday-gap handling, model-specific feature
+eligibility, invalid priors and unknown categorical evidence, numeric-string
+input normalization, ticker-name formats, per-ticker indicators, price-scale
+invariance, chronological target boundaries, training-only binning, Bayesian
+CPT predictions, package imports, unsigned HMM session validation,
+segment-consistent prefix-invariant HMM filtering, legal trading actions,
+consecutive trading steps, next-open rewards and transaction costs, immutable
+holdout evaluation, terminal Q-learning updates, notebook environment isolation,
+complete synthetic-data experiments, and saved notebook outputs.
 
 The same checks run automatically through [GitHub Actions](../.github/workflows/python-checks.yml) on pushes and pull requests. To regenerate the GitHub-visible notebook tables and figures, run:
 
@@ -228,8 +268,8 @@ python -m scripts.refresh_notebooks
 
 `python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them. The in-process runner captures stdout, stderr, explicit `display()` calls, final-expression results (including rich MIME representations), and Matplotlib PNGs in their execution order. It compares saved output order and text exactly, fully decodes saved PNGs, and detects both broad and localized changes to generated charts. Jupyter's `%matplotlib inline` directive is removed only when it is an actual standalone magic command, never when it appears inside a string. Python future-import compiler flags persist from one cell to the next.
 The `reproduce_notebook(path, check=True)` Python helper resolves relative data
-paths from the notebook's directory and restores the caller's working directory
-and `sys.path` import search path.
+paths from the notebook's directory and restores the caller's working directory,
+`sys.path` import search path, and environment variables even when a cell fails.
 It excludes the caller's existing Matplotlib figures from capture and cleanup,
 and closes newly created figures when execution fails, preventing stale-chart
 contamination.

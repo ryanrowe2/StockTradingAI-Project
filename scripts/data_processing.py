@@ -7,6 +7,7 @@ transformations belong inside training folds, after the chronological split.
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -16,14 +17,14 @@ if __package__:
     from .technical_indicators import add_technical_indicators
     from .date_validation import parse_daily_dates
     from .price_validation import valid_price_bars
-    from .session_validation import validate_session_positions
+    from .session_validation import session_positions, validate_session_positions
     from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from .ticker_validation import normalize_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
     from price_validation import valid_price_bars
-    from session_validation import validate_session_positions
+    from session_validation import session_positions, validate_session_positions
     from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from ticker_validation import normalize_ticker_symbols
 
@@ -34,6 +35,27 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
 REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
 MODEL_FEATURES = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
 SESSION_COLUMN = "Session_Number"
+
+
+@lru_cache(maxsize=1)
+def _bundled_session_calendar() -> pd.DatetimeIndex:
+    """Use the complete project's validated market observations as authority.
+
+    Individual CSVs contain ticker-specific holes, so their observed dates do
+    not identify all trading sessions represented by the bundled dataset.
+    """
+    source = pd.read_csv(DEFAULT_RAW_DATA, keep_default_na=False)
+    dates = parse_daily_dates(source["Date"], context="Bundled market dates")
+    valid = valid_price_bars(source, require_volume=True)
+    valid &= dates.dt.dayofweek.lt(5)
+    return pd.DatetimeIndex(dates.loc[valid].unique()).sort_values()
+
+
+def _is_bundled_raw_csv(filepath: str | Path) -> bool:
+    if not isinstance(filepath, (str, Path)):
+        return False
+    path = Path(filepath).resolve()
+    return path.is_file() and path.parent == DEFAULT_RAW_DATA.parent.resolve() and path.suffix == ".csv"
 
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -57,8 +79,7 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     # corrupt bar. A subsequent valid price must not become the missing bar's
     # fictional next trading session during return/HMM calculations.
     if SESSION_COLUMN not in df:
-        calendar = pd.Index(df["Date"].unique()).sort_values()
-        df[SESSION_COLUMN] = calendar.get_indexer(df["Date"])
+        df[SESSION_COLUMN] = session_positions(df)
     validate_session_positions(df)
     numeric_columns = ("Open", "High", "Low", "Close", "Volume")
     for name in numeric_columns:
@@ -86,32 +107,26 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
             raise ValueError("Selected tickers must be nonempty strings")
         if "Name" not in source:
             raise ValueError("Missing required columns: ['Name']")
-        # Other tickers' malformed OHLCV rows or dates must not invalidate a
-        # selected ticker. Their *valid* source dates nevertheless identify
-        # real market sessions and must remain in its calendar.
-        if "Date" in source and SESSION_COLUMN not in source:
-            source_dates = source["Date"].astype("string")
-            iso_dates = source_dates.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").fillna(False)
-            observed_dates = pd.to_datetime(
-                source_dates.loc[iso_dates], format="mixed", errors="coerce",
-            ).dropna()
-            source_calendar = pd.DatetimeIndex(observed_dates.unique()).sort_values()
-        else:
-            source_calendar = None
         selected = {ticker.strip().upper() for ticker in tickers}
         normalized_names = source["Name"].astype("string").str.strip().str.upper()
         not_found = selected - set(normalized_names.dropna())
         if not_found:
             raise ValueError(f"Ticker not found: {', '.join(sorted(not_found))}")
         source = source.loc[normalized_names.isin(selected)].copy()
-        if source_calendar is not None:
-            selected_dates = parse_daily_dates(source["Date"], context="Every Date")
-            source[SESSION_COLUMN] = source_calendar.get_indexer(selected_dates)
+    if SESSION_COLUMN not in source and _is_bundled_raw_csv(filepath):
+        # Both the complete source and every bundled per-symbol CSV must use
+        # exactly the same reference calendar, even on dates absent for a symbol.
+        dates = parse_daily_dates(source["Date"], context="Every Date")
+        positions = _bundled_session_calendar().get_indexer(dates)
+        if (positions < 0).any():
+            raise ValueError("Bundled observations contain non-market dates")
+        source[SESSION_COLUMN] = positions
     return validate_bars(source)
 
 
-def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Produce one valid next-market-session target per symbol with causal indicators."""
+def prepare_features(df: pd.DataFrame, *,
+                     features: tuple[str, ...] = MODEL_FEATURES) -> pd.DataFrame:
+    """Produce causal next-session targets with only requested model features required."""
     source = prepare_indicator_history(df)
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
     next_session = source.groupby("Name", sort=False)[SESSION_COLUMN].shift(-1)
@@ -119,11 +134,9 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     source["Target_Date"] = (source.groupby("Name", sort=False)["Date"]
                              .shift(-1).where(adjacent_target))
     source["Trend"] = (next_close > source["Close"]).astype("int64")
-    required = list(MODEL_FEATURES) + [
-        "Target_Date", "MA_20", "RSI_14",
-        "MACD", "MACD_Signal", "BB_Middle", "BB_Upper", "BB_Lower",
-        "Close_Lag1", "Return_Lag1",
-    ]
+    if not features or any(feature not in MODEL_FEATURES for feature in features):
+        raise ValueError(f"Model features must be drawn from {MODEL_FEATURES}")
+    required = list(features) + ["Target_Date"]
     source = source.replace([np.inf, -np.inf], np.nan)
     prepared = source.dropna(subset=required).reset_index(drop=True)
     if prepared.empty:
@@ -160,7 +173,8 @@ def main() -> None:
     result = prepare_features(data)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(args.output, index=False)
-    print(f"Prepared {len(result):,} observations from {result.Name.nunique()} tickers: {args.output}")
+    count = result.Name.nunique()
+    print(f"Prepared {len(result):,} observations from {count} {'ticker' if count == 1 else 'tickers'}: {args.output}")
 
 
 if __name__ == "__main__":

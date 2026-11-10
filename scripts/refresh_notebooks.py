@@ -144,7 +144,7 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
                 f"Invalid published chart in {path.name}, cell {cell_number}"
             ) from exc
 
-    for old, new in zip(old_figures, new_figures):
+    for old, new in zip(old_figures, new_figures, strict=True):
         old_size, old_pixels = decoded_chart(old)
         new_size, new_pixels = decoded_chart(new)
         difference = np.abs(old_pixels - new_pixels)
@@ -155,7 +155,7 @@ def _verify_outputs(previous: list, current: list, path: Path, cell_number: int)
         components, count = label(strong_difference, structure=np.ones((3, 3), dtype=int))
         largest_change = (np.bincount(components.ravel())[1:].max()
                           if count else 0)
-        if (max(abs(a - b) for a, b in zip(old_size, new_size)) > 3
+        if (max(abs(a - b) for a, b in zip(old_size, new_size, strict=True)) > 3
                 or difference.mean() > 3.0 or significant_fraction > 0.001
                 or largest_change >= 30):
             raise RuntimeError(f"Published chart differs in {path.name}, cell {cell_number}")
@@ -173,6 +173,7 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
     execution_count = 0
     previous_directory = Path.cwd()
     previous_sys_path = sys.path.copy()
+    previous_environment = os.environ.copy()
     existing_figures = set(plt.get_fignums())
     formatter = DisplayFormatter()
     compiler = codeop.Compile()
@@ -188,7 +189,7 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
             source = _remove_inline_magic(cell.source)
             outputs: list[nbformat.NotebookNode] = []
 
-            def capture_display(*values: object) -> None:
+            def capture_display(*values: object, outputs=outputs) -> None:
                 for value in values:
                     data, metadata = formatter.format(value)
                     if data:
@@ -196,7 +197,7 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
                             "display_data", data=data, metadata=metadata,
                         ))
 
-            def capture_figures() -> None:
+            def capture_figures(outputs=outputs) -> None:
                 for number in list(plt.get_fignums()):
                     if number in existing_figures:
                         continue
@@ -246,6 +247,8 @@ def reproduce_notebook(path: Path, *, save: bool | None = None,
         finally:
             os.chdir(previous_directory)
             sys.path[:] = previous_sys_path
+            os.environ.clear()
+            os.environ.update(previous_environment)
     nbformat.validate(notebook)
     if save:
         nbformat.write(notebook, path)

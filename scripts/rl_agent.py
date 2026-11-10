@@ -10,18 +10,19 @@ from __future__ import annotations
 
 import math
 import random
-from numbers import Integral
+from itertools import pairwise
+from numbers import Integral, Real
 
 import numpy as np
 import pandas as pd
 
 if __package__:
     from .date_validation import parse_daily_dates
-    from .session_validation import validate_session_positions
+    from .session_validation import session_positions, validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
-    from session_validation import validate_session_positions
+    from session_validation import session_positions, validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -53,6 +54,10 @@ class SimpleTradingEnv:
         if "Date" in self.data and self.data["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates")
         validate_session_positions(self.data, require_consecutive=True)
+        positions = session_positions(self.data).tolist()
+        if any(next_position != position + 1
+               for position, next_position in pairwise(positions)):
+            raise ValueError("Trading observations must occupy consecutive market sessions")
         prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
         if not np.isfinite(prices).all() or np.any(prices <= 0):
             raise ValueError("Open/close prices must be finite and positive")
@@ -130,6 +135,8 @@ class QLearningAgent:
                 or len(set(actions)) != len(actions)
                 or any(action not in supported for action in actions)
                 or ("hold" not in actions and not {"buy", "sell"}.issubset(actions))
+                or any(not isinstance(value, Real) or isinstance(value, (bool, np.bool_))
+                       or not np.isfinite(value) for value in (alpha, gamma, epsilon))
                 or not 0 < alpha <= 1 or not 0 <= gamma <= 1 or not 0 <= epsilon <= 1):
             raise ValueError("Invalid Q-learning parameters")
         self.actions = actions
