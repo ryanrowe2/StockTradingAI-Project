@@ -27,10 +27,14 @@ from sklearn.metrics import (
 )
 
 if __package__:
-    from .data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
+    from .data_processing import (
+        DEFAULT_RAW_DATA, MODEL_FEATURES, TARGET_DEFINITIONS, load_data, prepare_features,
+    )
     from .date_validation import parse_daily_dates
 else:
-    from data_processing import DEFAULT_RAW_DATA, MODEL_FEATURES, load_data, prepare_features
+    from data_processing import (
+        DEFAULT_RAW_DATA, MODEL_FEATURES, TARGET_DEFINITIONS, load_data, prepare_features,
+    )
     from date_validation import parse_daily_dates
 
 
@@ -197,7 +201,8 @@ def classification_metrics(labels: pd.Series, probabilities: np.ndarray) -> dict
 
 
 def train_and_select(split: ChronologicalSplit, features: tuple[str, ...],
-                     num_bins: int, sample_sizes: tuple[int, ...] = (5, 10, 15, 20)) -> dict:
+                     num_bins: int, sample_sizes: tuple[int, ...] = (5, 10, 15, 20),
+                     *, include_predictions: bool = False) -> dict:
     """Select prior strength on validation; refit and score on test once."""
     binner = QuantileBinner(num_bins).fit(split.train, features)
     train = binner.transform(split.train, features)
@@ -220,19 +225,24 @@ def train_and_select(split: ChronologicalSplit, features: tuple[str, ...],
     final_network = fit_network(combined_discrete, features, num_bins, best_size)
     test = final_binner.transform(split.test, features)
     probabilities = predict_up_probability(final_network, test)
-    return {
+    result = {
         "features": list(features),
         "num_bins": num_bins,
         "equivalent_sample_size": best_size,
         "validation": validation_metrics,
         "test": classification_metrics(split.test["Trend"], probabilities),
     }
+    if include_predictions:
+        # Internal research API. The ordinary CLI result remains JSON-ready.
+        result["test_probabilities"] = probabilities
+    return result
 
 
 def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
-                   tickers: tuple[str, ...] | None = None, num_bins: int = 4) -> dict:
+                   tickers: tuple[str, ...] | None = None, num_bins: int = 4,
+                   target: str = "close_to_close") -> dict:
     data = load_data(raw_data, tickers=tickers)
-    frame = prepare_features(data)
+    frame = prepare_features(data, target=target)
     split = chronological_split(frame)
     baseline = train_and_select(split, BASELINE_FEATURES, num_bins)
     enhanced = train_and_select(split, ENHANCED_FEATURES, num_bins)
@@ -240,6 +250,8 @@ def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
     majority = float((split.test["Trend"] == majority_label).mean())
     return {
         "source": str(Path(raw_data).name),
+        "target": target,
+        "target_definition": TARGET_DEFINITIONS[target],
         "tickers": int(frame["Name"].nunique()),
         "tickers_per_partition": {
             "train": int(split.train["Name"].nunique()),
@@ -264,10 +276,11 @@ def main() -> None:
     parser.add_argument("--input", type=Path, default=DEFAULT_RAW_DATA)
     parser.add_argument("--ticker", action="append", dest="tickers", help="Repeat to select multiple symbols")
     parser.add_argument("--num-bins", type=int, default=4)
+    parser.add_argument("--target", choices=tuple(TARGET_DEFINITIONS), default="close_to_close")
     parser.add_argument("--output", type=Path, default=DEFAULT_METRICS)
     args = parser.parse_args()
     result = run_experiment(args.input, tickers=tuple(args.tickers) if args.tickers else None,
-                            num_bins=args.num_bins)
+                            num_bins=args.num_bins, target=args.target)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))

@@ -14,8 +14,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -36,4 +36,6 @@ jobs:
         if: matrix.python-version == '3.12'
         run: |
           python -m scripts.model_training --ticker AAPL
+          python -m scripts.model_training --ticker AAPL --target next_open_to_close --output data/generated/aapl_executable_metrics.json
+          python -m scripts.walk_forward_evaluation --ticker AAPL --folds 2 --bootstrap-samples 100 --output data/generated/aapl_walk_forward_metrics.json
           python -m scripts.refresh_notebooks --check

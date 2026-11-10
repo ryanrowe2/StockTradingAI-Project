@@ -32,7 +32,8 @@ class SimpleTradingEnv:
     DEFAULT_STATE_COLUMNS = ("Return_binned", "RSI_14_binned", "Market_Regime")
 
     def __init__(self, data: pd.DataFrame, transaction_cost: float = 0.001,
-                 state_columns: tuple[str, ...] | None = None):
+                 state_columns: tuple[str, ...] | None = None,
+                 slippage_bps: float = 0.0):
         if not {"Open", "Close"}.issubset(data.columns) or len(data) < 2:
             raise ValueError("The trading environment needs at least two daily open/close bars")
         if "Name" in data:
@@ -42,8 +43,12 @@ class SimpleTradingEnv:
             )
             if normalized_symbols.nunique() != 1:
                 raise ValueError("A trading episode must contain exactly one ticker with a valid name")
-        if not 0 <= transaction_cost < 1:
+        if (not isinstance(transaction_cost, Real) or isinstance(transaction_cost, (bool, np.bool_))
+                or not np.isfinite(transaction_cost) or not 0 <= transaction_cost < 1):
             raise ValueError("transaction_cost must be a fraction between 0 and 1")
+        if (not isinstance(slippage_bps, Real) or isinstance(slippage_bps, (bool, np.bool_))
+                or not np.isfinite(slippage_bps) or not 0 <= slippage_bps < 10_000):
+            raise ValueError("slippage_bps must be finite basis points from 0 to less than 10000")
         self.data = data.copy()
         if "Name" in self.data:
             self.data["Name"] = normalized_symbols
@@ -81,13 +86,21 @@ class SimpleTradingEnv:
                    for value in state_values.flat):
                 raise ValueError("Trading state columns must contain finite integer states")
         self.state_columns = tuple(state_columns)
-        self.transaction_cost = transaction_cost
+        self.transaction_cost = float(transaction_cost)
+        self.slippage_bps = float(slippage_bps)
         self.reset()
 
     def reset(self) -> tuple[int, ...]:
         self.index = 0
         self.position = 0
         self.done = False
+        self.total_pnl = 0.0
+        self.total_fees = 0.0
+        self.total_slippage = 0.0
+        self.trade_count = 0
+        self.invested_steps = 0
+        self.overnight_invested_steps = 0
+        self.equity_curve = [0.0]
         return self.get_state()
 
     def get_state(self) -> tuple[int, ...]:
@@ -103,27 +116,66 @@ class SimpleTradingEnv:
             raise ValueError(f"Cannot {action} when position is {self.position}")
         decision_close = float(self.data.iloc[self.index]["Close"])
         next_bar = self.data.iloc[self.index + 1]
-        execution_price = float(next_bar["Open"])
+        market_open = float(next_bar["Open"])
         next_close = float(next_bar["Close"])
         # Existing holdings remain exposed to the overnight price change.
         next_position = self.position
-        overnight_pnl = self.position * (execution_price - decision_close)
+        overnight_pnl = self.position * (market_open - decision_close)
         fee = 0.0
+        execution_price = market_open
+        slippage_cost = 0.0
         if action == "buy":
             next_position = 1
+            execution_price = market_open * (1 + self.slippage_bps / 10_000)
+            slippage_cost = execution_price - market_open
             fee = execution_price * self.transaction_cost
         elif action == "sell":
             next_position = 0
+            execution_price = market_open * (1 - self.slippage_bps / 10_000)
+            slippage_cost = market_open - execution_price
             fee = execution_price * self.transaction_cost
-        intraday_pnl = next_position * (next_close - execution_price)
-        reward = overnight_pnl + intraday_pnl - fee
+        intraday_pnl = next_position * (next_close - market_open)
+        reward = overnight_pnl + intraday_pnl - fee - slippage_cost
+        try:
+            updated_pnl = math.fsum((self.total_pnl, reward))
+            updated_fees = math.fsum((self.total_fees, fee))
+            updated_slippage = math.fsum((self.total_slippage, slippage_cost))
+        except OverflowError as exc:
+            raise ValueError("Total trading reward must remain finite") from exc
         if not np.isfinite(reward):
             raise ValueError("Trading reward must remain finite")
+        if not all(np.isfinite(value) for value in
+                   (updated_pnl, updated_fees, updated_slippage)):
+            raise ValueError("Total trading reward must remain finite")
+        self.total_pnl = updated_pnl
+        self.total_fees = updated_fees
+        self.total_slippage = updated_slippage
+        self.trade_count += action != "hold"
+        self.invested_steps += next_position
+        self.overnight_invested_steps += self.position
+        self.equity_curve.append(updated_pnl)
         self.position = next_position
         self.index += 1
         self.done = self.index == len(self.data) - 1
         return self.get_state(), float(reward), self.done, {
             "position": self.position, "fee": fee, "execution_price": execution_price,
+            "slippage_cost": slippage_cost,
+        }
+
+    def episode_metrics(self) -> dict[str, float | int]:
+        """Summarize marked-to-market episode results without forcing an exit."""
+        equity = np.asarray(self.equity_curve, dtype=float)
+        drawdown = np.maximum.accumulate(equity) - equity
+        steps = len(equity) - 1
+        return {
+            "pnl": float(self.total_pnl),
+            "max_drawdown_dollars": float(drawdown.max()),
+            "trades": self.trade_count,
+            "fees_dollars": float(self.total_fees),
+            "slippage_dollars": float(self.total_slippage),
+            "intraday_exposure_fraction": self.invested_steps / steps if steps else 0.0,
+            "overnight_exposure_fraction": self.overnight_invested_steps / steps if steps else 0.0,
+            "terminal_position": self.position,
         }
 
 

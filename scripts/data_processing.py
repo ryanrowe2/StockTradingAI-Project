@@ -35,6 +35,10 @@ DEFAULT_RAW_DATA = PROJECT_ROOT / "data/raw/all_stocks_2006-01-01_to_2018-01-01.
 DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
 REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
 MODEL_FEATURES = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
+TARGET_DEFINITIONS = {
+    "close_to_close": "Next session close is above the decision-session close",
+    "next_open_to_close": "Next session close is above its opening price",
+}
 SESSION_COLUMN = "Session_Number"
 _BUNDLED_SYMBOLS = (
     "AABA", "AAPL", "AMZN", "AXP", "BA", "CAT", "CSCO", "CVX", "DIS",
@@ -152,15 +156,25 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
 
 
 def prepare_features(df: pd.DataFrame, *,
-                     features: tuple[str, ...] = MODEL_FEATURES) -> pd.DataFrame:
-    """Produce causal next-session targets with only requested model features required."""
+                     features: tuple[str, ...] = MODEL_FEATURES,
+                     target: str = "close_to_close") -> pd.DataFrame:
+    """Produce causal next-session targets with only requested model features required.
+
+    ``next_open_to_close`` aligns the target with an order submitted after the
+    current close and filled at the next open. The historical close-to-close
+    label remains the default for backward-compatible published experiments.
+    """
+    if target not in TARGET_DEFINITIONS:
+        raise ValueError(f"target must be one of {sorted(TARGET_DEFINITIONS)}")
     source = prepare_indicator_history(df)
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
+    next_open = source.groupby("Name", sort=False)["Open"].shift(-1)
     next_session = source.groupby("Name", sort=False)[SESSION_COLUMN].shift(-1)
     adjacent_target = next_session.sub(source[SESSION_COLUMN]).eq(1)
     source["Target_Date"] = (source.groupby("Name", sort=False)["Date"]
                              .shift(-1).where(adjacent_target))
-    source["Trend"] = (next_close > source["Close"]).astype("int64")
+    reference_price = source["Close"] if target == "close_to_close" else next_open
+    source["Trend"] = (next_close > reference_price).astype("int64")
     if not features or any(feature not in MODEL_FEATURES for feature in features):
         raise ValueError(f"Model features must be drawn from {MODEL_FEATURES}")
     required = list(features) + ["Target_Date"]

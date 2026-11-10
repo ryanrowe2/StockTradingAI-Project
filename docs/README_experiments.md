@@ -66,12 +66,11 @@ All paths normalize whitespace and case before checking ticker identity.
 In the included 93,612-row source, 93,435 bars pass OHLCV validation;
 177 incomplete or inconsistent records are excluded without imputation.
 Before exclusion, validation assigns `Session_Number` from the bundled
-reference calendar or conservative weekday ordinals. Session positions survive
-exclusion and subsetting,
-allowing indicators, HMM segment boundaries, and the trading simulator to detect
-missing sessions. Custom input dates with no session column use weekday
-positions for those same calculations. Supplied session positions are checked for a
-globally increasing one-to-one correspondence with weekday market dates.
+observed-session calendar or an NYSE-holiday-aware scheduled calendar that also
+retains explicitly observed weekdays. Session positions survive exclusion and
+subsetting, allowing indicators, HMM segment boundaries, and the trading
+simulator to detect missing sessions. Supplied positions must have a globally
+increasing one-to-one correspondence with weekday market dates.
 Direct indicator calls validate positive, finite, internally coherent OHLC
 prices, normalize accepted numeric strings, and check supplied session positions;
 Volume remains optional for that standalone API but is checked for finite
@@ -167,6 +166,40 @@ For the included combined source, the evaluation periods are:
 
 The [model evaluation notebook](../notebooks/Model_Training_Evaluation.ipynb) runs the same experiment and displays both models' metrics side by side.
 
+### Execution-aligned direction and additional holdout windows
+
+The original `Trend` target is `Close[t+1] > Close[t]`. Its positive label
+includes overnight movement before the next-open fill used by the trading
+simulator. The optional `next_open_to_close` target instead evaluates
+`Close[t+1] > Open[t+1]` while keeping the decision features at the completed
+current session. This is a distinct experimental question; the default
+`close_to_close` target and published results remain unchanged.
+
+```bash
+python -m scripts.model_training --target next_open_to_close --output data/generated/executable_target_metrics.json
+python -m scripts.walk_forward_evaluation --target next_open_to_close --output data/generated/executable_walk_forward_metrics.json
+```
+
+The walk-forward command performs five disjoint historical test windows.
+In fold one, the first 40% of available feature dates are training data,
+the next 10% validation, and the following 10% test. Each subsequent fold
+advances all three boundaries by 10%, retaining an expanding training history.
+No test-period label is used for that fold's bin fitting or BDeu selection;
+labels crossing a period boundary are purged. Once a prior test period is
+historical, its data may be used to train a subsequent fold. The resulting
+aggregate covers only the nonoverlapping forward test windows, and the fixed
+experimental design is never selected using their outcomes.
+
+The report includes each fold's metrics and sample sizes, pooled out-of-sample
+metrics, and 95% paired bootstrap intervals for accuracy *differences* versus
+the training-majority benchmark. Bootstrap units are consecutive blocks of
+ten market dates, with all tickers on a date kept together; block resampling
+partially accounts for serial and cross-sectional dependence. These descriptive
+intervals do not imply statistical independence across long market regimes or
+prove future trading profitability. Change the block length, fold count, or
+bootstrap sample count using `--block-sessions`, `--folds`, and
+`--bootstrap-samples`.
+
 ## 3. Gaussian HMM regime experiment
 
 Open [HMM_and_RL_Experiments.ipynb](../notebooks/HMM_and_RL_Experiments.ipynb).
@@ -249,6 +282,21 @@ comparator. The implementation is intentionally a transparent research
 simulator; it can be extended with portfolio sizing, risk controls, and realistic
 order execution.
 
+The same notebook now evaluates that *unchanged frozen policy* under 0, 10,
+and 25 basis points of next-open adverse slippage on entries and exits.
+`SimpleTradingEnv(..., slippage_bps=...)` applies an unfavorable fill price,
+charges the fractional transaction fee on that fill, and computes the one-share
+mark-to-market reward without future-price information. The
+`episode_metrics()` method reports cumulative P/L, realized transaction costs,
+slippage, trade count, maximum marked-to-market drawdown in dollars, fractions
+of intraday and overnight intervals invested, and terminal position. If a position remains open,
+the summary does not charge an imaginary exit. Multiple disconnected source
+segments are analyzed as separate episodes, including separately measured
+drawdowns; these are not interpreted as a continuously invested portfolio.
+The simulation remains deliberately simplified: it does not model order-book
+spreads, liquidity constraints, changing bid/ask quotes, market impact,
+financing, or capital-based risk management.
+
 ## 5. Verification
 
 Run the regression tests:
@@ -272,7 +320,9 @@ complete synthetic-data experiments, and saved notebook outputs. Additional
 regressions cover exchange holiday closures, invalid-only bundled dates,
 unrelated malformed records, custom CSV detection, weekend metadata,
 boolean OHLCV inputs, source-calendar cache invalidation, and segmented
-holdout trading.
+holdout trading. The extra executable-target evaluation, walk-forward fold
+separation, block-bootstrap estimates, and slippage/drawdown calculations
+also have dedicated regression checks.
 
 The same checks run automatically through [GitHub Actions](../.github/workflows/python-checks.yml) on pushes and pull requests. To regenerate the GitHub-visible notebook tables and figures, run:
 

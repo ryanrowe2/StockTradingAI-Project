@@ -125,6 +125,26 @@ In the separate AAPL trading notebook, the frozen Q-learning policy earned
 experiments demonstrate the implementation and its limitations; they do not
 establish predictive superiority or deployable trading profitability.
 
+For a signal acted upon at the *next open*, an additional supervised target
+tests whether that session's close is above its own open. This isolates an
+intraday direction observable after a next-open entry instead of counting
+an overnight move that occurs before the order executes. It does not change
+the original published close-to-close task or its results. An expanding-window
+evaluation additionally measures performance on five successive, nonoverlapping
+holdouts, with paired block-bootstrap intervals for accuracy differences
+against the majority baseline. Neither alternative target construction nor
+additional validation should be interpreted as a guaranteed performance gain.
+
+| Five-fold walk-forward target | Majority accuracy | Baseline BN | Enhanced BN | Baseline lift, 95% date-block interval |
+| --- | ---: | ---: | ---: | ---: |
+| Close-to-close | 51.67% | 51.96% | 51.69% | −0.55 to +1.11 percentage points |
+| Next-open-to-close | 51.40% | 51.68% | 51.30% | −0.48 to +1.03 percentage points |
+
+Both baseline accuracy lifts are small and their intervals include zero. This
+provides additional historical evidence without establishing a reproducible
+advantage over the naive classifier. The full fold-by-fold scores and bootstrap
+configuration are reproduced by the walk-forward command below.
+
 ## Reproduce the experiments
 
 **Requirements:** Python 3.10–3.12 and Git.
@@ -149,6 +169,12 @@ python scripts/model_training.py
 
 # Optional: run a quicker single-ticker experiment with its own split dates.
 python scripts/model_training.py --ticker AAPL --output data/generated/aapl_model_metrics.json
+
+# Evaluate an execution-aligned next-open-to-close prediction target.
+python -m scripts.model_training --target next_open_to_close --output data/generated/executable_target_metrics.json
+
+# Five expanding training windows with distinct out-of-sample test periods.
+python -m scripts.walk_forward_evaluation --target next_open_to_close --output data/generated/executable_walk_forward_metrics.json
 ```
 
 Generated feature tables and model metrics are saved under `data/generated/`. These artifacts can be regenerated directly from the included raw data.
@@ -217,6 +243,11 @@ capture, and cleans up newly created figures if a cell fails.
 The EDA notebook uses the same bundled-session calendar and validated returns
 as the modeling pipeline; its source path works from both the repository root
 and the notebook folder.
+The HMM/RL notebook also measures fixed-policy sensitivity to 0, 10, and 25
+basis points of execution slippage. The environment exposes per-episode fees,
+trade counts, dollar drawdown, and exposure without assuming a terminal sale.
+These are intentionally simplified one-share scenarios; real-world spread,
+market impact, liquidity, financing, and portfolio risks are not modeled.
 
 ## Repository structure
 
@@ -237,6 +268,7 @@ StockTradingAI-Project/
 │   ├── data_processing.py         # Input validation and causal features
 │   ├── technical_indicators.py    # Per-symbol technical indicators
 │   ├── model_training.py          # Bayesian networks and time-based evaluation
+│   ├── walk_forward_evaluation.py # Expanding holdouts and paired uncertainty intervals
 │   ├── hmm_integration.py         # Gaussian HMM and forward filtering
 │   ├── rl_agent.py                # Position-aware trading environment / Q-learning
 │   └── refresh_notebooks.py       # Reproducible notebook tables and charts

@@ -36,6 +36,9 @@ from model_training import (  # noqa: E402
 )
 from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
 from technical_indicators import add_technical_indicators  # noqa: E402
+from walk_forward_evaluation import (  # noqa: E402
+    paired_block_accuracy_intervals, walk_forward_experiment,
+)
 
 
 def synthetic_bars(days: int = 130) -> pd.DataFrame:
@@ -1050,6 +1053,8 @@ def test_project_modules_support_package_imports():
     assert callable(module.run_experiment)
     preprocessing = importlib.import_module("scripts.data_processing")
     assert callable(preprocessing.load_data)
+    walk_forward = importlib.import_module("scripts.walk_forward_evaluation")
+    assert callable(walk_forward.walk_forward_experiment)
 
 
 def test_hmm_and_rl_reject_multi_ticker_episodes():
@@ -1903,3 +1908,105 @@ def test_notebook_execution_restores_environment_variables(tmp_path: Path, monke
         else:
             reproduce_notebook(path, save=False)
         assert dict(os.environ) == original
+
+
+def test_executable_target_uses_next_open_and_preserves_historical_default():
+    bars = synthetic_bars()
+    bars.loc[(bars["Name"] == "AAA") & (bars.index % 2 == 0), "Open"] = (
+        bars.loc[(bars["Name"] == "AAA") & (bars.index % 2 == 0), "Close"] + 0.5
+    )
+    default = prepare_features(bars)
+    historical = prepare_features(bars, target="close_to_close")
+    executable = prepare_features(bars, target="next_open_to_close")
+    pd.testing.assert_frame_equal(default, historical)
+    assert executable[["Name", "Date", "Target_Date"]].equals(
+        historical[["Name", "Date", "Target_Date"]]
+    )
+    original = bars.set_index(["Name", "Date"])
+    expected = [int(original.loc[(row.Name, row.Target_Date), "Close"]
+                    > original.loc[(row.Name, row.Target_Date), "Open"])
+                for row in executable.itertuples()]
+    assert executable["Trend"].tolist() == expected
+    with pytest.raises(ValueError, match="target must be one of"):
+        prepare_features(bars, target="same_day")
+
+
+def test_trading_slippage_and_drawdown_metrics():
+    bars = pd.DataFrame({"Open": [100., 110., 120.], "Close": [100., 115., 125.]})
+    env = SimpleTradingEnv(bars, transaction_cost=0.001, slippage_bps=100,
+                           state_columns=())
+    _, buy_reward, done, first = env.step("buy")
+    assert not done
+    assert first["execution_price"] == pytest.approx(111.1)
+    assert first["slippage_cost"] == pytest.approx(1.1)
+    assert buy_reward == pytest.approx(5 - 1.1 - 0.1111)
+    _, sell_reward, done, second = env.step("sell")
+    assert done
+    assert second["execution_price"] == pytest.approx(118.8)
+    assert sell_reward == pytest.approx(5 - 1.2 - 0.1188)
+    report = env.episode_metrics()
+    assert report["pnl"] == pytest.approx(buy_reward + sell_reward)
+    assert report["trades"] == 2
+    assert report["fees_dollars"] == pytest.approx(0.2299)
+    assert report["slippage_dollars"] == pytest.approx(2.3)
+    assert report["intraday_exposure_fraction"] == pytest.approx(0.5)
+    assert report["overnight_exposure_fraction"] == pytest.approx(0.5)
+    assert report["terminal_position"] == 0
+
+    falling = SimpleTradingEnv(
+        pd.DataFrame({"Open": [100., 100., 90.], "Close": [100., 95., 92.]}),
+        transaction_cost=0, state_columns=(),
+    )
+    falling.step("buy")
+    falling.step("sell")
+    assert falling.episode_metrics()["max_drawdown_dollars"] == pytest.approx(10)
+    assert falling.reset() == (0,)
+    assert falling.episode_metrics()["trades"] == 0
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"slippage_bps": -1}, {"slippage_bps": float("nan")},
+    {"slippage_bps": True}, {"slippage_bps": 10_000},
+    {"transaction_cost": False}, {"transaction_cost": float("inf")},
+])
+def test_trading_rejects_invalid_execution_costs(kwargs):
+    with pytest.raises(ValueError):
+        SimpleTradingEnv(pd.DataFrame({"Open": [1, 2], "Close": [1, 2]}), **kwargs)
+
+
+def test_paired_market_date_bootstrap_is_deterministic_and_paired():
+    dates = pd.bdate_range("2026-01-01", periods=20).repeat(2)
+    observed = pd.DataFrame({
+        "Date": dates, "actual": np.arange(40) % 2,
+        "majority": 0, "baseline_prob": 0.1,
+        "enhanced_prob": np.where(np.arange(40) % 2, 0.9, 0.1),
+    })
+    first = paired_block_accuracy_intervals(
+        observed, block_sessions=5, bootstrap_samples=100, seed=11,
+    )
+    assert first == paired_block_accuracy_intervals(
+        observed, block_sessions=5, bootstrap_samples=100, seed=11,
+    )
+    assert first["baseline"] == [0.0, 0.0]
+    assert first["enhanced"] == [0.5, 0.5]
+
+
+def test_walk_forward_executable_evaluation_has_disjoint_test_folds(tmp_path: Path):
+    csv = tmp_path / "walk_forward.csv"
+    bars = synthetic_bars(150)
+    bars.loc[bars.index % 3 == 0, "Open"] = bars.loc[bars.index % 3 == 0, "Close"] + 0.3
+    bars.to_csv(csv, index=False)
+    report = walk_forward_experiment(
+        csv, target="next_open_to_close", folds=2,
+        bootstrap_samples=100, seed=3,
+    )
+    assert report["target"] == "next_open_to_close"
+    assert len(report["folds"]) == 2
+    assert report["folds"][0]["test_end"] <= report["folds"][1]["validation_end"]
+    assert report["holdout_observations"] == sum(
+        fold["observations"]["test"] for fold in report["folds"]
+    )
+    assert 0 <= report["baseline"]["accuracy"] <= 1
+    assert 0 <= report["enhanced"]["accuracy"] <= 1
+    with pytest.raises(ValueError, match="folds must be"):
+        walk_forward_experiment(csv, folds=6)
