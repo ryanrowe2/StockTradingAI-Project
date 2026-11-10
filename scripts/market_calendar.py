@@ -45,6 +45,11 @@ class _NYSEHolidays(AbstractHolidayCalendar):
 
 # Special NYSE market-wide closures beyond the regular recurring holidays.
 _EXCEPTIONAL_CLOSURES = pd.DatetimeIndex([
+    # Presidential Election Day was a full NYSE holiday in 1972, 1976, 1980.
+    "1972-11-07", "1976-11-02", "1980-11-04",
+    # Special full-day closures in the NYSE historical closing record.
+    "1972-12-28", "1973-01-25", "1977-07-14", "1985-09-27",
+    "1994-04-27",
     "2001-09-11", "2001-09-12", "2001-09-13", "2001-09-14",
     "2004-06-11", "2007-01-02", "2012-10-29", "2012-10-30",
     "2018-12-05", "2025-01-09",
@@ -61,9 +66,27 @@ def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIn
     return pd.bdate_range(start, end, freq=CustomBusinessDay(holidays=closure_days))
 
 
+def validate_nyse_open_dates(dates: pd.DatetimeIndex) -> None:
+    """Reject recorded NYSE trades on known closed dates from 1971 onward.
+
+    Earlier verified sessions remain caller-supplied because the modern calendar
+    deliberately cannot infer the NYSE's pre-1971 historical schedule.
+    """
+    modern = dates[dates >= pd.Timestamp("1971-01-01")]
+    if modern.empty:
+        return
+    scheduled = _scheduled_sessions(modern.min(), modern.max())
+    impossible = modern.difference(scheduled)
+    if not impossible.empty:
+        raise ValueError(
+            f"NYSE observations contain a closed-market date: {impossible[0].date()}"
+        )
+
+
 def inferred_equity_sessions(dates: pd.DatetimeIndex, *,
                              start: pd.Timestamp | None = None,
-                             end: pd.Timestamp | None = None) -> pd.DatetimeIndex:
+                             end: pd.Timestamp | None = None,
+                             nyse_only: bool = False) -> pd.DatetimeIndex:
     """Include scheduled NYSE sessions plus dates explicitly observed by a caller.
 
     Thus an absent genuine holiday does not create a fictional gap, while an
@@ -79,6 +102,8 @@ def inferred_equity_sessions(dates: pd.DatetimeIndex, *,
         # would silently invent sessions. Historical callers must provide
         # independently verified market-session ordinals instead.
         raise ValueError("NYSE dates before 1971 require verified Session_Number metadata")
+    if nyse_only:
+        validate_nyse_open_dates(dates)
     scheduled = _scheduled_sessions(
         first,
         dates.max() if end is None else end,

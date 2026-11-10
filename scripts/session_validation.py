@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 
 if __package__:
-    from .market_calendar import inferred_equity_sessions
+    from .market_calendar import inferred_equity_sessions, validate_nyse_open_dates
 else:
-    from market_calendar import inferred_equity_sessions
+    from market_calendar import inferred_equity_sessions, validate_nyse_open_dates
 
 
 SESSION_COLUMN = "Session_Number"
@@ -36,6 +36,8 @@ def _normalized_exchange_labels(frame: pd.DataFrame) -> pd.Series | None:
 def adjacent_session_flags(positions: pd.Series, *, forward: bool = False) -> pd.Series:
     """Test adjacent session ordinals using Python integers, without float conversion."""
     numbers = positions.tolist()
+    if not numbers:
+        return pd.Series(index=positions.index, dtype=bool)
     adjacent = [int(later) == int(earlier) + 1
                 for earlier, later in pairwise(numbers)]
     values = adjacent + [False] if forward else [False] + adjacent
@@ -73,10 +75,11 @@ def session_positions(frame: pd.DataFrame, *,
     # each ticker when exchange membership is unspecified.
     positions = np.empty(len(frame), dtype=np.int64)
     grouping = exchange_labels if exchange_labels is not None else frame["Name"]
-    for indices in frame.groupby(grouping, sort=False, dropna=False).indices.values():
+    for label, indices in frame.groupby(grouping, sort=False, dropna=False).indices.items():
         symbol_dates = dates.take(indices)
         sessions = inferred_equity_sessions(
             symbol_dates, start=start, end=end,
+            nyse_only=exchange_labels is not None and label in {"NYSE", "XNYS"},
         )
         positions[indices] = sessions.get_indexer(symbol_dates)
     return pd.Series(positions, index=frame.index, dtype=np.int64)
@@ -91,6 +94,11 @@ def validate_session_positions(frame: pd.DataFrame, *,
     the same date. Subsets may omit sessions unless ``require_consecutive`` is
     requested.
     """
+    if "Date" in frame:
+        identity = ["Name", "Date"] if "Name" in frame else ["Date"]
+        if frame.duplicated(identity).any():
+            raise ValueError("Duplicate ticker/date observations")
+
     if SESSION_COLUMN not in frame:
         return
 
@@ -107,6 +115,8 @@ def validate_session_positions(frame: pd.DataFrame, *,
             raise ValueError("Trading dates must fall on weekdays even with Session_Number")
         exchange_labels = _normalized_exchange_labels(frame)
         if exchange_labels is not None:
+            nyse = exchange_labels.isin(("NYSE", "XNYS"))
+            validate_nyse_open_dates(dates[nyse.to_numpy()])
             groups = (group for _, group in frame.groupby(exchange_labels, sort=False))
         elif "Name" in frame:
             groups = (group for _, group in frame.groupby("Name", sort=False, dropna=False))

@@ -108,6 +108,10 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations in indicator input")
     validate_session_positions(df)
+    # Infer on the complete input before grouping by ticker. A date observed
+    # for a peer on the same Exchange can expose a missing session here.
+    if "Session_Number" not in df:
+        df["Session_Number"] = session_positions(df)
     return pd.concat(
         [
             _one_symbol_indicators(group.sort_values("Date"))

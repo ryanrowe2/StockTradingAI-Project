@@ -44,7 +44,10 @@ the observed-session calendar of the complete 31-stock source. It retains
 dates attached to valid ticker identifiers even when their prices are unusable,
 but excludes malformed dates and invalid ticker identifiers.
 Date-only custom equity data from 1971 onward use scheduled NYSE sessions,
-including effective-dated holidays and exceptional closures. An optional
+including effective-dated holidays, 1972–1980 presidential Election Day
+closures, and documented exceptional full-day closures. Explicitly NYSE-labeled
+inputs reject observations on known closed-market dates even when session
+ordinals are supplied. An optional
 `Exchange` column groups stocks on the same market, so an observed exchange
 session can expose a missing bar in another stock without contaminating a
 different exchange's calendar. Without `Exchange`, observed extra weekdays are
@@ -52,6 +55,10 @@ retained only for the ticker that traded them. Callers can also supply verified
 `Session_Number` metadata, required for historical pre-1971 NYSE dates where
 automatic inference cannot safely reconstruct the older schedule. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
+Direct multi-ticker indicator and trading-episode utilities infer shared
+exchange calendars before splitting the source into individual stocks.
+Trading episodes reject duplicate ticker/date records and sort parsed dates,
+including valid non-zero-padded ISO dates.
 HMM fitting uses separate complete contiguous sequences; forward filtering
 restarts after incomplete observations or missing source sessions, so both use
 the same boundary policy. Target dates must follow their
@@ -208,6 +215,8 @@ is specified. Full-source dates anchor inferred ordinals even when loading a
 ticker subset. Supplied session positions are checked for chronological
 uniqueness within each ticker or declared exchange and for weekday dates;
 large unsigned positions are compared as exact integers, without float loss.
+Identical duplicate ticker/date records are rejected, and empty ordinal
+sequences produce empty adjacency flags.
 A close-to-close return crossing an excluded session is unavailable for
 single-day modeling rather than compressed into one day's return. Such a row
 also receives no next-session direction label and is excluded from supervised

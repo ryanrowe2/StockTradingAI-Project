@@ -188,8 +188,13 @@ def contiguous_trading_segments(data: pd.DataFrame) -> list[pd.DataFrame]:
         ordered["Name"] = normalize_ticker_symbols(
             ordered["Name"], context="Trading episodes require valid ticker names",
         )
-    ordered = ordered.sort_values("Date") if "Date" in ordered else ordered
+    if "Date" in ordered:
+        ordered["Date"] = parse_daily_dates(ordered["Date"], context="Trading dates")
+        ordered = ordered.sort_values("Date", kind="stable")
     validate_session_positions(ordered)
+    # Retain source-wide exchange calendars before isolating individual stocks.
+    if "Session_Number" not in ordered and "Date" in ordered:
+        ordered["Session_Number"] = session_positions(ordered)
     symbol_groups = (group for _, group in ordered.groupby("Name", sort=False)) \
         if "Name" in ordered else (ordered,)
     segments = []

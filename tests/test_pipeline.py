@@ -35,6 +35,7 @@ from model_training import (  # noqa: E402
     classification_metrics, fit_network, predict_up_probability, run_experiment,
 )
 from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
+from session_validation import adjacent_session_flags  # noqa: E402
 from technical_indicators import add_technical_indicators  # noqa: E402
 from walk_forward_evaluation import (  # noqa: E402
     paired_block_accuracy_intervals, walk_forward_experiment,
@@ -2231,3 +2232,111 @@ def test_walk_forward_rejects_too_few_bootstrap_dates_before_training(monkeypatc
                         lambda *args, **kwargs: pytest.fail("Model training began too soon"))
     with pytest.raises(ValueError, match="too few test dates"):
         evaluate("synthetic.csv", folds=1, bootstrap_samples=100)
+
+
+@pytest.mark.parametrize("closed,before,after", [
+    ("1972-11-07", "1972-11-06", "1972-11-08"),
+    ("1972-12-28", "1972-12-27", "1972-12-29"),
+    ("1973-01-25", "1973-01-24", "1973-01-26"),
+    ("1976-11-02", "1976-11-01", "1976-11-03"),
+    ("1977-07-14", "1977-07-13", "1977-07-15"),
+    ("1980-11-04", "1980-11-03", "1980-11-05"),
+    ("1985-09-27", "1985-09-26", "1985-09-30"),
+    ("1994-04-27", "1994-04-26", "1994-04-28"),
+])
+def test_historical_nyse_full_day_closures_do_not_create_sessions(closed, before, after):
+    bars = pd.DataFrame({
+        "Name": ["AAA"] * 2, "Exchange": ["NYSE"] * 2,
+        "Date": [before, after], "Open": [100, 101],
+        "High": [101, 102], "Low": [99, 100],
+        "Close": [100, 101], "Volume": [10, 10],
+    })
+    valid = validate_bars(bars)
+    assert valid.Session_Number.tolist() == [0, 1], closed
+
+
+@pytest.mark.parametrize("exchange", ["NYSE", "XNYS"])
+@pytest.mark.parametrize("with_metadata", [False, True])
+def test_declared_nyse_rejects_bar_during_known_closed_market(exchange, with_metadata):
+    bars = pd.DataFrame({
+        "Name": ["AAA"] * 3, "Exchange": [exchange] * 3,
+        "Date": ["2001-09-10", "2001-09-11", "2001-09-17"],
+        "Open": [100] * 3, "High": [101] * 3,
+        "Low": [99] * 3, "Close": [100] * 3,
+        "Volume": [10] * 3,
+    })
+    if with_metadata:
+        bars["Session_Number"] = [0, 1, 2]
+    with pytest.raises(ValueError, match="closed-market date: 2001-09-11"):
+        validate_bars(bars)
+    # Observed dates outside the reference NYSE calendar remain available to
+    # other explicitly identified exchanges.
+    other_exchange = bars.assign(Exchange="XOTHER")
+    assert len(validate_bars(other_exchange)) == 3
+
+
+def _extra_same_exchange_market_date() -> pd.DataFrame:
+    rows = []
+    for symbol in ("AAA", "BBB"):
+        for index, day in enumerate(pd.bdate_range("2024-01-12", "2024-01-17")):
+            if symbol == "AAA" and day == pd.Timestamp("2024-01-15"):
+                continue
+            price = 100.0 + index
+            rows.append({
+                "Name": symbol, "Exchange": "XTEST", "Date": day,
+                "Open": price, "High": price + 2, "Low": price - 1,
+                "Close": price + 1, "Volume": 1000,
+            })
+    return pd.DataFrame(rows)
+
+
+def test_direct_indicators_preserve_peer_observed_exchange_session_gaps():
+    source = _extra_same_exchange_market_date()
+    direct = add_technical_indicators(source)
+    validated = add_technical_indicators(validate_bars(source))
+    for frame in (direct, validated):
+        aaa = frame.loc[frame.Name == "AAA"].sort_values("Date")
+        assert aaa.Session_Number.tolist() == [0, 2, 3]
+        assert pd.isna(aaa.loc[aaa.Date == pd.Timestamp("2024-01-16"), "Return"].iloc[0])
+
+
+def test_direct_trading_segments_preserve_shared_exchange_calendar():
+    source = _extra_same_exchange_market_date()
+    segments = contiguous_trading_segments(source)
+    assert len(segments) == 2
+    assert [len(segment) for segment in segments] == [2, 4]
+    aaa = next(segment for segment in segments if segment.Name.iloc[0] == "AAA")
+    assert aaa.Date.dt.strftime("%Y-%m-%d").tolist() == ["2024-01-16", "2024-01-17"]
+    assert aaa.Session_Number.tolist() == [2, 3]
+
+
+@pytest.mark.parametrize("with_metadata", [False, True])
+def test_trading_segments_reject_duplicate_ticker_dates(with_metadata):
+    dates = pd.to_datetime([
+        "2024-01-02", "2024-01-03", "2024-01-03", "2024-01-04", "2024-01-05",
+    ])
+    source = pd.DataFrame({"Name": ["AAA"] * len(dates), "Date": dates})
+    if with_metadata:
+        source["Session_Number"] = [0, 1, 1, 2, 3]
+    with pytest.raises(ValueError, match="Duplicate ticker/date"):
+        contiguous_trading_segments(source)
+
+
+def test_trading_segments_parse_dates_before_chronological_sorting():
+    source = pd.DataFrame({
+        "Name": ["AAA"] * 3,
+        "Date": ["2025-01-9", "2025-01-10", "2025-01-13"],
+    })
+    segments = contiguous_trading_segments(source)
+    assert len(segments) == 1
+    assert segments[0].Date.dt.strftime("%Y-%m-%d").tolist() == [
+        "2025-01-09", "2025-01-10", "2025-01-13",
+    ]
+
+
+@pytest.mark.parametrize("forward", [False, True])
+def test_empty_session_adjacency_has_empty_boolean_result(forward):
+    positions = pd.Series([], index=pd.Index([], name="observation"), dtype="int64")
+    result = adjacent_session_flags(positions, forward=forward)
+    assert result.empty and result.dtype == bool
+    pd.testing.assert_index_equal(result.index, positions.index)

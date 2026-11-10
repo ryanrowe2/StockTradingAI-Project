@@ -52,14 +52,17 @@ and session positions agree with the same ticker selected from the combined
 source, even when individual stock files omit sessions. Custom CSVs, including
 new files placed in `data/raw/`, are not mistaken for bundled originals.
 Without `Session_Number`, date-only U.S. equity inputs from 1971 onward use an
-NYSE holiday calendar, including exceptional closures, rather than counting
+NYSE holiday calendar, including historical presidential Election Day closures
+from 1972 to 1980 and exceptional full-day closures, rather than counting
 holidays as trading sessions. The MLK holiday rule begins in 1998. Dates before
 1971 require independently verified `Session_Number` metadata: the older NYSE
 holiday schedule, including the 1968 Wednesday closures, cannot be accurately
 inferred using the modern weekday calendar. An optional `Exchange` column
 allows the same exchange's observed sessions to reveal gaps in other stocks on
 that exchange, while preventing foreign-exchange dates from contaminating NYSE
-history. Without `Exchange`, extra observed weekdays remain ticker-specific;
+history. When the declared exchange is `NYSE` or `XNYS`, observations on
+known closed-market dates are rejected, with or without supplied ordinals.
+Without `Exchange`, extra observed weekdays remain ticker-specific;
 for exact non-NYSE calendars, provide verified `Session_Number`. Weekend rows are
 rejected even when session positions are supplied. Invalid source identifiers
 do not contribute dates to the calendar. Literal symbols such as `NA` remain ticker identifiers instead
@@ -68,6 +71,10 @@ of being parsed as missing values, while missing-name placeholders such as
 input paths: raw data validation, direct
 indicator calculation, HMM fitting/inference, and trading environments.
 All paths normalize whitespace and case before checking ticker identity.
+Direct multi-ticker indicators and trading-episode segmentation establish
+the full input's exchange session positions before isolating individual stocks.
+Trading episodes reject duplicate ticker/date rows and sort by parsed dates,
+including valid non-zero-padded ISO strings.
 In the included 93,612-row source, 93,435 bars pass OHLCV validation;
 177 incomplete or inconsistent records are excluded without imputation.
 Before exclusion, validation assigns `Session_Number` from the bundled
@@ -348,6 +355,10 @@ bootstrap blocks. Further regressions cover exact 64-bit session arithmetic,
 stable custom CSV ordinals across ticker selection, declared exchange calendars,
 pre-1971 historical-calendar rejection without verified metadata, single-stock
 trading episodes, daily-only bootstrap inputs, and preflight fold viability.
+The historical-session and direct-API cases additionally cover documented
+1972–1994 NYSE full-day closures, fabricated holiday observations on declared
+NYSE data, exchange-shared indicators and episodes, duplicate ticker/date
+records, non-zero-padded date ordering, and empty adjacency input.
 
 The same checks run automatically through [GitHub Actions](../.github/workflows/python-checks.yml) on pushes and pull requests. To regenerate the GitHub-visible notebook tables and figures, run:
 
