@@ -55,10 +55,19 @@ retained only for the ticker that traded them. Callers can also supply verified
 `Session_Number` metadata, required for historical pre-1971 NYSE dates where
 automatic inference cannot safely reconstruct the older schedule. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
-Verified session ordinals also support historical NYSE Saturday trading through
+For `NYSE`/`XNYS` observations from 1971 onward, supplied ordinals must have
+the same spacing as actual scheduled market sessions, so an omitted Tuesday
+cannot be disguised as the next session after Monday. Verified session ordinals
+also support historical NYSE Saturday trading through
 its last Saturday session on May 24, 1952; later weekends are rejected.
-Direct session utilities require daily dates, and NumPy dates with only year,
-month, or week precision cannot silently become market sessions.
+Direct session utilities require daily dates. For raw NumPy date scalars, use
+`validate_raw_bar_records(records)` **before constructing a pandas DataFrame**:
+it rejects year-, month-, or week-precision dates rather than inventing a day.
+Ordinary pandas construction may silently expand such scalars into a complete
+timestamp, permanently discarding their original precision; a validator
+receiving that already-converted DataFrame cannot reconstruct it. ISO daily
+strings, Python date objects, and explicit NumPy day-precision values are safe
+inputs to the raw-record API.
 Direct multi-ticker indicator and trading-episode utilities infer shared
 exchange calendars before splitting the source into individual stocks.
 Trading episodes reject duplicate ticker/date records and sort parsed dates,

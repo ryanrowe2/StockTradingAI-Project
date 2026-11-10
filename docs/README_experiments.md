@@ -35,9 +35,14 @@ The source CSV is validated for required columns, explicit ISO year-first
 calendar dates (including non-zero-padded months/days), finite numeric values,
 positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)`
 observations. Relative dates, numeric timestamps, timezones, and intraday
-times are rejected to preserve one observation per trading day. NumPy dates
-with only year, month, or week precision are rejected rather than assigning
-an invented calendar day. Incomplete or
+times are rejected to preserve one observation per trading day. To reject
+NumPy dates with only year, month, or week precision, pass the original
+unconverted record mappings to `validate_raw_bar_records(records)` in
+`scripts/data_processing.py`; this checks each original scalar before pandas
+can assign an invented day. Once an ordinary DataFrame constructor has
+converted a coarse NumPy date into a timestamp, its original precision is
+irrecoverable and the general DataFrame validator cannot detect that coercion.
+Incomplete or
 contradictory bars are excluded without guessing replacement prices. Feature
 preparation rejects an input ticker if insufficient valid price history remains
 after indicator warm-up, so no ticker is silently omitted from the prepared data.
@@ -64,6 +69,9 @@ allows the same exchange's observed sessions to reveal gaps in other stocks on
 that exchange, while preventing foreign-exchange dates from contaminating NYSE
 history. When the declared exchange is `NYSE` or `XNYS`, observations on
 known closed-market dates are rejected, with or without supplied ordinals.
+From 1971 onward, supplied NYSE ordinals must also advance by the exact number
+of scheduled market sessions between observations, preventing missing trading
+days from being concealed by compressed consecutive session numbers.
 Without `Exchange`, extra observed weekdays remain ticker-specific;
 for exact non-NYSE calendars, provide verified `Session_Number`. Historical NYSE
 Saturday trading is supported through its last actual Saturday session on

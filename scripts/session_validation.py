@@ -141,9 +141,28 @@ def validate_session_positions(frame: pd.DataFrame, *,
             if (calendar["Date"].duplicated().any()
                     or calendar[SESSION_COLUMN].duplicated().any()):
                 raise ValueError("Session_Number must identify exactly one market date per ticker")
-            chronological = calendar.sort_values("Date")[SESSION_COLUMN].tolist()
+            calendar = calendar.sort_values("Date")
+            chronological = calendar[SESSION_COLUMN].tolist()
             if any(later <= earlier for earlier, later in pairwise(chronological)):
                 raise ValueError("Session_Number must increase with the market dates per ticker")
+            if (exchange_labels is not None
+                    and group["Exchange"].iloc[0].strip().upper() in {"NYSE", "XNYS"}):
+                # The modern NYSE calendar is known: supplied ordinals may have
+                # any origin, but their differences must match real sessions.
+                # Otherwise an omitted Tuesday can be disguised as an adjacent
+                # Monday-to-Wednesday trading step.
+                modern = calendar.loc[calendar["Date"] >= pd.Timestamp("1971-01-01")]
+                if len(modern) > 1:
+                    modern_dates = pd.DatetimeIndex(modern["Date"])
+                    scheduled = inferred_equity_sessions(modern_dates, nyse_only=True)
+                    true_ordinals = scheduled.get_indexer(modern_dates).tolist()
+                    supplied = modern[SESSION_COLUMN].tolist()
+                    if any(int(later) - int(earlier) != real_later - real_earlier
+                           for (earlier, later), (real_earlier, real_later)
+                           in zip(pairwise(supplied), pairwise(true_ordinals), strict=True)):
+                        raise ValueError(
+                            "Session_Number spacing must match scheduled NYSE trading sessions"
+                        )
 
     # When Date is absent, the caller's row order is the chronological order.
     # With Date, verify adjacency inside each ticker, not across different names.

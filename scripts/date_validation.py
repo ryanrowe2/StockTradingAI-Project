@@ -18,6 +18,8 @@ def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series
     A daily bar represents a calendar day. Allowing an intraday time creates
     multiple observations for one session; allowing words such as ``today`` or
     numeric epoch values silently makes historical experiments nonreproducible.
+    For untrusted NumPy inputs, validate original scalars before pandas
+    DataFrame construction: converted timestamps no longer retain precision.
     """
     message = f"{context} must be present, parseable ISO calendar dates without times or timezones"
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from collections.abc import Iterable, Mapping
 from functools import lru_cache
 from pathlib import Path
 
@@ -162,6 +163,27 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
             f"{', '.join(missing_tickers)}"
         )
     return df.sort_values(["Name", "Date"]).reset_index(drop=True)
+
+
+def validate_raw_bar_records(records: Iterable[Mapping[str, object]]) -> pd.DataFrame:
+    """Validate raw records *before* pandas can erase date precision.
+
+    A normal ``pd.DataFrame`` constructor coerces an array of month-only
+    ``np.datetime64`` values into complete timestamps. The resulting values
+    cannot be distinguished from genuinely day-precise timestamps. This entry
+    point preserves each original date scalar until precision is verified.
+    """
+    rows = list(records)
+    if not rows:
+        raise ValueError("A nonempty collection of raw price records is required")
+    if any(not isinstance(row, Mapping) or "Date" not in row for row in rows):
+        raise ValueError("Every raw price record must provide a Date")
+    dates = parse_daily_dates(
+        pd.Series([row["Date"] for row in rows], dtype=object), context="Every Date",
+    )
+    frame = pd.DataFrame.from_records(rows)
+    frame["Date"] = dates.to_numpy()
+    return validate_bars(frame)
 
 
 def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -> pd.DataFrame:

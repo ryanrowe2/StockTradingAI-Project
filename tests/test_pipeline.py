@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from data_processing import (  # noqa: E402
-    DEFAULT_RAW_DATA, load_data, prepare_features, prepare_indicator_history, validate_bars,
+    DEFAULT_RAW_DATA, load_data, prepare_features, prepare_indicator_history,
+    validate_bars, validate_raw_bar_records,
 )
 from date_validation import parse_daily_dates  # noqa: E402
 from hmm_integration import (  # noqa: E402
@@ -2411,3 +2412,63 @@ def test_direct_session_validation_identifies_equivalent_iso_dates():
     with pytest.raises(ValueError, match="Duplicate ticker/date"):
         validate_session_positions(frame)
     pd.testing.assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize("exchange", ["NYSE", "XNYS"])
+def test_supplied_nyse_ordinals_cannot_compress_missing_sessions(exchange):
+    bars = pd.DataFrame({
+        "Date": ["2024-06-03", "2024-06-05"],
+        "Name": ["IBM", "IBM"], "Exchange": [exchange, exchange],
+        "Session_Number": [100, 101],
+        "Open": [10.0, 11.0], "High": [12.0, 13.0],
+        "Low": [9.0, 10.0], "Close": [11.0, 12.0],
+        "Volume": [100, 100],
+    })
+    with pytest.raises(ValueError, match="spacing.*NYSE"):
+        validate_bars(bars)
+    with pytest.raises(ValueError, match="spacing.*NYSE"):
+        add_technical_indicators(bars)
+    with pytest.raises(ValueError, match="spacing.*NYSE"):
+        SimpleTradingEnv(bars)
+
+    # Preserve the actual Tuesday session with a one-position gap.
+    verified = validate_bars(bars.assign(Session_Number=[100, 102]))
+    assert verified.Session_Number.tolist() == [100, 102]
+    assert pd.isna(add_technical_indicators(verified)["Return"].iloc[1])
+
+
+def test_supplied_nyse_ordinals_respect_holidays_and_offsets():
+    # July 4 is a market holiday, so July 3 -> July 5 is one trading step.
+    bars = pd.DataFrame({
+        "Date": ["2024-07-03", "2024-07-05"], "Name": ["IBM", "IBM"],
+        "Exchange": ["NYSE", "NYSE"], "Session_Number": [2**53 + 10, 2**53 + 11],
+        "Open": [10.0, 11.0], "High": [12.0, 13.0],
+        "Low": [9.0, 10.0], "Close": [11.0, 12.0], "Volume": [100, 100],
+    })
+    assert len(validate_bars(bars)) == 2
+    with pytest.raises(ValueError, match="spacing.*NYSE"):
+        validate_bars(bars.assign(Session_Number=[100, 102]))
+    # Exact NYSE spacing cannot be imposed on an unrelated exchange.
+    assert len(validate_bars(bars.assign(Exchange="XLON", Session_Number=[100, 102]))) == 2
+
+
+@pytest.mark.parametrize("coarse", [
+    np.datetime64("2024"), np.datetime64("2024-04"),
+    np.datetime64("2024-04-05", "W"),
+])
+def test_raw_bar_ingestion_preserves_and_rejects_coarse_date_precision(coarse):
+    def record(day):
+        return {
+            "Date": day, "Name": "IBM", "Open": 10.0, "High": 12.0,
+            "Low": 9.0, "Close": 11.0, "Volume": 100,
+        }
+
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        validate_raw_bar_records([record(coarse), record(np.datetime64("2024-04-08", "D"))])
+
+    valid = validate_raw_bar_records([
+        record(np.datetime64("2024-04-05", "D")),
+        record(np.datetime64("2024-04-08", "D")),
+    ])
+    assert valid.Date.dt.strftime("%Y-%m-%d").tolist() == ["2024-04-05", "2024-04-08"]
+    assert valid.Session_Number.tolist() == [0, 1]
