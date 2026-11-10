@@ -46,8 +46,26 @@ def paired_block_accuracy_intervals(scored: pd.DataFrame, *,
         raise ValueError("block_sessions must be positive and bootstrap_samples at least 100")
     if scored.empty:
         raise ValueError("Cannot bootstrap an empty holdout")
+    required = {"Date", "actual", "majority", "baseline_prob", "enhanced_prob"}
+    missing = required - set(scored.columns)
+    if missing:
+        raise ValueError(f"Missing bootstrap columns: {sorted(missing)}")
+    if (not scored["actual"].isin((0, 1)).all()
+            or not scored["majority"].isin((0, 1)).all()):
+        raise ValueError("Bootstrap actual and majority labels must be binary (0 or 1)")
+    try:
+        probabilities = scored[["baseline_prob", "enhanced_prob"]].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Bootstrap probabilities must be numeric values in [0, 1]") from exc
+    if (not np.isfinite(probabilities).all()
+            or ((probabilities < 0) | (probabilities > 1)).any()):
+        raise ValueError("Bootstrap probabilities must be finite values in [0, 1]")
     days = pd.DatetimeIndex(scored["Date"].unique()).sort_values()
+    if days.hasnans:
+        raise ValueError("Bootstrap dates must be present")
     block_id = days.get_indexer(scored["Date"]) // block_sessions
+    if len(np.unique(block_id)) < 2:
+        raise ValueError("Bootstrap requires at least two chronological date blocks")
     expected = (scored["actual"] == scored["majority"]).to_numpy(dtype=int)
     baseline = (scored["actual"] == (scored["baseline_prob"] >= 0.5)).to_numpy(dtype=int)
     enhanced = (scored["actual"] == (scored["enhanced_prob"] >= 0.5)).to_numpy(dtype=int)

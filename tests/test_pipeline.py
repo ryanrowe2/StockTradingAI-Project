@@ -2010,3 +2010,90 @@ def test_walk_forward_executable_evaluation_has_disjoint_test_folds(tmp_path: Pa
     assert 0 <= report["enhanced"]["accuracy"] <= 1
     with pytest.raises(ValueError, match="folds must be"):
         walk_forward_experiment(csv, folds=6)
+
+
+def test_mixed_exchange_holiday_does_not_contaminate_nyse_ticker(tmp_path: Path):
+    # NYSE was closed on 2025-01-20, while BBB's exchange was open.
+    source = pd.DataFrame({
+        "Name": ["AAA", "AAA", "BBB", "BBB", "BBB"],
+        "Date": ["2025-01-17", "2025-01-21", "2025-01-17", "2025-01-20", "2025-01-21"],
+        "Open": [100, 110, 200, 210, 220],
+        "High": [101, 111, 201, 211, 221],
+        "Low": [99, 109, 199, 209, 219],
+        "Close": [100, 110, 200, 210, 220],
+        "Volume": [1000] * 5,
+    })
+    csv = tmp_path / "mixed_exchanges.csv"
+    source.to_csv(csv, index=False)
+    combined = load_data(csv)
+    aaa = combined.loc[combined.Name == "AAA"]
+    bbb = combined.loc[combined.Name == "BBB"]
+    assert aaa.Session_Number.tolist() == [0, 1]
+    assert bbb.Session_Number.tolist() == [0, 1, 2]
+    assert add_technical_indicators(combined).loc[
+        lambda rows: (rows.Name == "AAA") & (rows.Date == pd.Timestamp("2025-01-21")),
+        "Return",
+    ].iloc[0] == pytest.approx(0.1)
+    pd.testing.assert_frame_equal(load_data(csv, tickers=("AAA",)), aaa.reset_index(drop=True))
+
+
+def test_mixed_exchange_explicit_ordinals_are_valid_per_ticker():
+    dates = ["2025-01-17", "2025-01-21", "2025-01-17", "2025-01-20", "2025-01-21"]
+    names = ["AAA", "AAA", "BBB", "BBB", "BBB"]
+    prices = [100, 101, 200, 201, 202]
+    source = pd.DataFrame({
+        "Name": names, "Date": dates, "Session_Number": [0, 1, 0, 1, 2],
+        "Open": prices, "Close": prices,
+        "High": [value + 1 for value in prices],
+        "Low": [value - 1 for value in prices], "Volume": [1000] * 5,
+    })
+    checked = validate_bars(source)
+    assert checked.loc[checked.Name == "AAA", "Session_Number"].tolist() == [0, 1]
+    corrupted = source.copy()
+    corrupted.loc[(corrupted.Name == "BBB") & (corrupted.Date == "2025-01-21"),
+                  "Session_Number"] = 1
+    with pytest.raises(ValueError, match="Session_Number"):
+        validate_bars(corrupted)
+
+
+def test_mlk_nyse_holiday_only_applies_from_1998():
+    def two_bars(first: str, second: str) -> pd.DataFrame:
+        return pd.DataFrame({
+            "Name": ["AAA", "AAA"], "Date": [first, second],
+            "Open": [100, 101], "High": [101, 102],
+            "Low": [99, 100], "Close": [100, 101], "Volume": [1000, 1000],
+        })
+
+    # Monday 1997-01-20 was still a regular NYSE session.
+    assert validate_bars(two_bars("1997-01-17", "1997-01-21"))["Session_Number"].tolist() == [0, 2]
+    # The third Monday in January became an NYSE holiday in 1998.
+    assert validate_bars(two_bars("1998-01-16", "1998-01-20"))["Session_Number"].tolist() == [0, 1]
+
+
+@pytest.mark.parametrize("column,value", [
+    ("baseline_prob", np.nan), ("enhanced_prob", np.inf),
+    ("baseline_prob", -0.01), ("enhanced_prob", 1.01),
+    ("baseline_prob", "not a probability"),
+    ("actual", 2), ("majority", np.nan),
+])
+def test_block_bootstrap_rejects_invalid_scores(column, value):
+    scored = pd.DataFrame({
+        "Date": pd.bdate_range("2026-01-05", periods=30),
+        "actual": [0, 1] * 15, "majority": [0] * 30,
+        "baseline_prob": [0.2] * 30, "enhanced_prob": [0.8] * 30,
+    })
+    if isinstance(value, str):
+        scored[column] = scored[column].astype(object)
+    scored.loc[0, column] = value
+    with pytest.raises(ValueError, match="Bootstrap"):
+        paired_block_accuracy_intervals(scored, block_sessions=10, bootstrap_samples=100)
+
+
+def test_block_bootstrap_rejects_one_independent_date_block():
+    scored = pd.DataFrame({
+        "Date": pd.bdate_range("2026-01-05", periods=8),
+        "actual": [0, 1] * 4, "majority": [0] * 8,
+        "baseline_prob": [0.8] * 8, "enhanced_prob": [0.2] * 8,
+    })
+    with pytest.raises(ValueError, match="at least two chronological date blocks"):
+        paired_block_accuracy_intervals(scored, block_sessions=10, bootstrap_samples=100)

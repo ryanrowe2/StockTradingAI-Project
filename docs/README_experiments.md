@@ -53,9 +53,11 @@ source, even when individual stock files omit sessions. Custom CSVs, including
 new files placed in `data/raw/`, are not mistaken for bundled originals.
 Without `Session_Number`, date-only U.S. equity inputs use an NYSE holiday
 calendar, including exceptional closures, rather than counting holidays as
-trading sessions. Observed weekdays remain eligible for other exchanges, and
-missing regular market weekdays remain gaps. For exact exchange-specific
-adjacency, callers may provide verified `Session_Number`. Weekend rows are
+trading sessions. The MLK holiday rule begins in 1998, when the NYSE first
+observed it. Observed weekdays remain eligible only for the ticker that traded
+them, so mixing exchanges does not invent gaps in another ticker's history.
+Missing regular market weekdays remain gaps. For exact exchange-specific
+adjacency, callers may provide verified per-ticker `Session_Number`. Weekend rows are
 rejected even when session positions are supplied. Invalid source identifiers
 do not contribute dates to the calendar. Literal symbols such as `NA` remain ticker identifiers instead
 of being parsed as missing values, while missing-name placeholders such as
@@ -67,10 +69,11 @@ In the included 93,612-row source, 93,435 bars pass OHLCV validation;
 177 incomplete or inconsistent records are excluded without imputation.
 Before exclusion, validation assigns `Session_Number` from the bundled
 observed-session calendar or an NYSE-holiday-aware scheduled calendar that also
-retains explicitly observed weekdays. Session positions survive exclusion and
+retains weekdays explicitly observed for each ticker. Session positions survive exclusion and
 subsetting, allowing indicators, HMM segment boundaries, and the trading
-simulator to detect missing sessions. Supplied positions must have a globally
-increasing one-to-one correspondence with weekday market dates.
+simulator to detect missing sessions. Supplied positions must have an increasing
+one-to-one correspondence with weekday market dates within each ticker; the
+same date can have different positions on different exchange calendars.
 Direct indicator calls validate positive, finite, internally coherent OHLC
 prices, normalize accepted numeric strings, and check supplied session positions;
 Volume remains optional for that standalone API but is checked for finite
@@ -198,7 +201,10 @@ partially accounts for serial and cross-sectional dependence. These descriptive
 intervals do not imply statistical independence across long market regimes or
 prove future trading profitability. Change the block length, fold count, or
 bootstrap sample count using `--block-sessions`, `--folds`, and
-`--bootstrap-samples`.
+`--bootstrap-samples`. The helper checks binary classification labels, finite
+prediction probabilities in [0, 1], and at least two distinct chronological
+date blocks. A shorter holdout or oversized block setting fails explicitly
+instead of presenting a degenerate 95% interval.
 
 ## 3. Gaussian HMM regime experiment
 
@@ -322,7 +328,10 @@ unrelated malformed records, custom CSV detection, weekend metadata,
 boolean OHLCV inputs, source-calendar cache invalidation, and segmented
 holdout trading. The extra executable-target evaluation, walk-forward fold
 separation, block-bootstrap estimates, and slippage/drawdown calculations
-also have dedicated regression checks.
+also have dedicated regression checks. Edge-case tests additionally cover
+mixed-exchange calendars, independent per-ticker ordinals, the start of the
+NYSE's MLK holiday in 1998, invalid bootstrap scores, and insufficient
+bootstrap blocks.
 
 The same checks run automatically through [GitHub Actions](../.github/workflows/python-checks.yml) on pushes and pull requests. To regenerate the GitHub-visible notebook tables and figures, run:
 

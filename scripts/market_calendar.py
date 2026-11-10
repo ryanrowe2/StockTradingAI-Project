@@ -26,7 +26,7 @@ class _NYSEHolidays(AbstractHolidayCalendar):
     rules = [
         Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),
         Holiday("Martin Luther King Jr. Day", month=1, day=1,
-                offset=DateOffset(weekday=MO(3))),
+                offset=DateOffset(weekday=MO(3)), start_date="1998-01-01"),
         Holiday("Washington's Birthday", month=2, day=1,
                 offset=DateOffset(weekday=MO(3))),
         GoodFriday,
@@ -61,7 +61,9 @@ def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIn
     return pd.bdate_range(start, end, freq=CustomBusinessDay(holidays=closure_days))
 
 
-def inferred_equity_sessions(dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
+def inferred_equity_sessions(dates: pd.DatetimeIndex, *,
+                             start: pd.Timestamp | None = None,
+                             end: pd.Timestamp | None = None) -> pd.DatetimeIndex:
     """Include scheduled NYSE sessions plus dates explicitly observed by a caller.
 
     Thus an absent genuine holiday does not create a fictional gap, while an
@@ -70,5 +72,8 @@ def inferred_equity_sessions(dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
     """
     if dates.empty:
         return pd.DatetimeIndex([])
-    scheduled = _scheduled_sessions(dates.min(), dates.max())
+    scheduled = _scheduled_sessions(
+        dates.min() if start is None else start,
+        dates.max() if end is None else end,
+    )
     return scheduled.union(dates.unique()).sort_values()
