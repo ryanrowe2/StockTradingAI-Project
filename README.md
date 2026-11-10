@@ -32,7 +32,7 @@ flowchart TD
     H --> I["Segment-consistent forward regimes"]
     I --> J["Q-learning training with AAPL-fitted bins"]
     E --> J
-    J --> K["Frozen-policy evaluation on full valid price history"]
+    J --> K["Segment-safe frozen-policy evaluation on later price history"]
 ```
 
 Each ticker's indicators and next-session labels are computed independently. Ticker
@@ -40,10 +40,13 @@ identifiers are normalized consistently, including for direct indicator calls;
 literal symbols such as `NA` are preserved during CSV loading. Date boundaries
 are shared across the Bayesian and AAPL trading experiments, so their partitions
 correspond to the same historical market periods. All bundled ticker CSVs use
-the verified observed-session calendar of the complete 31-stock source.
-Custom data without exchange-session positions conservatively count weekdays,
-so an omitted weekday cannot silently become an adjacent session; exchange
-holidays may require explicit `Session_Number` metadata. Close-to-close daily
+the observed-session calendar of the complete 31-stock source. It retains
+dates attached to valid ticker identifiers even when their prices are unusable,
+but excludes malformed dates and invalid ticker identifiers.
+Date-only custom equity data use scheduled NYSE sessions, including holidays
+and exceptional historical closures, while preserving additional weekdays
+explicitly present in the input for other exchanges. A different exchange can
+provide exact `Session_Number` metadata. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
 HMM fitting uses separate complete contiguous sequences; forward filtering
 restarts after incomplete observations or missing source sessions, so both use
@@ -96,7 +99,7 @@ The [HMM and RL notebook](notebooks/HMM_and_RL_Experiments.ipynb) illustrates re
 
 The tabular Q-learning agent considers **buy, sell, and hold**, allowing buys only when flat and sells only when invested. States combine training-binned daily return and RSI, a forward-filtered market regime, and the current position. State components must be actual integers, and transition dimensions, position changes, and Q-value updates are checked for validity. Decisions use completed daily observations; orders execute at the **next session's open**. A single-symbol simulation requires consecutive recorded market sessions; training splits at missing feature sessions rather than treating weeks as one trading step. The simulator tracks overnight gaps, intraday price changes, and transaction costs, rejecting nonfinite step and cumulative rewards.
 
-The experiment trains across separate contiguous episodes in an earlier historical period and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison.
+The experiment trains across separate contiguous episodes in an earlier historical period and evaluates the frozen policy on later observations, alongside a one-share, next-open buy-and-hold comparison. Both training and test episodes restart after an absent market session, so no trade is executed across an unobserved multi-session gap.
 Both outcomes are marked to the final validated source close, including the
 terminal trading session that has no next-day prediction label. A share still held at
 that point remains open, so the displayed P/L excludes a hypothetical final
@@ -153,6 +156,9 @@ The input validator raises a clear error if all valid price bars for any ticker
 are discarded, rather than silently excluding that ticker.
 When `--ticker` is specified, selection happens before price-bar validation,
 so invalid records belonging only to other symbols do not block the experiment.
+The bundled reference calendar independently ignores malformed source dates
+and invalid ticker identifiers; an invalid OHLCV bar on an otherwise valid
+market date still preserves that session's position for gap detection.
 CSV parsing preserves legitimate ticker strings such as `NA`, which pandas
 otherwise interprets as missing values, while rejecting explicit placeholders
 such as `N/A`, `NaN`, `NULL`, and `<NA>`, plus malformed symbols. The same
@@ -162,8 +168,10 @@ records, 93,435 pass OHLCV validation; 177 incomplete or contradictory rows
 are excluded without modifying the raw files.
 An additional `Session_Number` column preserves market-session positions through
 this exclusion. The bundled individual stock files use the complete dataset's
-verified observed-session calendar; custom CSVs without supplied positions use
-conservative weekday positions to identify missing weekdays.
+observed-session calendar. Other CSVs, including new files inside `data/raw/`,
+use an NYSE-holiday-aware calendar that retains explicitly observed weekdays.
+Supplied session positions are checked for ordering, uniqueness, and weekday
+dates; other exchange calendars may use their own verified positions.
 A close-to-close return crossing an excluded session is unavailable for
 single-day modeling rather than compressed into one day's return. Such a row
 also receives no next-session direction label and is excluded from supervised
@@ -206,6 +214,9 @@ The notebook reproduction helper captures stdout, stderr, rich `display()` and
 expression results, and Matplotlib figures in execution order. It restores the
 caller's working directory and import path, excludes existing figures from
 capture, and cleans up newly created figures if a cell fails.
+The EDA notebook uses the same bundled-session calendar and validated returns
+as the modeling pipeline; its source path works from both the repository root
+and the notebook folder.
 
 ## Repository structure
 
@@ -219,6 +230,7 @@ StockTradingAI-Project/
 ├── notebooks/                     # EDA, model evaluation, HMM / RL experiments
 ├── scripts/
 │   ├── date_validation.py        # Explicit daily calendar date validation
+│   ├── market_calendar.py        # Holiday-aware U.S. equity session positions
 │   ├── price_validation.py       # Shared coherent-price checks
 │   ├── session_validation.py     # Consistent market-session metadata
 │   ├── ticker_validation.py      # Shared ticker-name normalization and checks

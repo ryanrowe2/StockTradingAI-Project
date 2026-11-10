@@ -7,6 +7,7 @@ transformations belong inside training folds, after the chronological split.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from functools import lru_cache
 from pathlib import Path
 
@@ -19,14 +20,14 @@ if __package__:
     from .price_validation import valid_price_bars
     from .session_validation import session_positions, validate_session_positions
     from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
-    from .ticker_validation import normalize_ticker_symbols
+    from .ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
     from price_validation import valid_price_bars
     from session_validation import session_positions, validate_session_positions
     from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
-    from ticker_validation import normalize_ticker_symbols
+    from ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,27 +36,52 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "data/generated/stock_features.csv"
 REQUIRED_COLUMNS = ("Date", "Name", "Open", "High", "Low", "Close", "Volume")
 MODEL_FEATURES = ("Return", "Intraday_Return", "Daily_Range", "MACD_Pct")
 SESSION_COLUMN = "Session_Number"
+_BUNDLED_SYMBOLS = (
+    "AABA", "AAPL", "AMZN", "AXP", "BA", "CAT", "CSCO", "CVX", "DIS",
+    "GE", "GOOGL", "GS", "HD", "IBM", "INTC", "JNJ", "JPM", "KO",
+    "MCD", "MMM", "MRK", "MSFT", "NKE", "PFE", "PG", "TRV", "UNH",
+    "UTX", "VZ", "WMT", "XOM",
+)
+_BUNDLED_RAW_NAMES = frozenset({
+    DEFAULT_RAW_DATA.name,
+    "all_stocks_2017-01-01_to_2018-01-01.csv",
+    *(f"{ticker}_2006-01-01_to_2018-01-01.csv" for ticker in _BUNDLED_SYMBOLS),
+})
 
 
-@lru_cache(maxsize=1)
-def _bundled_session_calendar() -> pd.DatetimeIndex:
-    """Use the complete project's validated market observations as authority.
+@lru_cache(maxsize=4)
+def _cached_bundled_session_calendar(path: Path, contents_hash: bytes) -> pd.DatetimeIndex:
+    """Use source-observed market dates with valid ticker identities as authority.
 
     Individual CSVs contain ticker-specific holes, so their observed dates do
-    not identify all trading sessions represented by the bundled dataset.
+    not identify all trading sessions represented by the bundled dataset. A
+    damaged price bar still identifies a potential session, whereas malformed
+    dates and invalid ticker identifiers cannot be trusted for this purpose.
     """
-    source = pd.read_csv(DEFAULT_RAW_DATA, keep_default_na=False)
-    dates = parse_daily_dates(source["Date"], context="Bundled market dates")
-    valid = valid_price_bars(source, require_volume=True)
-    valid &= dates.dt.dayofweek.lt(5)
-    return pd.DatetimeIndex(dates.loc[valid].unique()).sort_values()
+    source = pd.read_csv(path, keep_default_na=False)
+    usable_identifiers = valid_ticker_symbols(source["Name"])
+    raw_dates = source.loc[usable_identifiers, "Date"].astype("string")
+    explicit = raw_dates.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").fillna(False)
+    dates = pd.to_datetime(raw_dates.where(explicit), format="mixed", errors="coerce")
+    dates = dates.loc[dates.notna() & dates.dt.dayofweek.lt(5)]
+    return pd.DatetimeIndex(dates.unique()).sort_values()
+
+
+def _bundled_session_calendar() -> pd.DatetimeIndex:
+    # Key the cache to the bytes, not the filename or modification timestamp:
+    # replacing the bundled source in a long-running interpreter cannot reuse
+    # an obsolete calendar, even if its size and mtime are unchanged.
+    return _cached_bundled_session_calendar(
+        DEFAULT_RAW_DATA.resolve(), hashlib.sha256(DEFAULT_RAW_DATA.read_bytes()).digest(),
+    )
 
 
 def _is_bundled_raw_csv(filepath: str | Path) -> bool:
     if not isinstance(filepath, (str, Path)):
         return False
     path = Path(filepath).resolve()
-    return path.is_file() and path.parent == DEFAULT_RAW_DATA.parent.resolve() and path.suffix == ".csv"
+    return (path.is_file() and path.parent == DEFAULT_RAW_DATA.parent.resolve()
+            and path.name in _BUNDLED_RAW_NAMES)
 
 
 def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -81,10 +107,11 @@ def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
     if SESSION_COLUMN not in df:
         df[SESSION_COLUMN] = session_positions(df)
     validate_session_positions(df)
+    valid_prices = valid_price_bars(df, require_volume=True)
     numeric_columns = ("Open", "High", "Low", "Close", "Volume")
     for name in numeric_columns:
         df[name] = pd.to_numeric(df[name], errors="coerce")
-    df = df.loc[valid_price_bars(df, require_volume=True)].copy()
+    df = df.loc[valid_prices].copy()
     if df.empty:
         raise ValueError("No valid OHLCV observations remain")
     missing_tickers = sorted(input_tickers - set(df["Name"]))

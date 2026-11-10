@@ -20,6 +20,11 @@ def valid_price_bars(frame: pd.DataFrame, *, require_volume: bool = False) -> pd
     if missing:
         raise ValueError(f"Missing required price columns: {sorted(missing)}")
     numeric = frame[list(required)].apply(pd.to_numeric, errors="coerce")
+    # Python booleans are subclasses of integers, but ``True`` is not a
+    # legitimate OHLC price or trading volume. Do not turn it into 1.0.
+    booleans = frame[list(required)].apply(
+        lambda column: column.map(lambda value: isinstance(value, (bool, np.bool_)))
+    ).any(axis=1)
     finite = pd.Series(np.isfinite(numeric.to_numpy(dtype=float)).all(axis=1), index=frame.index)
     positive = numeric[list(PRICE_COLUMNS)].gt(0).all(axis=1)
     coherent = (
@@ -28,4 +33,4 @@ def valid_price_bars(frame: pd.DataFrame, *, require_volume: bool = False) -> pd
     )
     if require_volume:
         positive &= numeric["Volume"].ge(0)
-    return finite & positive & coherent
+    return finite & positive & coherent & ~booleans

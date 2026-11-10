@@ -43,15 +43,21 @@ Validation also rejects a ticker if every one of its price bars is invalid.
 Single-ticker selection is applied before validating OHLCV records and dates,
 so unrelated symbols cannot cause a selected ticker's run to fail. Every
 bundled per-ticker CSV uses the full 31-stock dataset's reference calendar,
-assembled from its validated weekday OHLCV observations. Therefore its labels
+assembled from weekday dates with valid ticker identifiers. Incomplete price
+bars still establish their source date as a potential market session, so an
+invalid-only date is excluded from the price sample without compressing time.
+Malformed dates and invalid ticker identifiers cannot contaminate the
+reference calendar. Therefore its labels
 and session positions agree with the same ticker selected from the combined
-source, even when individual stock files omit sessions. For custom sources,
-missing `Session_Number` metadata triggers conservative weekday positions;
-weekend rows are rejected and missing weekdays are never compressed into one
-session. Some exchange holidays can be treated as gaps without an explicit
-exchange calendar; provide verified `Session_Number` for exact exchange-specific
-adjacency. Invalid records from unrelated tickers do not contribute dates to
-the calendar. Literal symbols such as `NA` remain ticker identifiers instead
+source, even when individual stock files omit sessions. Custom CSVs, including
+new files placed in `data/raw/`, are not mistaken for bundled originals.
+Without `Session_Number`, date-only U.S. equity inputs use an NYSE holiday
+calendar, including exceptional closures, rather than counting holidays as
+trading sessions. Observed weekdays remain eligible for other exchanges, and
+missing regular market weekdays remain gaps. For exact exchange-specific
+adjacency, callers may provide verified `Session_Number`. Weekend rows are
+rejected even when session positions are supplied. Invalid source identifiers
+do not contribute dates to the calendar. Literal symbols such as `NA` remain ticker identifiers instead
 of being parsed as missing values, while missing-name placeholders such as
 `N/A`, `NaN`, `NULL`, `<NA>`, and malformed symbols are rejected by all four
 input paths: raw data validation, direct
@@ -65,11 +71,12 @@ exclusion and subsetting,
 allowing indicators, HMM segment boundaries, and the trading simulator to detect
 missing sessions. Custom input dates with no session column use weekday
 positions for those same calculations. Supplied session positions are checked for a
-globally increasing one-to-one correspondence with market dates.
+globally increasing one-to-one correspondence with weekday market dates.
 Direct indicator calls validate positive, finite, internally coherent OHLC
 prices, normalize accepted numeric strings, and check supplied session positions;
 Volume remains optional for that standalone API but is checked for finite
-nonnegative values when supplied.
+nonnegative values when supplied. Boolean OHLCV values are rejected instead
+of being silently converted to numeric ones or zeros.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
@@ -106,9 +113,12 @@ model-training step.
 
 The [EDA notebook](../notebooks/EDA_Preprocessing.ipynb) displays the raw
 missingness and the validator's retained/excluded row counts. Its histogram
-uses daily percentage returns, and its box plots compare percentage returns
-within each ticker rather than mixing stocks' nominal closing prices. Returns
-spanning invalid source sessions are omitted from those comparisons.
+uses daily percentage returns from the exact same bundled market-session
+calendar as the modeling pipeline (93,228 available close-to-close returns),
+and its box plots compare those percentage returns within each ticker rather
+than mixing stocks' nominal closing prices. Returns spanning invalid source
+sessions are omitted from those comparisons. Its CSV path resolves correctly
+from both the repository root and the notebook directory.
 
 ## 2. Bayesian-network experiment
 
@@ -196,7 +206,7 @@ residuals before squaring to avoid avoidable intermediate overflow.
 
 ## 4. Q-learning experiment
 
-The same notebook fits three-bin quantiles on AAPL's training-period consecutive-session return and RSI, combines those two binned features with the filtered HMM regime and the current position, and trains the tabular policy for 75 passes across separate contiguous training segments. A gap in the feature-eligible rows ends an episode instead of allowing execution several market sessions later. Each segment starts flat; its final position is marked to market without an assumed sale. These columns, `Return_binned`, `RSI_14_binned`, and `Market_Regime`, also form the environment's default state schema when present.
+The same notebook fits three-bin quantiles on AAPL's training-period consecutive-session return and RSI, combines those two binned features with the filtered HMM regime and the current position, and trains the tabular policy for 75 passes across separate contiguous training segments. A gap in feature-eligible training **or test** rows ends an episode instead of allowing execution several market sessions later. Each segment starts flat; its final position is marked to market without an assumed sale. The frozen-policy test P/L and next-open buy-and-hold comparator sum comparable per-segment results, excluding isolated one-bar fragments where no trading step is possible. For the bundled AAPL holdout, all test bars are contiguous and the published totals remain unchanged. These columns, `Return_binned`, `RSI_14_binned`, and `Market_Regime`, also form the environment's default state schema when present.
 The training chart's horizontal axis counts **75 training passes**, each
 aggregating the rewards of all segment episodes in that pass; it does not count
 individual segment episodes.
@@ -258,7 +268,11 @@ CPT predictions, package imports, unsigned HMM session validation,
 segment-consistent prefix-invariant HMM filtering, legal trading actions,
 consecutive trading steps, next-open rewards and transaction costs, immutable
 holdout evaluation, terminal Q-learning updates, notebook environment isolation,
-complete synthetic-data experiments, and saved notebook outputs.
+complete synthetic-data experiments, and saved notebook outputs. Additional
+regressions cover exchange holiday closures, invalid-only bundled dates,
+unrelated malformed records, custom CSV detection, weekend metadata,
+boolean OHLCV inputs, source-calendar cache invalidation, and segmented
+holdout trading.
 
 The same checks run automatically through [GitHub Actions](../.github/workflows/python-checks.yml) on pushes and pull requests. To regenerate the GitHub-visible notebook tables and figures, run:
 

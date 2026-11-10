@@ -1,0 +1,74 @@
+"""Exchange-aware daily session positions for date-only U.S. equity inputs.
+
+NYSE regular holidays and exceptional full-day closures are omitted from the
+reference calendar. Observed weekdays are included as well, since a custom
+source may describe another exchange with a different holiday schedule.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+import pandas as pd
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar,
+    GoodFriday,
+    Holiday,
+    MO,
+    TH,
+    nearest_workday,
+    sunday_to_monday,
+)
+from pandas.tseries.offsets import CustomBusinessDay, DateOffset
+
+
+class _NYSEHolidays(AbstractHolidayCalendar):
+    rules = [
+        Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),
+        Holiday("Martin Luther King Jr. Day", month=1, day=1,
+                offset=DateOffset(weekday=MO(3))),
+        Holiday("Washington's Birthday", month=2, day=1,
+                offset=DateOffset(weekday=MO(3))),
+        GoodFriday,
+        Holiday("Memorial Day", month=5, day=31,
+                offset=DateOffset(weekday=MO(-1))),
+        Holiday("Juneteenth", month=6, day=19, start_date="2022-01-01",
+                observance=nearest_workday),
+        Holiday("Independence Day", month=7, day=4, observance=nearest_workday),
+        Holiday("Labor Day", month=9, day=1,
+                offset=DateOffset(weekday=MO(1))),
+        Holiday("Thanksgiving", month=11, day=1,
+                offset=DateOffset(weekday=TH(4))),
+        Holiday("Christmas Day", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+# Special NYSE market-wide closures beyond the regular recurring holidays.
+_EXCEPTIONAL_CLOSURES = pd.DatetimeIndex([
+    "2001-09-11", "2001-09-12", "2001-09-13", "2001-09-14",
+    "2004-06-11", "2007-01-02", "2012-10-29", "2012-10-30",
+    "2018-12-05", "2025-01-09",
+])
+
+
+@lru_cache(maxsize=32)
+def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
+    recurring_holidays = _NYSEHolidays().holidays(start=start, end=end)
+    exceptions = _EXCEPTIONAL_CLOSURES[
+        (_EXCEPTIONAL_CLOSURES >= start) & (_EXCEPTIONAL_CLOSURES <= end)
+    ]
+    closure_days = recurring_holidays.union(exceptions)
+    return pd.bdate_range(start, end, freq=CustomBusinessDay(holidays=closure_days))
+
+
+def inferred_equity_sessions(dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """Include scheduled NYSE sessions plus dates explicitly observed by a caller.
+
+    Thus an absent genuine holiday does not create a fictional gap, while an
+    omitted ordinary market weekday still creates one. Observed weekdays stay
+    eligible for non-NYSE sources unless the caller supplies exact ordinals.
+    """
+    if dates.empty:
+        return pd.DatetimeIndex([])
+    scheduled = _scheduled_sessions(dates.min(), dates.max())
+    return scheduled.union(dates.unique()).sort_values()

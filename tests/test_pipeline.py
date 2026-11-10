@@ -34,7 +34,7 @@ from model_training import (  # noqa: E402
     BASELINE_FEATURES, QuantileBinner, chronological_split,
     classification_metrics, fit_network, predict_up_probability, run_experiment,
 )
-from rl_agent import QLearningAgent, SimpleTradingEnv  # noqa: E402
+from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
 from technical_indicators import add_technical_indicators  # noqa: E402
 
 
@@ -575,7 +575,8 @@ def test_hmm_notebook_keeps_causal_observations_purged_from_supervised_splits():
     assert "indicator_history = prepare_indicator_history" in source
     assert "split = chronological_split(features)" in source
     assert "history_regimes['Date'] > split.validation_end" in source
-    assert "training.groupby(training['Session_Number'].diff().ne(1).cumsum())" in source
+    assert "training_segments = contiguous_trading_segments(training)" in source
+    assert "testing_segments = contiguous_trading_segments(testing)" in source
     assert "train_envs = [SimpleTradingEnv(group" in source
     assert "xlabel='Training pass'" in source
 
@@ -1596,7 +1597,7 @@ def test_eda_notebook_uses_validated_percent_returns_and_reports_exclusions():
 
     notebook = nbformat.read(ROOT / "notebooks" / "EDA_Preprocessing.ipynb", as_version=4)
     cells = [cell for cell in notebook.cells if cell.cell_type == "code"]
-    audit = [cell for cell in cells if "validate_bars(df)" in cell.source]
+    audit = [cell for cell in cells if "cleaned = load_data(DEFAULT_RAW_DATA)" in cell.source]
     assert len(audit) == 1
     assert "177" in "".join(
         str(output.get("data", {})) for output in audit[0].outputs
@@ -1607,6 +1608,176 @@ def test_eda_notebook_uses_validated_percent_returns_and_reports_exclusions():
     assert "returns" in histograms[0].source
     assert "ticker_returns" in boxplots[0].source
     assert "df['Close']" not in histograms[0].source + boxplots[0].source
+
+
+@pytest.mark.parametrize("start,end", [
+    ("2006-01-13", "2006-01-17"),  # Martin Luther King Jr. Day
+    ("2024-03-28", "2024-04-01"),  # Good Friday
+    ("2012-10-26", "2012-10-31"),  # Hurricane Sandy market closure
+    ("2025-01-08", "2025-01-10"),  # National day of mourning
+])
+def test_date_only_equities_respect_real_market_holidays(start, end):
+    bars = pd.DataFrame({
+        "Date": [start, end], "Name": ["AAPL", "AAPL"],
+        "Open": [10.0, 11.0], "High": [11.0, 13.0],
+        "Low": [9.0, 10.5], "Close": [10.5, 12.0], "Volume": [100, 100],
+    })
+    clean = validate_bars(bars)
+    assert clean["Session_Number"].tolist() == [0, 1]
+    history = prepare_indicator_history(clean)
+    assert history["Return"].iloc[1] == pytest.approx(12 / 10.5 - 1)
+    assert SimpleTradingEnv(bars).data["Date"].dt.strftime("%Y-%m-%d").tolist() == [start, end]
+
+
+def test_date_only_equities_still_detect_missing_ordinary_market_sessions():
+    bars = pd.DataFrame({
+        "Date": ["2024-01-12", "2024-01-17"], "Name": ["AAPL"] * 2,
+        "Open": [10.0, 11.0], "High": [11.0, 13.0],
+        "Low": [9.0, 10.5], "Close": [10.5, 12.0], "Volume": [100, 100],
+    })
+    clean = validate_bars(bars)
+    assert clean["Session_Number"].tolist() == [0, 2]
+    assert pd.isna(prepare_indicator_history(clean)["Return"].iloc[1])
+    with pytest.raises(ValueError, match="consecutive market sessions"):
+        SimpleTradingEnv(bars)
+
+
+def test_inferred_nyse_holidays_match_every_bundled_market_date():
+    from market_calendar import _scheduled_sessions
+
+    raw = pd.read_csv(DEFAULT_RAW_DATA, usecols=["Date"])
+    observed = pd.DatetimeIndex(pd.to_datetime(raw["Date"]).unique()).sort_values()
+    scheduled = _scheduled_sessions(observed.min(), observed.max())
+    assert scheduled.equals(observed)
+
+
+def test_bundled_calendar_ignores_unrelated_invalid_dates_and_ticker_names(tmp_path, monkeypatch):
+    import data_processing as processing
+
+    reference = pd.DataFrame({
+        "Date": ["2006-01-13", "2006-01-17", "not-a-date", "2006-01-16"],
+        "Name": ["AAPL", "AAPL", "BBB", "N/A"],
+        "Open": [10.0] * 4, "High": [12.0] * 4,
+        "Low": [9.0] * 4, "Close": [11.0] * 4, "Volume": [100] * 4,
+    })
+    combined = tmp_path / DEFAULT_RAW_DATA.name
+    reference.to_csv(combined, index=False)
+    monkeypatch.setattr(processing, "DEFAULT_RAW_DATA", combined)
+    selected = processing.load_data(combined, tickers=("AAPL",))
+    assert selected["Session_Number"].tolist() == [0, 1]
+    with pytest.raises(ValueError, match="parseable ISO calendar dates"):
+        processing.load_data(combined)
+
+
+def test_custom_csv_in_data_raw_is_not_misidentified_as_bundled(tmp_path, monkeypatch):
+    import data_processing as processing
+
+    bundled = tmp_path / DEFAULT_RAW_DATA.name
+    bundled.write_text(
+        "Date,Name,Open,High,Low,Close,Volume\n"
+        "2006-01-13,AAPL,10,12,9,11,100\n",
+        encoding="utf-8",
+    )
+    custom = tmp_path / "my_custom_equity_data.csv"
+    custom.write_text(
+        "Date,Name,Open,High,Low,Close,Volume\n"
+        "2024-01-12,AAPL,10,12,9,11,100\n"
+        "2024-01-16,AAPL,11,13,10,12,100\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(processing, "DEFAULT_RAW_DATA", bundled)
+    assert not processing._is_bundled_raw_csv(custom)
+    assert processing.load_data(custom)["Session_Number"].tolist() == [0, 1]
+
+
+def test_bundled_invalid_only_weekday_is_excluded_without_compressing_time(tmp_path, monkeypatch):
+    import data_processing as processing
+
+    combined = tmp_path / DEFAULT_RAW_DATA.name
+    combined.write_text(
+        "Date,Name,Open,High,Low,Close,Volume\n"
+        "2024-01-09,AAPL,10,12,9,11,100\n"
+        "2024-01-10,AAPL,10,-1,9,11,100\n"
+        "2024-01-11,AAPL,11,13,10,12,100\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(processing, "DEFAULT_RAW_DATA", combined)
+    selected = processing.load_data(combined, tickers=("AAPL",))
+    assert selected["Session_Number"].tolist() == [0, 2]
+    assert pd.isna(prepare_indicator_history(selected)["Return"].iloc[1])
+
+
+def test_bundled_reference_calendar_cache_changes_with_source_bytes(tmp_path, monkeypatch):
+    import data_processing as processing
+
+    combined = tmp_path / DEFAULT_RAW_DATA.name
+    header = "Date,Name,Open,High,Low,Close,Volume\n"
+    first = "2024-01-09,AAPL,10,12,9,11,100\n"
+    last = "2024-01-11,AAPL,11,13,10,12,100\n"
+    combined.write_text(header + first + last, encoding="utf-8")
+    monkeypatch.setattr(processing, "DEFAULT_RAW_DATA", combined)
+    assert len(processing._bundled_session_calendar()) == 2
+    combined.write_text(header + first + "2024-01-10,AAPL,10,12,9,11,100\n" + last,
+                        encoding="utf-8")
+    assert len(processing._bundled_session_calendar()) == 3
+
+
+def test_supplied_session_ordinals_do_not_allow_weekend_stock_bars():
+    bars = pd.DataFrame({
+        "Date": ["2024-01-12", "2024-01-13"], "Name": ["AAPL"] * 2,
+        "Open": [10.0, 11.0], "High": [12.0, 13.0],
+        "Low": [9.0, 10.0], "Close": [11.0, 12.0], "Volume": [100, 100],
+        "Session_Number": [0, 1],
+    })
+    with pytest.raises(ValueError, match="weekdays"):
+        validate_bars(bars)
+    with pytest.raises(ValueError, match="weekdays"):
+        add_technical_indicators(bars)
+    with pytest.raises(ValueError, match="weekdays"):
+        SimpleTradingEnv(bars)
+
+
+def test_boolean_market_prices_and_volumes_are_never_interpreted_as_numbers():
+    bars = pd.DataFrame({
+        "Date": ["2024-01-09", "2024-01-10"], "Name": ["AAPL"] * 2,
+        "Open": [True, 10.0], "High": [12.0, 12.0],
+        "Low": [0.5, 9.0], "Close": [11.0, 11.0], "Volume": [100, 100],
+    })
+    assert len(validate_bars(bars)) == 1
+    with pytest.raises(ValueError, match="Indicator OHLC prices"):
+        add_technical_indicators(bars)
+    with pytest.raises(ValueError, match="booleans"):
+        SimpleTradingEnv(bars)
+    volume_boolean = bars.assign(Open=[10.0, 10.0], Volume=[True, 100])
+    assert len(validate_bars(volume_boolean)) == 1
+
+
+def test_holdout_trading_is_split_into_independent_contiguous_episodes():
+    rows = pd.DataFrame({
+        "Date": pd.bdate_range("2024-01-08", periods=6),
+        "Name": ["AAPL"] * 6, "Open": [10.0] * 6,
+        "Close": [11.0] * 6, "Session_Number": [0, 1, 3, 4, 6, 8],
+    })
+    segments = contiguous_trading_segments(rows)
+    assert [segment["Session_Number"].tolist() for segment in segments] == [[0, 1], [3, 4]]
+    policy = QLearningAgent(epsilon=0.0)
+    original_table = copy.deepcopy(policy.q_table)
+    rewards = [policy.simulate_episode(SimpleTradingEnv(segment), train=False)
+               for segment in segments]
+    assert len(rewards) == 2
+    assert policy.q_table == original_table
+
+
+def test_eda_source_uses_repo_root_and_the_model_pipeline_calendar():
+    import nbformat
+
+    notebook = nbformat.read(ROOT / "notebooks/EDA_Preprocessing.ipynb", as_version=4)
+    source = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
+    assert "df = pd.read_csv(root / 'data/raw/" in source
+    assert "cleaned = load_data(DEFAULT_RAW_DATA)" in source
+    assert "cleaned = validate_bars(df)" not in source
+    reference = prepare_indicator_history(load_data(DEFAULT_RAW_DATA))
+    assert reference["Return"].notna().sum() == 93_228
 
 
 def test_direct_indicators_detect_missing_weekdays_without_session_metadata():

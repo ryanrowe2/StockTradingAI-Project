@@ -58,6 +58,10 @@ class SimpleTradingEnv:
         if any(next_position != position + 1
                for position, next_position in pairwise(positions)):
             raise ValueError("Trading observations must occupy consecutive market sessions")
+        if self.data[["Open", "Close"]].apply(
+            lambda column: column.map(lambda value: isinstance(value, (bool, np.bool_)))
+        ).any().any():
+            raise ValueError("Open/close prices must be numeric prices, not booleans")
         prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
         if not np.isfinite(prices).all() or np.any(prices <= 0):
             raise ValueError("Open/close prices must be finite and positive")
@@ -121,6 +125,17 @@ class SimpleTradingEnv:
         return self.get_state(), float(reward), self.done, {
             "position": self.position, "fee": fee, "execution_price": execution_price,
         }
+
+
+def contiguous_trading_segments(data: pd.DataFrame) -> list[pd.DataFrame]:
+    """Create independently tradable episodes without crossing missing sessions."""
+    if data.empty:
+        return []
+    ordered = data.sort_values("Date") if "Date" in data else data
+    validate_session_positions(ordered)
+    positions = session_positions(ordered)
+    boundaries = positions.diff().ne(1).cumsum()
+    return [group.copy() for _, group in ordered.groupby(boundaries) if len(group) >= 2]
 
 
 class QLearningAgent:
