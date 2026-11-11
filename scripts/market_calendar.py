@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import exchange_calendars as exchange_calendars
+
 import numpy as np
 import pandas as pd
 from pandas.tseries.holiday import (
@@ -119,34 +121,96 @@ def validate_nyse_open_dates(dates: pd.DatetimeIndex) -> None:
         )
 
 
+# Explicit aliases for exchanges whose actual scheduled sessions are known.
+_US_EQUITY_EXCHANGES = frozenset({"NYSE", "XNYS", "NASDAQ", "XNAS"})
+_LONDON_EXCHANGES = frozenset({"LSE", "XLON"})
+
+
+@lru_cache(maxsize=64)
+def _london_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
+    """Use the authoritative London Stock Exchange trading calendar.
+
+    Padding prevents a one-day date range or a range beginning on a holiday
+    from being rejected by the calendar constructor.
+    """
+    calendar = exchange_calendars.get_calendar(
+        "XLON", start=start - pd.Timedelta(days=14), end=end + pd.Timedelta(days=14)
+    )
+    return pd.DatetimeIndex(calendar.sessions_in_range(start, end))
+
+
+def exchange_open_mask(dates: pd.DatetimeIndex, exchange: str | None = None) -> np.ndarray:
+    """Check session validity for known exchanges; unknown exchanges need ordinals.
+
+    When Exchange is absent, the documented default is U.S. equities, not an
+    arbitrary international exchange. Historical pre-1971 sessions with
+    supplied ordinals retain the project’s existing partial calendar policy.
+    """
+    label = "NYSE" if exchange is None else exchange.strip().upper()
+    if label in _US_EQUITY_EXCHANGES:
+        return nyse_open_mask(dates)
+    if label in _LONDON_EXCHANGES:
+        modern = dates >= pd.Timestamp("1971-01-01")
+        historical_saturday = (dates.dayofweek == 5) & (
+            dates <= LAST_NYSE_SATURDAY_SESSION
+        )
+        valid = ~pd.isna(dates) & ((dates.dayofweek < 5) | historical_saturday)
+        if modern.any():
+            observed = dates[modern]
+            sessions = _london_sessions(observed.min(), observed.max())
+            valid[modern] = observed.isin(sessions)
+        return valid
+    # Do not pretend to know a custom market's holidays or its exact ordinals.
+    # Explicitly observed weekdays are possible sessions; callers requiring
+    # exact adjacency for an unknown exchange must provide Session_Number.
+    return ~pd.isna(dates) & (dates.dayofweek < 5)
+
+
+def validate_exchange_open_dates(
+    dates: pd.DatetimeIndex, exchange: str | None = None
+) -> None:
+    """Reject invalid daily sessions for the declared exchange."""
+    impossible = dates[~exchange_open_mask(dates, exchange)]
+    if not impossible.empty:
+        label = exchange or "NYSE (default U.S. equity calendar)"
+        raise ValueError(
+            f"{label} observations contain a closed-market date: {impossible[0].date()}"
+        )
+
+
 def inferred_equity_sessions(
     dates: pd.DatetimeIndex,
     *,
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
     nyse_only: bool = False,
+    exchange: str | None = None,
 ) -> pd.DatetimeIndex:
-    """Include scheduled NYSE sessions plus dates explicitly observed by a caller.
+    """Infer sessions for known exchanges, or a conservative custom-market fallback.
 
-    Thus an absent genuine holiday does not create a fictional gap, while an
-    omitted ordinary market weekday still creates one. Observed weekdays stay
-    eligible for non-NYSE sources unless the caller supplies exact ordinals.
+    Inferred dates must themselves be valid sessions. U.S. stocks without an
+    Exchange label use the NYSE/Nasdaq regular-market schedule; declared LSE
+    stocks use the London Stock Exchange schedule. For unknown exchanges,
+    observed weekdays are retained alongside the U.S. weekday baseline;
+    verified Session_Number metadata is required for exact custom adjacency.
     """
     if dates.empty:
         return pd.DatetimeIndex([])
+    if pd.isna(dates).any() or (dates.dayofweek >= 5).any():
+        raise ValueError("Trading dates must be nonmissing weekday market sessions")
     first = dates.min() if start is None else start
+    last = dates.max() if end is None else end
     if first < pd.Timestamp("1971-01-01"):
-        # Earlier NYSE holidays and special schedules were materially different
-        # (including the 1968 Wednesday closures). Inferring a modern calendar
-        # would silently invent sessions. Historical callers must provide
-        # independently verified market-session ordinals instead.
         raise ValueError(
             "NYSE dates before 1971 require verified Session_Number metadata"
         )
-    if nyse_only:
-        validate_nyse_open_dates(dates)
-    scheduled = _scheduled_sessions(
-        first,
-        dates.max() if end is None else end,
-    )
+    label = "NYSE" if exchange is None or nyse_only else exchange.strip().upper()
+    if label in _LONDON_EXCHANGES:
+        scheduled = _london_sessions(first, last)
+        validate_exchange_open_dates(dates, label)
+        return scheduled
+    scheduled = _scheduled_sessions(first, last)
+    if label in _US_EQUITY_EXCHANGES:
+        validate_exchange_open_dates(dates, label)
+        return scheduled
     return scheduled.union(dates.unique()).sort_values()

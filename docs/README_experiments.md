@@ -80,7 +80,7 @@ and session positions agree with the same ticker selected from the combined
 source, even when individual stock files omit sessions. Custom CSVs, including
 new files placed in `data/raw/`, are not mistaken for bundled originals.
 Without `Session_Number`, date-only U.S. equity inputs from 1971 onward use an
-NYSE holiday calendar, including historical presidential Election Day closures
+NYSE/Nasdaq holiday calendar, including historical presidential Election Day closures
 from 1972 to 1980 and exceptional full-day closures, rather than counting
 holidays as trading sessions. The MLK holiday rule begins in 1998. Dates before
 1971 require independently verified `Session_Number` metadata: the older NYSE
@@ -88,16 +88,23 @@ holiday schedule, including the 1968 Wednesday closures, cannot be accurately
 inferred using the modern weekday calendar. An optional `Exchange` column
 allows the same exchange's observed sessions to reveal gaps in other stocks on
 that exchange, while preventing foreign-exchange dates from contaminating NYSE
-history. When the declared exchange is `NYSE` or `XNYS`, observations on
-known closed-market dates are rejected, with or without supplied ordinals.
+history. The aliases `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S.
+calendar, including when `Exchange` is omitted. The aliases `LSE` and `XLON`
+use the London Stock Exchange session calendar (including Boxing Day).
+Observed dates outside any recognized market's actual calendar are rejected,
+with or without supplied ordinals. Unrecognized explicit exchange labels retain
+the earlier observed-weekday fallback and require verified `Session_Number`
+metadata for trustworthy exact adjacency.
 From 1971 onward, supplied NYSE ordinals must also advance by the exact number
 of scheduled market sessions between observations, preventing missing trading
 days from being concealed by compressed consecutive session numbers.
-For custom CSV ticker selection, impossible NYSE dates belonging only to
-unselected peers are ignored as calendar evidence; valid same-exchange dates
-still reveal missing sessions in the selected ticker.
-Without `Exchange`, extra observed weekdays remain ticker-specific;
-for exact non-NYSE calendars, provide verified `Session_Number`. Historical NYSE
+For custom CSV ticker selection, impossible closed-market observations on a
+recognized exchange belonging only to unselected peers are ignored as calendar
+evidence; valid same-exchange dates still reveal missing sessions in the selected
+ticker.
+Without `Exchange`, U.S. market holidays are enforced, including for
+caller-supplied `Session_Number` values. For exact unsupported exchange
+calendars, declare an exchange and provide verified `Session_Number`. Historical NYSE
 Saturday trading is supported through its last actual Saturday session on
 1952-05-24, but only with independently verified `Session_Number` metadata;
 later Saturdays and all Sundays are rejected. Invalid source identifiers
@@ -114,8 +121,9 @@ including valid non-zero-padded ISO strings.
 In the included 93,612-row source, 93,435 bars pass OHLCV validation;
 177 incomplete or inconsistent records are excluded without imputation.
 Before exclusion, validation assigns `Session_Number` from the bundled
-observed-session calendar or an NYSE-holiday-aware scheduled calendar that also
-retains weekdays observed within each declared exchange or ticker. Source-wide
+observed-session calendar or the recognized exchange's scheduled calendar.
+Unknown explicit exchanges retain observed weekday information, and callers
+must supply verified ordinals for reliable exact adjacency. Source-wide
 valid dates anchor ordinals before ticker selection, so the same custom stock
 has identical session numbers in full and selected CSV loads. Positions survive
 price exclusion and subsetting, allowing indicators, HMM boundaries, and the

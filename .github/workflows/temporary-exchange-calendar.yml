@@ -1,0 +1,104 @@
+name: One-time exchange calendar dependency lock
+
+on:
+  push:
+    branches: [Milestone3]
+    paths: [.github/workflows/temporary-exchange-calendar.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  lock-and-verify:
+    if: github.event.head_commit.message == 'maintenance-exchange-calendar-lock'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install existing verified dependencies and exchange calendar
+        run: |
+          python -m pip install --require-hashes -r requirements-repro-py312.txt
+          python -m pip install 'exchange-calendars==4.13.1'
+          python -m pip check
+      - name: Generate updated SHA256 lock from installed versions
+        run: |
+          python - <<'PY'
+          import hashlib
+          import importlib.metadata
+          import re
+          import subprocess
+          import sys
+          import tempfile
+          from pathlib import Path
+          from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
+
+          output = Path('requirements-repro-py312.txt')
+          requirements = {
+              canonicalize_name(line.split('==', 1)[0]): line.split('==', 1)[1].split()[0]
+              for line in output.read_text(encoding='utf-8').splitlines()
+              if line.strip() and not line.startswith('#')
+          }
+          additional = (
+              'exchange-calendars', 'pyluach', 'toolz', 'korean-lunar-calendar',
+          )
+          for name in additional:
+              requirements[canonicalize_name(name)] = importlib.metadata.version(name)
+          pins = [f'{name}=={version}' for name, version in sorted(requirements.items())]
+          with tempfile.TemporaryDirectory() as temporary:
+              root = Path(temporary)
+              unverified = root / 'requirements.txt'
+              unverified.write_text('\n'.join(pins) + '\n', encoding='utf-8')
+              artifacts = root / 'distributions'
+              artifacts.mkdir()
+              subprocess.run(
+                  [sys.executable, '-m', 'pip', 'download', '--no-deps',
+                   '-r', str(unverified), '-d', str(artifacts)],
+                  check=True,
+              )
+              found = {}
+              for item in artifacts.iterdir():
+                  try:
+                      name, version, _, _ = parse_wheel_filename(item.name)
+                  except ValueError:
+                      name, version = parse_sdist_filename(item.name)
+                  key = (canonicalize_name(name), str(version))
+                  if key in found:
+                      raise RuntimeError(f'Multiple artifacts for {key}')
+                  found[key] = hashlib.sha256(item.read_bytes()).hexdigest()
+              rows = []
+              for name, version in sorted(requirements.items()):
+                  sha = found.pop((name, version))
+                  rows.append(f'{name}=={version} --hash=sha256:{sha}')
+              if found:
+                  raise RuntimeError(f'Unexpected distributions: {found.keys()}')
+          header = [
+              '# Verified Python 3.12 / Ubuntu 24.04 (Linux x86_64) wheels.',
+              '# Exact versions and SHA256 distribution hashes.',
+              '# Other Python versions or platforms use requirements-dev.txt.',
+          ]
+          output.write_text('\n'.join(header + rows) + '\n', encoding='utf-8')
+          print('Locked', len(rows), 'packages')
+          PY
+          python -m pip install --require-hashes --force-reinstall -r requirements-repro-py312.txt
+          python -m pip check
+      - name: Format and verify the complete project
+        run: |
+          python -m ruff format --target-version py310 scripts tests
+          python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
+          python -m ruff format --check --target-version py310 scripts tests
+          python -m compileall -q scripts tests
+          python -m coverage run --source=scripts -m pytest tests -q
+          python -m coverage report --fail-under=90
+          python -m scripts.refresh_notebooks --check
+          python -m scripts.model_training --ticker AAPL
+      - name: Publish validated formatting and dependency lock
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts tests requirements-repro-py312.txt
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m "test: verify calendars and hash-lock exchange dependencies"
+          git push origin HEAD:Milestone3

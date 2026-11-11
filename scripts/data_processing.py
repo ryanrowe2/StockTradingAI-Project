@@ -18,7 +18,7 @@ import pandas as pd
 if __package__:
     from .technical_indicators import add_technical_indicators
     from .date_validation import parse_daily_dates
-    from .market_calendar import nyse_open_mask
+    from .market_calendar import exchange_open_mask
     from .price_validation import valid_price_bars
     from .session_validation import (
         adjacent_session_flags,
@@ -30,7 +30,7 @@ if __package__:
 else:
     from technical_indicators import add_technical_indicators
     from date_validation import parse_daily_dates
-    from market_calendar import nyse_open_mask
+    from market_calendar import exchange_open_mask
     from price_validation import valid_price_bars
     from session_validation import (
         adjacent_session_flags,
@@ -171,17 +171,17 @@ def _custom_source_session_positions(
         )
         labels = reference["Exchange"].astype("string").str.strip().str.upper()
         reference = reference.loc[labels.isin(wanted)]
-        # Same-exchange peers help reveal missing real sessions, but a peer's
-        # fabricated trade on a closed NYSE day is not market-calendar evidence.
-        # Keep selected records intact so their own invalid dates still fail.
+        # Invalid peer observations cannot establish trading sessions for a
+        # selected ticker. Check each declared exchange independently, leaving
+        # the selected ticker's own invalid records intact for strict rejection.
         labels = labels.loc[reference.index]
-        nyse_peers = labels.isin(("NYSE", "XNYS")) & ~reference.index.isin(
-            source.index[selected_mask]
-        )
-        if nyse_peers.any():
-            peer_dates = pd.DatetimeIndex(reference.loc[nyse_peers, "Date"])
-            invalid_peers = reference.loc[nyse_peers].index[~nyse_open_mask(peer_dates)]
-            reference = reference.drop(index=invalid_peers)
+        peer_indices = reference.index[~reference.index.isin(source.index[selected_mask])]
+        invalid_peers = []
+        for exchange in labels.loc[peer_indices].unique():
+            indices = peer_indices[labels.loc[peer_indices].eq(exchange)]
+            dates = pd.DatetimeIndex(reference.loc[indices, "Date"])
+            invalid_peers.extend(indices[~exchange_open_mask(dates, str(exchange))])
+        reference = reference.drop(index=invalid_peers)
     else:
         reference = reference.loc[selected_mask]
     inferred = session_positions(reference, calendar_start=start, calendar_end=end)

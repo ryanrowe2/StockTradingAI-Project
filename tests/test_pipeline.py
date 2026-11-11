@@ -46,7 +46,7 @@ from model_training import (  # noqa: E402
     predict_up_probability,
     run_experiment,
 )
-from market_calendar import nyse_open_mask, validate_nyse_open_dates  # noqa: E402
+from market_calendar import _scheduled_sessions, nyse_open_mask, validate_nyse_open_dates  # noqa: E402
 from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
 from session_validation import (  # noqa: E402
     adjacent_session_flags,
@@ -71,7 +71,7 @@ def prepare_indicator_history(*args, **kwargs):
 
 
 def synthetic_bars(days: int = 130) -> pd.DataFrame:
-    dates = pd.bdate_range("2019-01-01", periods=days)
+    dates = _scheduled_sessions(pd.Timestamp("2019-01-01"), pd.Timestamp("2024-01-01"))[:days]
     frames = []
     for ticker, base in (("AAA", 30.0), ("BBB", 300.0)):
         index = np.arange(days)
@@ -2282,7 +2282,7 @@ def test_boolean_market_prices_and_volumes_are_never_interpreted_as_numbers():
 def test_holdout_trading_is_split_into_independent_contiguous_episodes():
     rows = pd.DataFrame(
         {
-            "Date": pd.bdate_range("2024-01-08", periods=6),
+            "Date": _scheduled_sessions(pd.Timestamp("2024-01-08"), pd.Timestamp("2024-02-01"))[:6],
             "Name": ["AAPL"] * 6,
             "Open": [10.0] * 6,
             "Close": [11.0] * 6,
@@ -2591,6 +2591,7 @@ def test_mixed_exchange_holiday_does_not_contaminate_nyse_ticker(tmp_path: Path)
     source = pd.DataFrame(
         {
             "Name": ["AAA", "AAA", "BBB", "BBB", "BBB"],
+            "Exchange": ["NYSE"] * 2 + ["XTEST"] * 3,
             "Date": [
                 "2025-01-17",
                 "2025-01-21",
@@ -2628,6 +2629,7 @@ def test_mixed_exchange_explicit_ordinals_are_valid_per_ticker():
     source = pd.DataFrame(
         {
             "Name": names,
+            "Exchange": ["NYSE"] * 2 + ["XTEST"] * 3,
             "Date": dates,
             "Session_Number": [0, 1, 0, 1, 2],
             "Open": prices,
@@ -2831,7 +2833,7 @@ def test_trading_segments_never_combine_different_symbols():
 
 def test_next_session_targets_remain_exact_with_large_uint64_ordinals():
     count = 90
-    dates = pd.bdate_range("2025-01-02", periods=count)
+    dates = _scheduled_sessions(pd.Timestamp("2025-01-02"), pd.Timestamp("2026-01-01"))[:count]
     close = 100 + 0.1 * np.arange(count)
     bars = pd.DataFrame(
         {

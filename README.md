@@ -43,17 +43,21 @@ correspond to the same historical market periods. All bundled ticker CSVs use
 the observed-session calendar of the complete 31-stock source. It retains
 dates attached to valid ticker identifiers even when their prices are unusable,
 but excludes malformed dates and invalid ticker identifiers.
-Date-only custom equity data from 1971 onward use scheduled NYSE sessions,
+Date-only U.S. equity data from 1971 onward use scheduled NYSE/Nasdaq sessions,
 including effective-dated holidays, 1972–1980 presidential Election Day
-closures, and documented exceptional full-day closures. Explicitly NYSE-labeled
-inputs reject observations on known closed-market dates even when session
-ordinals are supplied. An optional
-`Exchange` column groups stocks on the same market, so an observed exchange
-session can expose a missing bar in another stock without contaminating a
-different exchange's calendar. Without `Exchange`, observed extra weekdays are
-retained only for the ticker that traded them. Callers can also supply verified
-`Session_Number` metadata, required for historical pre-1971 NYSE dates where
-automatic inference cannot safely reconstruct the older schedule. Close-to-close daily
+closures, and exceptional full-day closures. Observations on closed U.S. market
+dates are rejected even when `Exchange` is omitted or session ordinals are
+supplied. An optional `Exchange` column groups stocks on the same market:
+`NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S. calendar;
+`LSE` and `XLON` use the London Stock Exchange calendar, including Boxing Day.
+Other explicitly named exchanges retain the existing observed-weekday fallback;
+provide independently verified `Session_Number` metadata for exact session
+adjacency on those markets. A peer's fabricated closed-market observation
+cannot contaminate a selected stock's inferred calendar. When `Exchange` is
+omitted, U.S. equity market rules apply rather than accepting arbitrary
+observed holiday weekdays. Callers can supply verified `Session_Number`
+metadata, required for pre-1971 NYSE dates where automatic inference cannot
+safely reconstruct the historical schedule. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
 For `NYSE`/`XNYS` observations from 1971 onward, supplied ordinals must have
 the same spacing as actual scheduled market sessions, so an omitted Tuesday
@@ -77,9 +81,9 @@ DataFrame returned by `load_data()`, explicitly set
 `verified_datetime_dates=True` on either preparation function; unverified raw
 pandas timestamps must not use that opt-in. ISO daily strings, Python
 date objects, and explicit NumPy day-precision values are safe inputs to the
-raw-record API. When selecting a ticker from a custom CSV, an unrelated NYSE
-ticker's impossible closed-market observation is excluded from shared calendar
-inference, while the selected ticker's own invalid dates are still rejected.
+raw-record API. When selecting a ticker from a custom CSV, an unrelated stock's impossible
+closed-market observation on a recognized exchange is excluded from shared
+calendar inference, while the selected ticker's own invalid dates are rejected.
 The standalone NYSE calendar validator also rejects missing (`NaT`) dates.
 It rejects pre-1971 Sundays and Saturdays after the final May 1952 Saturday
 session; other pre-1971 sessions still require verified market ordinals.
@@ -237,9 +241,9 @@ are excluded without modifying the raw files.
 An additional `Session_Number` column preserves market-session positions through
 this exclusion. The bundled individual stock files use the complete dataset's
 observed-session calendar. Other CSVs, including new files inside `data/raw/`,
-use an NYSE-holiday-aware calendar that retains explicitly observed extra
-weekdays within a declared `Exchange`, or within one ticker when no exchange
-is specified. Full-source dates anchor inferred ordinals even when loading a
+use the recognized exchange's actual holiday calendar (defaulting to the
+U.S. market when `Exchange` is omitted). Unknown explicitly declared exchanges
+retain observed weekdays and require verified ordinals for exact adjacency. Full-source dates anchor inferred ordinals even when loading a
 ticker subset. Supplied session positions are checked for chronological
 uniqueness within each ticker or declared exchange and for valid daily dates,
 including historically verified Saturday trading before summer 1952;
@@ -309,7 +313,7 @@ StockTradingAI-Project/
 ├── notebooks/                     # EDA, model evaluation, HMM / RL experiments
 ├── scripts/
 │   ├── date_validation.py        # Explicit daily calendar date validation
-│   ├── market_calendar.py        # Holiday-aware U.S. equity session positions
+│   ├── market_calendar.py        # U.S. and London equity session calendars
 │   ├── price_validation.py       # Shared coherent-price checks
 │   ├── session_validation.py     # Consistent market-session metadata
 │   ├── ticker_validation.py      # Shared ticker-name normalization and checks
