@@ -102,3 +102,5 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "test: verify calendars and hash-lock exchange dependencies"
           git push origin HEAD:Milestone3
+
+# Retry after correcting the test import pragma.

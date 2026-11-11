@@ -46,7 +46,11 @@ from model_training import (  # noqa: E402
     predict_up_probability,
     run_experiment,
 )
-from market_calendar import _scheduled_sessions, nyse_open_mask, validate_nyse_open_dates  # noqa: E402
+from market_calendar import (  # noqa: E402
+    _scheduled_sessions,
+    nyse_open_mask,
+    validate_nyse_open_dates,
+)  # noqa: E402
 from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
 from session_validation import (  # noqa: E402
     adjacent_session_flags,
