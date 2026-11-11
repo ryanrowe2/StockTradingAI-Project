@@ -2909,7 +2909,7 @@ def test_walk_forward_rejects_too_few_bootstrap_dates_before_training(monkeypatc
     bars = validate_bars(
         pd.DataFrame(
             {
-                "Date": pd.bdate_range("2020-01-02", periods=count),
+                "Date": _scheduled_sessions(pd.Timestamp("2020-01-02"), pd.Timestamp("2021-01-01"))[:count],
                 "Name": ["AAA"] * count,
                 "Open": close - 0.2,
                 "High": close + 1,
@@ -3056,13 +3056,13 @@ def test_trading_segments_parse_dates_before_chronological_sorting():
     source = pd.DataFrame(
         {
             "Name": ["AAA"] * 3,
-            "Date": ["2025-01-9", "2025-01-10", "2025-01-13"],
+            "Date": ["2025-01-8", "2025-01-10", "2025-01-13"],
         }
     )
     segments = contiguous_trading_segments(source)
     assert len(segments) == 1
     assert segments[0].Date.dt.strftime("%Y-%m-%d").tolist() == [
-        "2025-01-09",
+        "2025-01-08",
         "2025-01-10",
         "2025-01-13",
     ]

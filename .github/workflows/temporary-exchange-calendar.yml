@@ -104,3 +104,5 @@ jobs:
           git push origin HEAD:Milestone3
 
 # Retry after correcting the test import pragma.
+
+# Retry after correcting synthetic trading-day fixtures.

@@ -128,6 +128,13 @@ def validate_session_positions(
 
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
+        historic_saturday = (checked_dates.dayofweek == 5) & (
+            checked_dates <= LAST_NYSE_SATURDAY_SESSION
+        )
+        if ((checked_dates.dayofweek >= 5) & ~historic_saturday).any():
+            raise ValueError(
+                "Trading dates must fall on weekdays, except verified historical Saturday sessions"
+            )
         exchanges = _normalized_exchange_labels(frame)
         if exchanges is None:
             validate_exchange_open_dates(checked_dates)
