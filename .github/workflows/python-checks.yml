@@ -8,7 +8,7 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -22,16 +22,19 @@ jobs:
       - name: Install supported environment
         run: |
           if [ "${{ matrix.python-version }}" = "3.12" ]; then
-            python -m pip install -r requirements-repro-py312.txt
+            python -m pip install --require-hashes -r requirements-repro-py312.txt
           else
             python -m pip install -r requirements-dev.txt
           fi
-      - name: Run regression tests
-        run: python -m pytest tests -q
-      - name: Check Python syntax and static lint
+      - name: Run regression tests with coverage
+        run: |
+          python -m coverage run --source=scripts -m pytest tests -q
+          python -m coverage report --fail-under=90
+      - name: Check Python syntax, lint, and formatting
         run: |
           python -m compileall -q scripts tests
           python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
+          python -m ruff format --check --target-version py310 scripts tests
       - name: Verify pinned published experiments
         if: matrix.python-version == '3.12'
         run: |
