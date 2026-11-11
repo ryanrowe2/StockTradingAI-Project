@@ -175,7 +175,9 @@ def _custom_source_session_positions(
         # selected ticker. Check each declared exchange independently, leaving
         # the selected ticker's own invalid records intact for strict rejection.
         labels = labels.loc[reference.index]
-        peer_indices = reference.index[~reference.index.isin(source.index[selected_mask])]
+        peer_indices = reference.index[
+            ~reference.index.isin(source.index[selected_mask])
+        ]
         invalid_peers = []
         for exchange in labels.loc[peer_indices].unique():
             indices = peer_indices[labels.loc[peer_indices].eq(exchange)]

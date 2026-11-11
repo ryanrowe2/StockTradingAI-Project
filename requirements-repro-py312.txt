@@ -1,7 +1,6 @@
-# Python 3.12 / Ubuntu 24.04 (Linux x86_64): pinned with SHA256 hashes.
-# Generated from the previously verified pinned versions without upgrades.
-# Other platforms/Python versions use requirements-dev.txt.
-# Recreate the hashes only after independently checking downloaded artifacts.
+# Verified Python 3.12 / Ubuntu 24.04 (Linux x86_64) wheels.
+# Exact versions and SHA256 distribution hashes.
+# Other Python versions or platforms use requirements-dev.txt.
 anyio==4.16.0 --hash=sha256:c66ae634e0b8228396b801741beb3294326d4b6102f7bba4041c0dfb58c29026
 asttokens==3.0.2 --hash=sha256:9da13157f5b28becde0bd374fc677dcd3c290614264eff096f167c469cd9f933
 attrs==26.1.0 --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
@@ -11,6 +10,7 @@ contourpy==1.3.3 --hash=sha256:4d00e655fcef08aba35ec9610536bfe90267d7ab5ba944f70
 coverage==7.17.2 --hash=sha256:36314997533266bde3d07765289674304d61bfe49165bb1b4fa9be12cb4ba0d1
 cycler==0.12.1 --hash=sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30
 debugpy==1.8.22 --hash=sha256:8a697acec45dbc70d17fb5d9f4f61989fc294d273c69de487fd10cb35fdd75eb
+exchange-calendars==4.13.1 --hash=sha256:cf39d2128a4da3ac253283f91ab63d79930a68196a3aac811091a4e38b6cbe49
 executing==2.3.0 --hash=sha256:736e859c9f8701f11fcf516856f26f562e04776387824b43a35a1dfe21c84122
 fastjsonschema==2.22.3 --hash=sha256:f670b443830b75aca3f00b75949efa20f4b2a80302ec7a21505c28dd54cffd43
 filelock==4.2.9 --hash=sha256:a379c50a729e5b68c8519a4d26489f755d9769960a236ecd838190e2a78db2e9
@@ -36,6 +36,7 @@ jsonschema-specifications==2025.9.1 --hash=sha256:98802fee3a11ee76ecaca44429fda8
 jupyter-client==8.10.0 --hash=sha256:5f73f24f22fa25192cfff6b23c051932a2473a797b05734aff495b392103e14e
 jupyter-core==5.9.1 --hash=sha256:ebf87fdc6073d142e114c72c9e29a9d7ca03fad818c5d300ce2adc1fb0743407
 kiwisolver==1.4.9 --hash=sha256:f6008a4919fdbc0b0097089f67a1eb55d950ed7e90ce2cc3e640abadd2757a04
+korean-lunar-calendar==0.4.0 --hash=sha256:c042e20de0bb702add6bec8d0f6da1ea8d3b170838e63846f70420cf341fe4e7
 matplotlib==3.10.8 --hash=sha256:3ab4aabc72de4ff77b3ec33a6d78a68227bf1123465887f9905ba79184a1cc04
 matplotlib-inline==0.2.2 --hash=sha256:3c821cf1c209f59fb2d2d64abbf5b23b67bcb2210d663f9918dd851c6da1fcf6
 narwhals==2.28.0 --hash=sha256:1f69d6385ec30e2fa6e1fdeb37c562ecabd0f713f6f3e3b58a668c5c9df9567f
@@ -59,6 +60,7 @@ psutil==7.2.2 --hash=sha256:076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a
 ptyprocess==0.7.0 --hash=sha256:4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35
 pure-eval==0.2.4 --hash=sha256:96cae060a313cfaad51bb761278bfb0e62dc0248d9315a81173752dc546cd37a
 pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+pyluach==2.3.0 --hash=sha256:4497b731aef59508b079dbf5f00bc5bf4329ac45090a6cd37b5a83756f0e69ab
 pyparsing==3.3.2 --hash=sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d
 pytest==9.2.0 --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588
 python-dateutil==3.0.0 --hash=sha256:3c79630202e4152c6add678446984236efe4f57e84d8e892aab0637bab82e9fd
@@ -75,6 +77,7 @@ six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be89
 stack-data==0.6.3 --hash=sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695
 statsmodels==0.15.0 --hash=sha256:c6f2bd48915cc9b3b95c3c7f6ac363b6f8aaa38172962ba5f7f6885f0dfe57f2
 threadpoolctl==3.6.0 --hash=sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb
+toolz==1.2.0 --hash=sha256:890f820b1cb8152785aaf9386d8707770110809035800985ca65cb24ce1120ef
 tornado==6.6 --hash=sha256:11bb97c00981eb8254e55bd6a5ad960c983ae343fef8ae3ae5584cd1fb70236a
 tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
 traitlets==5.16.1 --hash=sha256:f775618166caa0396c8e337099240f2bd3e5e917d203b2e6fbe21a58d3cb1f6b

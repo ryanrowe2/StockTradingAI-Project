@@ -139,7 +139,9 @@ def validate_session_positions(
         if exchanges is None:
             validate_exchange_open_dates(checked_dates)
         else:
-            for exchange, indices in frame.groupby(exchanges, sort=False).indices.items():
+            for exchange, indices in frame.groupby(
+                exchanges, sort=False
+            ).indices.items():
                 validate_exchange_open_dates(checked_dates.take(indices), str(exchange))
 
     if SESSION_COLUMN not in frame:

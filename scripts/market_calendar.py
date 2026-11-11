@@ -139,7 +139,9 @@ def _london_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex
     return pd.DatetimeIndex(calendar.sessions_in_range(start, end))
 
 
-def exchange_open_mask(dates: pd.DatetimeIndex, exchange: str | None = None) -> np.ndarray:
+def exchange_open_mask(
+    dates: pd.DatetimeIndex, exchange: str | None = None
+) -> np.ndarray:
     """Check session validity for known exchanges; unknown exchanges need ordinals.
 
     When Exchange is absent, the documented default is U.S. equities, not an

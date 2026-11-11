@@ -75,7 +75,9 @@ def prepare_indicator_history(*args, **kwargs):
 
 
 def synthetic_bars(days: int = 130) -> pd.DataFrame:
-    dates = _scheduled_sessions(pd.Timestamp("2019-01-01"), pd.Timestamp("2024-01-01"))[:days]
+    dates = _scheduled_sessions(pd.Timestamp("2019-01-01"), pd.Timestamp("2024-01-01"))[
+        :days
+    ]
     frames = []
     for ticker, base in (("AAA", 30.0), ("BBB", 300.0)):
         index = np.arange(days)
@@ -2286,7 +2288,9 @@ def test_boolean_market_prices_and_volumes_are_never_interpreted_as_numbers():
 def test_holdout_trading_is_split_into_independent_contiguous_episodes():
     rows = pd.DataFrame(
         {
-            "Date": _scheduled_sessions(pd.Timestamp("2024-01-08"), pd.Timestamp("2024-02-01"))[:6],
+            "Date": _scheduled_sessions(
+                pd.Timestamp("2024-01-08"), pd.Timestamp("2024-02-01")
+            )[:6],
             "Name": ["AAPL"] * 6,
             "Open": [10.0] * 6,
             "Close": [11.0] * 6,
@@ -2837,7 +2841,9 @@ def test_trading_segments_never_combine_different_symbols():
 
 def test_next_session_targets_remain_exact_with_large_uint64_ordinals():
     count = 90
-    dates = _scheduled_sessions(pd.Timestamp("2025-01-02"), pd.Timestamp("2026-01-01"))[:count]
+    dates = _scheduled_sessions(pd.Timestamp("2025-01-02"), pd.Timestamp("2026-01-01"))[
+        :count
+    ]
     close = 100 + 0.1 * np.arange(count)
     bars = pd.DataFrame(
         {
@@ -2909,7 +2915,9 @@ def test_walk_forward_rejects_too_few_bootstrap_dates_before_training(monkeypatc
     bars = validate_bars(
         pd.DataFrame(
             {
-                "Date": _scheduled_sessions(pd.Timestamp("2020-01-02"), pd.Timestamp("2021-01-01"))[:count],
+                "Date": _scheduled_sessions(
+                    pd.Timestamp("2020-01-02"), pd.Timestamp("2021-01-01")
+                )[:count],
                 "Name": ["AAA"] * count,
                 "Open": close - 0.2,
                 "High": close + 1,
