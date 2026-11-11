@@ -44,8 +44,11 @@ def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series
         raise ValueError(message)
     try:
         parsed = pd.to_datetime(values, format="mixed", errors="coerce")
-        if (parsed.isna().any() or not (parsed.dt.normalize() == parsed).all()
-                or isinstance(parsed.dtype, pd.DatetimeTZDtype)):
+        if (
+            parsed.isna().any()
+            or not (parsed.dt.normalize() == parsed).all()
+            or isinstance(parsed.dtype, pd.DatetimeTZDtype)
+        ):
             raise ValueError(message)
     except (TypeError, AttributeError, ValueError) as exc:
         raise ValueError(message) from exc

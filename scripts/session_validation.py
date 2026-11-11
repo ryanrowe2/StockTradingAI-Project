@@ -10,22 +10,31 @@ import pandas as pd
 if __package__:
     from .date_validation import parse_daily_dates
     from .market_calendar import (
-        LAST_NYSE_SATURDAY_SESSION, inferred_equity_sessions, validate_nyse_open_dates,
+        LAST_NYSE_SATURDAY_SESSION,
+        inferred_equity_sessions,
+        validate_nyse_open_dates,
     )
 else:
     from date_validation import parse_daily_dates
     from market_calendar import (
-        LAST_NYSE_SATURDAY_SESSION, inferred_equity_sessions, validate_nyse_open_dates,
+        LAST_NYSE_SATURDAY_SESSION,
+        inferred_equity_sessions,
+        validate_nyse_open_dates,
     )
 
 
 SESSION_COLUMN = "Session_Number"
+
+
 def _normalized_exchange_labels(frame: pd.DataFrame) -> pd.Series | None:
     """Validate optional exchange identities used to share market calendars."""
     if "Exchange" not in frame:
         return None
     values = frame["Exchange"]
-    if (values.isna().any() or not values.map(lambda value: isinstance(value, str)).all()):
+    if (
+        values.isna().any()
+        or not values.map(lambda value: isinstance(value, str)).all()
+    ):
         raise ValueError("Exchange must contain nonempty exchange identifiers")
     normalized = values.str.strip().str.upper()
     if normalized.isin(("", "N/A", "NAN", "NULL", "NONE", "<NA>")).any():
@@ -42,15 +51,17 @@ def adjacent_session_flags(positions: pd.Series, *, forward: bool = False) -> pd
     numbers = positions.tolist()
     if not numbers:
         return pd.Series(index=positions.index, dtype=bool)
-    adjacent = [int(later) == int(earlier) + 1
-                for earlier, later in pairwise(numbers)]
+    adjacent = [int(later) == int(earlier) + 1 for earlier, later in pairwise(numbers)]
     values = adjacent + [False] if forward else [False] + adjacent
     return pd.Series(values, index=positions.index, dtype=bool)
 
 
-def session_positions(frame: pd.DataFrame, *,
-                      calendar_start: pd.Timestamp | None = None,
-                      calendar_end: pd.Timestamp | None = None) -> pd.Series:
+def session_positions(
+    frame: pd.DataFrame,
+    *,
+    calendar_start: pd.Timestamp | None = None,
+    calendar_end: pd.Timestamp | None = None,
+) -> pd.Series:
     """Return supplied ordinals or exchange-aware inferred equity positions.
 
     In date-only U.S. equity inputs, genuine NYSE holidays do not create gaps.
@@ -65,7 +76,9 @@ def session_positions(frame: pd.DataFrame, *,
         return pd.Series(np.arange(len(frame), dtype=np.int64), index=frame.index)
     dates = pd.DatetimeIndex(parse_daily_dates(frame["Date"], context="Trading dates"))
     if (dates.dayofweek >= 5).any():
-        raise ValueError("Trading dates must fall on weekdays; supply a verified market calendar")
+        raise ValueError(
+            "Trading dates must fall on weekdays; supply a verified market calendar"
+        )
     if dates.empty:
         return pd.Series(dtype=np.int64, index=frame.index)
     exchange_labels = _normalized_exchange_labels(frame)
@@ -79,18 +92,23 @@ def session_positions(frame: pd.DataFrame, *,
     # each ticker when exchange membership is unspecified.
     positions = np.empty(len(frame), dtype=np.int64)
     grouping = exchange_labels if exchange_labels is not None else frame["Name"]
-    for label, indices in frame.groupby(grouping, sort=False, dropna=False).indices.items():
+    for label, indices in frame.groupby(
+        grouping, sort=False, dropna=False
+    ).indices.items():
         symbol_dates = dates.take(indices)
         sessions = inferred_equity_sessions(
-            symbol_dates, start=start, end=end,
+            symbol_dates,
+            start=start,
+            end=end,
             nyse_only=exchange_labels is not None and label in {"NYSE", "XNYS"},
         )
         positions[indices] = sessions.get_indexer(symbol_dates)
     return pd.Series(positions, index=frame.index, dtype=np.int64)
 
 
-def validate_session_positions(frame: pd.DataFrame, *,
-                               require_consecutive: bool = False) -> None:
+def validate_session_positions(
+    frame: pd.DataFrame, *, require_consecutive: bool = False
+) -> None:
     """Validate source-market ordinals without unsigned-integer subtraction.
 
     Within each ticker, a date identifies one market session and an ordinal
@@ -112,16 +130,21 @@ def validate_session_positions(frame: pd.DataFrame, *,
         return
 
     positions = frame[SESSION_COLUMN]
-    if (positions.isna().any()
-            or not pd.api.types.is_integer_dtype(positions.dtype)
-            or pd.api.types.is_bool_dtype(positions.dtype)
-            or (positions < 0).any()):
-        raise ValueError("Session_Number must contain nonnegative integer market positions")
+    if (
+        positions.isna().any()
+        or not pd.api.types.is_integer_dtype(positions.dtype)
+        or pd.api.types.is_bool_dtype(positions.dtype)
+        or (positions < 0).any()
+    ):
+        raise ValueError(
+            "Session_Number must contain nonnegative integer market positions"
+        )
 
     if "Date" in frame:
         dates = pd.DatetimeIndex(frame["Date"])
-        historic_saturday = ((dates.dayofweek == 5)
-                             & (dates <= LAST_NYSE_SATURDAY_SESSION))
+        historic_saturday = (dates.dayofweek == 5) & (
+            dates <= LAST_NYSE_SATURDAY_SESSION
+        )
         if ((dates.dayofweek >= 5) & ~historic_saturday).any():
             raise ValueError(
                 "Trading dates must fall on weekdays, except verified historical Saturday sessions"
@@ -132,20 +155,29 @@ def validate_session_positions(frame: pd.DataFrame, *,
             validate_nyse_open_dates(dates[nyse.to_numpy()])
             groups = (group for _, group in frame.groupby(exchange_labels, sort=False))
         elif "Name" in frame:
-            groups = (group for _, group in frame.groupby("Name", sort=False, dropna=False))
+            groups = (
+                group for _, group in frame.groupby("Name", sort=False, dropna=False)
+            )
         else:
             groups = (frame,)
         for group in groups:
             calendar = group[["Date", SESSION_COLUMN]].drop_duplicates()
-            if (calendar["Date"].duplicated().any()
-                    or calendar[SESSION_COLUMN].duplicated().any()):
-                raise ValueError("Session_Number must identify exactly one market date per ticker")
+            if (
+                calendar["Date"].duplicated().any()
+                or calendar[SESSION_COLUMN].duplicated().any()
+            ):
+                raise ValueError(
+                    "Session_Number must identify exactly one market date per ticker"
+                )
             calendar = calendar.sort_values("Date")
             chronological = calendar[SESSION_COLUMN].tolist()
             if any(later <= earlier for earlier, later in pairwise(chronological)):
-                raise ValueError("Session_Number must increase with the market dates per ticker")
-            if (exchange_labels is not None
-                    and group["Exchange"].iloc[0].strip().upper() in {"NYSE", "XNYS"}):
+                raise ValueError(
+                    "Session_Number must increase with the market dates per ticker"
+                )
+            if exchange_labels is not None and group["Exchange"].iloc[
+                0
+            ].strip().upper() in {"NYSE", "XNYS"}:
                 # The modern NYSE calendar is known: supplied ordinals may have
                 # any origin, but their differences must match real sessions.
                 # Otherwise an omitted Tuesday can be disguised as an adjacent
@@ -156,9 +188,12 @@ def validate_session_positions(frame: pd.DataFrame, *,
                     scheduled = inferred_equity_sessions(modern_dates, nyse_only=True)
                     true_ordinals = scheduled.get_indexer(modern_dates).tolist()
                     supplied = modern[SESSION_COLUMN].tolist()
-                    if any(int(later) - int(earlier) != real_later - real_earlier
-                           for (earlier, later), (real_earlier, real_later)
-                           in zip(pairwise(supplied), pairwise(true_ordinals), strict=True)):
+                    if any(
+                        int(later) - int(earlier) != real_later - real_earlier
+                        for (earlier, later), (real_earlier, real_later) in zip(
+                            pairwise(supplied), pairwise(true_ordinals), strict=True
+                        )
+                    ):
                         raise ValueError(
                             "Session_Number spacing must match scheduled NYSE trading sessions"
                         )
@@ -174,11 +209,18 @@ def validate_session_positions(frame: pd.DataFrame, *,
             ordered = group.sort_values("Date") if "Date" in group else group
             sequence = ordered[SESSION_COLUMN].tolist()
             if any(later != earlier + 1 for earlier, later in pairwise(sequence)):
-                raise ValueError("Trading observations must occupy consecutive market sessions")
+                raise ValueError(
+                    "Trading observations must occupy consecutive market sessions"
+                )
     elif "Date" not in frame:
-        groups = (group for _, group in frame.groupby("Name", sort=False)) \
-            if "Name" in frame else (frame,)
+        groups = (
+            (group for _, group in frame.groupby("Name", sort=False))
+            if "Name" in frame
+            else (frame,)
+        )
         for group in groups:
             sequence = group[SESSION_COLUMN].tolist()
             if any(later <= earlier for earlier, later in pairwise(sequence)):
-                raise ValueError("Session_Number must increase with the observation order")
+                raise ValueError(
+                    "Session_Number must increase with the observation order"
+                )

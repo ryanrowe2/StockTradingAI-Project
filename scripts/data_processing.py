@@ -20,7 +20,11 @@ if __package__:
     from .date_validation import parse_daily_dates
     from .market_calendar import nyse_open_mask
     from .price_validation import valid_price_bars
-    from .session_validation import adjacent_session_flags, session_positions, validate_session_positions
+    from .session_validation import (
+        adjacent_session_flags,
+        session_positions,
+        validate_session_positions,
+    )
     from .ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from .ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 else:
@@ -28,7 +32,11 @@ else:
     from date_validation import parse_daily_dates
     from market_calendar import nyse_open_mask
     from price_validation import valid_price_bars
-    from session_validation import adjacent_session_flags, session_positions, validate_session_positions
+    from session_validation import (
+        adjacent_session_flags,
+        session_positions,
+        validate_session_positions,
+    )
     from ticker_validation import MISSING_TICKER_MARKERS as MISSING_TICKER_MARKERS
     from ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 
@@ -44,20 +52,51 @@ TARGET_DEFINITIONS = {
 }
 SESSION_COLUMN = "Session_Number"
 _BUNDLED_SYMBOLS = (
-    "AABA", "AAPL", "AMZN", "AXP", "BA", "CAT", "CSCO", "CVX", "DIS",
-    "GE", "GOOGL", "GS", "HD", "IBM", "INTC", "JNJ", "JPM", "KO",
-    "MCD", "MMM", "MRK", "MSFT", "NKE", "PFE", "PG", "TRV", "UNH",
-    "UTX", "VZ", "WMT", "XOM",
+    "AABA",
+    "AAPL",
+    "AMZN",
+    "AXP",
+    "BA",
+    "CAT",
+    "CSCO",
+    "CVX",
+    "DIS",
+    "GE",
+    "GOOGL",
+    "GS",
+    "HD",
+    "IBM",
+    "INTC",
+    "JNJ",
+    "JPM",
+    "KO",
+    "MCD",
+    "MMM",
+    "MRK",
+    "MSFT",
+    "NKE",
+    "PFE",
+    "PG",
+    "TRV",
+    "UNH",
+    "UTX",
+    "VZ",
+    "WMT",
+    "XOM",
 )
-_BUNDLED_RAW_NAMES = frozenset({
-    DEFAULT_RAW_DATA.name,
-    "all_stocks_2017-01-01_to_2018-01-01.csv",
-    *(f"{ticker}_2006-01-01_to_2018-01-01.csv" for ticker in _BUNDLED_SYMBOLS),
-})
+_BUNDLED_RAW_NAMES = frozenset(
+    {
+        DEFAULT_RAW_DATA.name,
+        "all_stocks_2017-01-01_to_2018-01-01.csv",
+        *(f"{ticker}_2006-01-01_to_2018-01-01.csv" for ticker in _BUNDLED_SYMBOLS),
+    }
+)
 
 
 @lru_cache(maxsize=4)
-def _cached_bundled_session_calendar(path: Path, contents_hash: bytes) -> pd.DatetimeIndex:
+def _cached_bundled_session_calendar(
+    path: Path, contents_hash: bytes
+) -> pd.DatetimeIndex:
     """Use source-observed market dates with valid ticker identities as authority.
 
     Individual CSVs contain ticker-specific holes, so their observed dates do
@@ -79,7 +118,8 @@ def _bundled_session_calendar() -> pd.DatetimeIndex:
     # replacing the bundled source in a long-running interpreter cannot reuse
     # an obsolete calendar, even if its size and mtime are unchanged.
     return _cached_bundled_session_calendar(
-        DEFAULT_RAW_DATA.resolve(), hashlib.sha256(DEFAULT_RAW_DATA.read_bytes()).digest(),
+        DEFAULT_RAW_DATA.resolve(),
+        hashlib.sha256(DEFAULT_RAW_DATA.read_bytes()).digest(),
     )
 
 
@@ -87,12 +127,16 @@ def _is_bundled_raw_csv(filepath: str | Path) -> bool:
     if not isinstance(filepath, (str, Path)):
         return False
     path = Path(filepath).resolve()
-    return (path.is_file() and path.parent == DEFAULT_RAW_DATA.parent.resolve()
-            and path.name in _BUNDLED_RAW_NAMES)
+    return (
+        path.is_file()
+        and path.parent == DEFAULT_RAW_DATA.parent.resolve()
+        and path.name in _BUNDLED_RAW_NAMES
+    )
 
 
-def _custom_source_session_positions(source: pd.DataFrame,
-                                     selected_mask: pd.Series) -> pd.Series:
+def _custom_source_session_positions(
+    source: pd.DataFrame, selected_mask: pd.Series
+) -> pd.Series:
     """Infer selected sessions from the full source's valid market-date context.
 
     Malformed records for unrelated symbols must not invalidate a selected
@@ -102,8 +146,11 @@ def _custom_source_session_positions(source: pd.DataFrame,
     raw_dates = source["Date"].astype("string")
     explicit = raw_dates.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").fillna(False)
     parsed = pd.to_datetime(raw_dates.where(explicit), format="mixed", errors="coerce")
-    valid = (valid_ticker_symbols(source["Name"])
-             & parsed.notna() & parsed.dt.dayofweek.lt(5))
+    valid = (
+        valid_ticker_symbols(source["Name"])
+        & parsed.notna()
+        & parsed.dt.dayofweek.lt(5)
+    )
     reference = source.loc[valid].copy()
     if reference.empty:
         raise ValueError("No usable market dates remain for session inference")
@@ -115,8 +162,13 @@ def _custom_source_session_positions(source: pd.DataFrame,
         reference = reference.loc[reference["Date"] >= pd.Timestamp("1971-01-01")]
     start, end = reference["Date"].min(), reference["Date"].max()
     if "Exchange" in source:
-        wanted = (source.loc[selected_mask, "Exchange"].astype("string")
-                  .str.strip().str.upper().unique())
+        wanted = (
+            source.loc[selected_mask, "Exchange"]
+            .astype("string")
+            .str.strip()
+            .str.upper()
+            .unique()
+        )
         labels = reference["Exchange"].astype("string").str.strip().str.upper()
         reference = reference.loc[labels.isin(wanted)]
         # Same-exchange peers help reveal missing real sessions, but a peer's
@@ -139,7 +191,9 @@ def _custom_source_session_positions(source: pd.DataFrame,
     return selected.astype("int64")
 
 
-def validate_bars(df: pd.DataFrame, *, verified_datetime_dates: bool = False) -> pd.DataFrame:
+def validate_bars(
+    df: pd.DataFrame, *, verified_datetime_dates: bool = False
+) -> pd.DataFrame:
     """Retain complete, coherent daily price bars with verified dates and symbols.
 
     A contradictory OHLC record cannot be repaired reliably without an
@@ -153,8 +207,10 @@ def validate_bars(df: pd.DataFrame, *, verified_datetime_dates: bool = False) ->
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
     supplied_dates = df["Date"]
-    ambiguous_precision = (pd.api.types.is_datetime64_any_dtype(supplied_dates.dtype)
-                           or supplied_dates.map(lambda value: isinstance(value, pd.Timestamp)).any())
+    ambiguous_precision = (
+        pd.api.types.is_datetime64_any_dtype(supplied_dates.dtype)
+        or supplied_dates.map(lambda value: isinstance(value, pd.Timestamp)).any()
+    )
     if ambiguous_precision and not verified_datetime_dates:
         raise ValueError(
             "Pandas datetime dates have unknown original precision; supply explicit "
@@ -164,7 +220,8 @@ def validate_bars(df: pd.DataFrame, *, verified_datetime_dates: bool = False) ->
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
     df["Name"] = normalize_ticker_symbols(
-        df["Name"], context="Every observation must have a ticker symbol",
+        df["Name"],
+        context="Every observation must have a ticker symbol",
     )
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
@@ -209,22 +266,27 @@ def validate_raw_bar_records(records: Iterable[Mapping[str, object]]) -> pd.Data
     # records must retain genuine date-only scalars; an independently verified
     # pandas timestamp belongs in validate_bars(..., verified_datetime_dates=True).
     if any(isinstance(value, pd.Timestamp) for value in raw_dates):
-        raise ValueError("Every Date must be an original date-only scalar, not a pandas Timestamp")
+        raise ValueError(
+            "Every Date must be an original date-only scalar, not a pandas Timestamp"
+        )
     dates = parse_daily_dates(pd.Series(raw_dates, dtype=object), context="Every Date")
     frame = pd.DataFrame.from_records(rows)
     frame["Date"] = dates.to_numpy()
     return validate_bars(frame, verified_datetime_dates=True)
 
 
-def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -> pd.DataFrame:
+def load_data(
+    filepath: str | Path, *, tickers: tuple[str, ...] | None = None
+) -> pd.DataFrame:
     """Read prices, preserving the source-wide calendar when selecting symbols."""
     # Stock symbols such as "NA" are valid identifiers. Pandas' default NA
     # tokens would silently turn them into missing ticker names.
     source = pd.read_csv(filepath, keep_default_na=False)
     bundled = _is_bundled_raw_csv(filepath)
     if tickers is not None:
-        if not tickers or any(not isinstance(ticker, str) or not ticker.strip()
-                              for ticker in tickers):
+        if not tickers or any(
+            not isinstance(ticker, str) or not ticker.strip() for ticker in tickers
+        ):
             raise ValueError("Selected tickers must be nonempty strings")
         if "Name" not in source:
             raise ValueError("Missing required columns: ['Name']")
@@ -254,10 +316,13 @@ def load_data(filepath: str | Path, *, tickers: tuple[str, ...] | None = None) -
     return validate_bars(source)
 
 
-def prepare_features(df: pd.DataFrame, *,
-                     features: tuple[str, ...] = MODEL_FEATURES,
-                     target: str = "close_to_close",
-                     verified_datetime_dates: bool = False) -> pd.DataFrame:
+def prepare_features(
+    df: pd.DataFrame,
+    *,
+    features: tuple[str, ...] = MODEL_FEATURES,
+    target: str = "close_to_close",
+    verified_datetime_dates: bool = False,
+) -> pd.DataFrame:
     """Produce causal next-session targets with only requested model features required.
 
     ``next_open_to_close`` aligns the target with an order submitted after the
@@ -269,15 +334,17 @@ def prepare_features(df: pd.DataFrame, *,
     if target not in TARGET_DEFINITIONS:
         raise ValueError(f"target must be one of {sorted(TARGET_DEFINITIONS)}")
     source = prepare_indicator_history(
-        df, verified_datetime_dates=verified_datetime_dates,
+        df,
+        verified_datetime_dates=verified_datetime_dates,
     )
     next_close = source.groupby("Name", sort=False)["Close"].shift(-1)
     next_open = source.groupby("Name", sort=False)["Open"].shift(-1)
     adjacent_target = source.groupby("Name", sort=False)[SESSION_COLUMN].transform(
         lambda positions: adjacent_session_flags(positions, forward=True)
     )
-    source["Target_Date"] = (source.groupby("Name", sort=False)["Date"]
-                             .shift(-1).where(adjacent_target))
+    source["Target_Date"] = (
+        source.groupby("Name", sort=False)["Date"].shift(-1).where(adjacent_target)
+    )
     reference_price = source["Close"] if target == "close_to_close" else next_open
     source["Trend"] = (next_close > reference_price).astype("int64")
     if not features or any(feature not in MODEL_FEATURES for feature in features):
@@ -299,8 +366,9 @@ def prepare_features(df: pd.DataFrame, *,
     return prepared
 
 
-def prepare_indicator_history(df: pd.DataFrame, *,
-                              verified_datetime_dates: bool = False) -> pd.DataFrame:
+def prepare_indicator_history(
+    df: pd.DataFrame, *, verified_datetime_dates: bool = False
+) -> pd.DataFrame:
     """Retain validated, causally calculated price history, including its last bar.
 
     Unlike supervised feature preparation, this does not remove rows solely
@@ -319,12 +387,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--ticker", type=str, default=None)
     args = parser.parse_args()
-    data = load_data(args.input, tickers=(args.ticker,) if args.ticker is not None else None)
+    data = load_data(
+        args.input, tickers=(args.ticker,) if args.ticker is not None else None
+    )
     result = prepare_features(data, verified_datetime_dates=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(args.output, index=False)
     count = result.Name.nunique()
-    print(f"Prepared {len(result):,} observations from {count} {'ticker' if count == 1 else 'tickers'}: {args.output}")
+    print(
+        f"Prepared {len(result):,} observations from {count} {'ticker' if count == 1 else 'tickers'}: {args.output}"
+    )
 
 
 if __name__ == "__main__":

@@ -28,19 +28,29 @@ from sklearn.metrics import (
 
 if __package__:
     from .data_processing import (
-        DEFAULT_RAW_DATA, MODEL_FEATURES, TARGET_DEFINITIONS, load_data, prepare_features,
+        DEFAULT_RAW_DATA,
+        MODEL_FEATURES,
+        TARGET_DEFINITIONS,
+        load_data,
+        prepare_features,
     )
     from .date_validation import parse_daily_dates
 else:
     from data_processing import (
-        DEFAULT_RAW_DATA, MODEL_FEATURES, TARGET_DEFINITIONS, load_data, prepare_features,
+        DEFAULT_RAW_DATA,
+        MODEL_FEATURES,
+        TARGET_DEFINITIONS,
+        load_data,
+        prepare_features,
     )
     from date_validation import parse_daily_dates
 
 
 BASELINE_FEATURES = ("Return", "Intraday_Return", "Daily_Range")
 ENHANCED_FEATURES = MODEL_FEATURES
-DEFAULT_METRICS = Path(__file__).resolve().parents[1] / "data/generated/model_metrics.json"
+DEFAULT_METRICS = (
+    Path(__file__).resolve().parents[1] / "data/generated/model_metrics.json"
+)
 
 
 @dataclass(frozen=True)
@@ -52,8 +62,9 @@ class ChronologicalSplit:
     validation_end: pd.Timestamp
 
 
-def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
-                        validation_fraction: float = 0.2) -> ChronologicalSplit:
+def chronological_split(
+    df: pd.DataFrame, train_fraction: float = 0.6, validation_fraction: float = 0.2
+) -> ChronologicalSplit:
     """Split globally by observation date, purging cross-period target labels."""
     if not 0 < train_fraction < 1 or not 0 < validation_fraction < 1 - train_fraction:
         raise ValueError("Train and validation fractions must leave a test period")
@@ -82,14 +93,21 @@ def chronological_split(df: pd.DataFrame, train_fraction: float = 0.6,
         requested = set(df["Name"])
         missing = {
             label: sorted(requested - set(partition["Name"]))
-            for label, partition in (("train", train), ("validation", validation), ("test", test))
+            for label, partition in (
+                ("train", train),
+                ("validation", validation),
+                ("test", test),
+            )
         }
         if any(missing.values()):
             details = "; ".join(
                 f"{label}: {', '.join(symbols)}"
-                for label, symbols in missing.items() if symbols
+                for label, symbols in missing.items()
+                if symbols
             )
-            raise ValueError(f"Missing ticker coverage in chronological partitions: {details}")
+            raise ValueError(
+                f"Missing ticker coverage in chronological partitions: {details}"
+            )
     return ChronologicalSplit(train, validation, test, train_end, validation_end)
 
 
@@ -97,7 +115,9 @@ class QuantileBinner:
     """Train-fitted discretizer. No quantile is estimated from held-out rows."""
 
     def __init__(self, num_bins: int = 4):
-        integer_count = isinstance(num_bins, Integral) and not isinstance(num_bins, (bool, np.bool_))
+        integer_count = isinstance(num_bins, Integral) and not isinstance(
+            num_bins, (bool, np.bool_)
+        )
         if not integer_count or not 2 <= num_bins <= 20:
             raise ValueError("num_bins must be an integer between 2 and 20")
         self.num_bins = int(num_bins)
@@ -135,13 +155,19 @@ class QuantileBinner:
         return result
 
 
-def fit_network(df: pd.DataFrame, features: tuple[str, ...],
-                num_bins: int, equivalent_sample_size: int) -> DiscreteBayesianNetwork:
+def fit_network(
+    df: pd.DataFrame,
+    features: tuple[str, ...],
+    num_bins: int,
+    equivalent_sample_size: int,
+) -> DiscreteBayesianNetwork:
     """Fit a simple, interpretable feature-to-next-session-direction network."""
-    if (not isinstance(equivalent_sample_size, Real)
-            or isinstance(equivalent_sample_size, (bool, np.bool_))
-            or not np.isfinite(equivalent_sample_size)
-            or equivalent_sample_size <= 0):
+    if (
+        not isinstance(equivalent_sample_size, Real)
+        or isinstance(equivalent_sample_size, (bool, np.bool_))
+        or not np.isfinite(equivalent_sample_size)
+        or equivalent_sample_size <= 0
+    ):
         raise ValueError("BDeu equivalent_sample_size must be a finite positive number")
     network = DiscreteBayesianNetwork([(name, "Trend") for name in features])
     # Specify the full bin vocabulary even when a particular training period
@@ -161,13 +187,17 @@ def fit_network(df: pd.DataFrame, features: tuple[str, ...],
     return network
 
 
-def predict_up_probability(network: DiscreteBayesianNetwork, frame: pd.DataFrame) -> np.ndarray:
+def predict_up_probability(
+    network: DiscreteBayesianNetwork, frame: pd.DataFrame
+) -> np.ndarray:
     """Vectorized posterior lookup for the fully observed feature-parent graph."""
     conditional = network.get_cpds("Trend")
     parents = conditional.variables[1:]
     positions = []
     for parent in parents:
-        name_to_index = {state: i for i, state in enumerate(conditional.state_names[parent])}
+        name_to_index = {
+            state: i for i, state in enumerate(conditional.state_names[parent])
+        }
         if parent not in frame:
             raise ValueError(f"Missing Bayesian-network parent feature: {parent}")
         mapped = frame[parent].map(name_to_index)
@@ -179,15 +209,22 @@ def predict_up_probability(network: DiscreteBayesianNetwork, frame: pd.DataFrame
     return np.asarray(conditional.values[(up_index, *positions)], dtype=float)
 
 
-def classification_metrics(labels: pd.Series, probabilities: np.ndarray) -> dict[str, float]:
+def classification_metrics(
+    labels: pd.Series, probabilities: np.ndarray
+) -> dict[str, float]:
     supplied_labels = labels.to_numpy()
     if not np.isin(supplied_labels, (0, 1)).all():
         raise ValueError("Classification labels must be binary (0 or 1)")
     actual = supplied_labels.astype(int)
     probabilities = np.asarray(probabilities, dtype=float)
-    if (probabilities.shape != actual.shape or not np.isfinite(probabilities).all()
-            or ((probabilities < 0) | (probabilities > 1)).any()):
-        raise ValueError("Probabilities must be finite values between 0 and 1 for every label")
+    if (
+        probabilities.shape != actual.shape
+        or not np.isfinite(probabilities).all()
+        or ((probabilities < 0) | (probabilities > 1)).any()
+    ):
+        raise ValueError(
+            "Probabilities must be finite values between 0 and 1 for every label"
+        )
     predictions = (probabilities >= 0.5).astype(int)
     result = {
         "accuracy": float(accuracy_score(actual, predictions)),
@@ -196,13 +233,22 @@ def classification_metrics(labels: pd.Series, probabilities: np.ndarray) -> dict
         "recall": float(recall_score(actual, predictions, zero_division=0)),
         "f1": float(f1_score(actual, predictions, zero_division=0)),
     }
-    result["roc_auc"] = float(roc_auc_score(actual, probabilities)) if len(np.unique(actual)) == 2 else None
+    result["roc_auc"] = (
+        float(roc_auc_score(actual, probabilities))
+        if len(np.unique(actual)) == 2
+        else None
+    )
     return result
 
 
-def train_and_select(split: ChronologicalSplit, features: tuple[str, ...],
-                     num_bins: int, sample_sizes: tuple[int, ...] = (5, 10, 15, 20),
-                     *, include_predictions: bool = False) -> dict:
+def train_and_select(
+    split: ChronologicalSplit,
+    features: tuple[str, ...],
+    num_bins: int,
+    sample_sizes: tuple[int, ...] = (5, 10, 15, 20),
+    *,
+    include_predictions: bool = False,
+) -> dict:
     """Select prior strength on validation; refit and score on test once."""
     binner = QuantileBinner(num_bins).fit(split.train, features)
     train = binner.transform(split.train, features)
@@ -214,10 +260,14 @@ def train_and_select(split: ChronologicalSplit, features: tuple[str, ...],
         candidate = fit_network(train, features, num_bins, size)
         probability = predict_up_probability(candidate, validation)
         metrics = classification_metrics(split.validation["Trend"], probability)
-        choices.append((metrics["balanced_accuracy"], metrics["accuracy"], size, metrics))
+        choices.append(
+            (metrics["balanced_accuracy"], metrics["accuracy"], size, metrics)
+        )
 
     # All hyperparameters are decided before looking at test performance.
-    _, _, best_size, validation_metrics = max(choices, key=lambda item: (item[0], item[1], -item[2]))
+    _, _, best_size, validation_metrics = max(
+        choices, key=lambda item: (item[0], item[1], -item[2])
+    )
     combined = pd.concat([split.train, split.validation], ignore_index=True)
     final_binner = QuantileBinner(num_bins).fit(combined, features)
     combined_discrete = final_binner.transform(combined, features)
@@ -238,9 +288,13 @@ def train_and_select(split: ChronologicalSplit, features: tuple[str, ...],
     return result
 
 
-def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
-                   tickers: tuple[str, ...] | None = None, num_bins: int = 4,
-                   target: str = "close_to_close") -> dict:
+def run_experiment(
+    raw_data: str | Path = DEFAULT_RAW_DATA,
+    *,
+    tickers: tuple[str, ...] | None = None,
+    num_bins: int = 4,
+    target: str = "close_to_close",
+) -> dict:
     data = load_data(raw_data, tickers=tickers)
     frame = prepare_features(data, target=target, verified_datetime_dates=True)
     split = chronological_split(frame)
@@ -258,7 +312,11 @@ def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
             "validation": int(split.validation["Name"].nunique()),
             "test": int(split.test["Name"].nunique()),
         },
-        "observations": {"train": len(split.train), "validation": len(split.validation), "test": len(split.test)},
+        "observations": {
+            "train": len(split.train),
+            "validation": len(split.validation),
+            "test": len(split.test),
+        },
         "periods": {
             "train_end": split.train_end.date().isoformat(),
             "validation_end": split.validation_end.date().isoformat(),
@@ -274,13 +332,24 @@ def run_experiment(raw_data: str | Path = DEFAULT_RAW_DATA, *,
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_RAW_DATA)
-    parser.add_argument("--ticker", action="append", dest="tickers", help="Repeat to select multiple symbols")
+    parser.add_argument(
+        "--ticker",
+        action="append",
+        dest="tickers",
+        help="Repeat to select multiple symbols",
+    )
     parser.add_argument("--num-bins", type=int, default=4)
-    parser.add_argument("--target", choices=tuple(TARGET_DEFINITIONS), default="close_to_close")
+    parser.add_argument(
+        "--target", choices=tuple(TARGET_DEFINITIONS), default="close_to_close"
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_METRICS)
     args = parser.parse_args()
-    result = run_experiment(args.input, tickers=tuple(args.tickers) if args.tickers else None,
-                            num_bins=args.num_bins, target=args.target)
+    result = run_experiment(
+        args.input,
+        tickers=tuple(args.tickers) if args.tickers else None,
+        num_bins=args.num_bins,
+        target=args.target,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))

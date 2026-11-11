@@ -37,23 +37,29 @@ def _gaussian_log_emissions(model: GaussianHMM, observations: np.ndarray) -> np.
         # Squaring a large finite difference *before* dividing by an even
         # larger variance overflows unnecessarily (e.g. 1e200**2 / 1e300).
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-            standardized = ((observations[:, None, :] - means[None, :, :])
-                            / np.sqrt(variances)[None, :, :])
+            standardized = (observations[:, None, :] - means[None, :, :]) / np.sqrt(
+                variances
+            )[None, :, :]
             return -0.5 * (
                 observations.shape[1] * np.log(2 * np.pi)
                 + np.log(variances).sum(axis=1)[None, :]
                 + np.square(standardized).sum(axis=2)
             )
-    return np.column_stack([
-        np.atleast_1d(multivariate_normal.logpdf(
-            observations, mean=means[state], cov=covariances[state]
-        ))
-        for state in range(model.n_components)
-    ])
+    return np.column_stack(
+        [
+            np.atleast_1d(
+                multivariate_normal.logpdf(
+                    observations, mean=means[state], cov=covariances[state]
+                )
+            )
+            for state in range(model.n_components)
+        ]
+    )
 
 
-def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
-                          *, keep_missing: bool = False) -> pd.DataFrame:
+def _validated_indicators(
+    frame: pd.DataFrame, indicators: tuple[str, ...], *, keep_missing: bool = False
+) -> pd.DataFrame:
     if not indicators or len(set(indicators)) != len(indicators):
         raise ValueError("HMM indicators must be a nonempty set of distinct columns")
     absent = set(indicators) - set(frame.columns)
@@ -62,10 +68,13 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
     if "Name" in frame:
         symbols = frame["Name"]
         normalized = normalize_ticker_symbols(
-            symbols, context="Fit/infer HMM regimes for one ticker with a valid name at a time",
+            symbols,
+            context="Fit/infer HMM regimes for one ticker with a valid name at a time",
         )
         if normalized.nunique() != 1:
-            raise ValueError("Fit/infer HMM regimes for one ticker with a valid name at a time")
+            raise ValueError(
+                "Fit/infer HMM regimes for one ticker with a valid name at a time"
+            )
     ordered = frame.copy()
     if "Name" in ordered:
         ordered["Name"] = normalized
@@ -81,8 +90,11 @@ def _validated_indicators(frame: pd.DataFrame, indicators: tuple[str, ...],
     return ordered if keep_missing else clean
 
 
-def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
-                           indicators: tuple[str, ...] = DEFAULT_INDICATORS) -> pd.DataFrame:
+def infer_filtered_regimes(
+    model: GaussianHMM,
+    df: pd.DataFrame,
+    indicators: tuple[str, ...] = DEFAULT_INDICATORS,
+) -> pd.DataFrame:
     """Assign each state's most likely value using only observations so far.
 
     In particular, do not use HMM ``predict``/Viterbi smoothing: it uses future
@@ -126,7 +138,10 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
         current_session = int(positions.iloc[step])
         if has_observation:
             if previous_observed_session is not None:
-                if missing_since_observation or current_session != previous_observed_session + 1:
+                if (
+                    missing_since_observation
+                    or current_session != previous_observed_session + 1
+                ):
                     log_alpha = log_start.copy()
                 else:
                     log_alpha = logsumexp(log_alpha[:, None] + transition, axis=0)
@@ -147,10 +162,12 @@ def infer_filtered_regimes(model: GaussianHMM, df: pd.DataFrame,
     return output
 
 
-def fit_hmm_on_indicators(df: pd.DataFrame,
-                          indicators: tuple[str, ...] = DEFAULT_INDICATORS,
-                          n_components: int = 3,
-                          random_state: int = 42) -> tuple[GaussianHMM, pd.DataFrame]:
+def fit_hmm_on_indicators(
+    df: pd.DataFrame,
+    indicators: tuple[str, ...] = DEFAULT_INDICATORS,
+    n_components: int = 3,
+    random_state: int = 42,
+) -> tuple[GaussianHMM, pd.DataFrame]:
     """Fit on caller-supplied training data and infer its filtered regimes.
 
     Holdout observations must be supplied only to ``infer_filtered_regimes``
@@ -167,12 +184,18 @@ def fit_hmm_on_indicators(df: pd.DataFrame,
         raise ValueError("Insufficient training observations for the HMM")
     X = clean[list(indicators)].to_numpy(dtype=float)
     model = GaussianHMM(
-        n_components=n_components, covariance_type="diag", n_iter=500,
-        tol=1e-4, random_state=random_state, min_covar=1e-4,
+        n_components=n_components,
+        covariance_type="diag",
+        n_iter=500,
+        tol=1e-4,
+        random_state=random_state,
+        min_covar=1e-4,
     )
     positions = session_positions(clean).tolist()
-    boundaries = np.array([0] + [i for i in range(1, len(positions))
-                                 if positions[i] != positions[i - 1] + 1])
+    boundaries = np.array(
+        [0]
+        + [i for i in range(1, len(positions)) if positions[i] != positions[i - 1] + 1]
+    )
     lengths = np.diff(np.r_[boundaries, len(clean)]).tolist()
     if sum(length - 1 for length in lengths) < n_components:
         raise ValueError("Insufficient consecutive-session transitions for the HMM")

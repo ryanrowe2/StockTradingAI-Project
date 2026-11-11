@@ -12,7 +12,9 @@ def valid_ticker_symbols(symbols: pd.Series) -> pd.Series:
     """Identify valid source identifiers without rejecting unrelated rows."""
     normalized = symbols.astype("string").str.strip().str.upper()
     valid_format = normalized.str.fullmatch(r"[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)*")
-    return (valid_format.fillna(False) & ~normalized.isin(MISSING_TICKER_MARKERS)).astype(bool)
+    return (
+        valid_format.fillna(False) & ~normalized.isin(MISSING_TICKER_MARKERS)
+    ).astype(bool)
 
 
 def normalize_ticker_symbols(symbols: pd.Series, *, context: str) -> pd.Series:

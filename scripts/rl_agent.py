@@ -18,11 +18,19 @@ import pandas as pd
 
 if __package__:
     from .date_validation import parse_daily_dates
-    from .session_validation import adjacent_session_flags, session_positions, validate_session_positions
+    from .session_validation import (
+        adjacent_session_flags,
+        session_positions,
+        validate_session_positions,
+    )
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
-    from session_validation import adjacent_session_flags, session_positions, validate_session_positions
+    from session_validation import (
+        adjacent_session_flags,
+        session_positions,
+        validate_session_positions,
+    )
     from ticker_validation import normalize_ticker_symbols
 
 
@@ -31,41 +39,73 @@ class SimpleTradingEnv:
 
     DEFAULT_STATE_COLUMNS = ("Return_binned", "RSI_14_binned", "Market_Regime")
 
-    def __init__(self, data: pd.DataFrame, transaction_cost: float = 0.001,
-                 state_columns: tuple[str, ...] | None = None,
-                 slippage_bps: float = 0.0):
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        transaction_cost: float = 0.001,
+        state_columns: tuple[str, ...] | None = None,
+        slippage_bps: float = 0.0,
+    ):
         if not {"Open", "Close"}.issubset(data.columns) or len(data) < 2:
-            raise ValueError("The trading environment needs at least two daily open/close bars")
+            raise ValueError(
+                "The trading environment needs at least two daily open/close bars"
+            )
         if "Name" in data:
             symbols = data["Name"]
             normalized_symbols = normalize_ticker_symbols(
-                symbols, context="A trading episode must contain exactly one ticker with a valid name",
+                symbols,
+                context="A trading episode must contain exactly one ticker with a valid name",
             )
             if normalized_symbols.nunique() != 1:
-                raise ValueError("A trading episode must contain exactly one ticker with a valid name")
-        if (not isinstance(transaction_cost, Real) or isinstance(transaction_cost, (bool, np.bool_))
-                or not np.isfinite(transaction_cost) or not 0 <= transaction_cost < 1):
+                raise ValueError(
+                    "A trading episode must contain exactly one ticker with a valid name"
+                )
+        if (
+            not isinstance(transaction_cost, Real)
+            or isinstance(transaction_cost, (bool, np.bool_))
+            or not np.isfinite(transaction_cost)
+            or not 0 <= transaction_cost < 1
+        ):
             raise ValueError("transaction_cost must be a fraction between 0 and 1")
-        if (not isinstance(slippage_bps, Real) or isinstance(slippage_bps, (bool, np.bool_))
-                or not np.isfinite(slippage_bps) or not 0 <= slippage_bps < 10_000):
-            raise ValueError("slippage_bps must be finite basis points from 0 to less than 10000")
+        if (
+            not isinstance(slippage_bps, Real)
+            or isinstance(slippage_bps, (bool, np.bool_))
+            or not np.isfinite(slippage_bps)
+            or not 0 <= slippage_bps < 10_000
+        ):
+            raise ValueError(
+                "slippage_bps must be finite basis points from 0 to less than 10000"
+            )
         self.data = data.copy()
         if "Name" in self.data:
             self.data["Name"] = normalized_symbols
         if "Date" in self.data:
-            self.data["Date"] = parse_daily_dates(self.data["Date"], context="Trading dates")
+            self.data["Date"] = parse_daily_dates(
+                self.data["Date"], context="Trading dates"
+            )
             self.data = self.data.sort_values("Date", kind="stable")
         self.data = self.data.reset_index(drop=True)
         if "Date" in self.data and self.data["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates")
         validate_session_positions(self.data, require_consecutive=True)
         positions = session_positions(self.data).tolist()
-        if any(next_position != position + 1
-               for position, next_position in pairwise(positions)):
-            raise ValueError("Trading observations must occupy consecutive market sessions")
-        if self.data[["Open", "Close"]].apply(
-            lambda column: column.map(lambda value: isinstance(value, (bool, np.bool_)))
-        ).any().any():
+        if any(
+            next_position != position + 1
+            for position, next_position in pairwise(positions)
+        ):
+            raise ValueError(
+                "Trading observations must occupy consecutive market sessions"
+            )
+        if (
+            self.data[["Open", "Close"]]
+            .apply(
+                lambda column: column.map(
+                    lambda value: isinstance(value, (bool, np.bool_))
+                )
+            )
+            .any()
+            .any()
+        ):
             raise ValueError("Open/close prices must be numeric prices, not booleans")
         prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
         if not np.isfinite(prices).all() or np.any(prices <= 0):
@@ -73,7 +113,9 @@ class SimpleTradingEnv:
         if state_columns is None:
             provided = set(self.DEFAULT_STATE_COLUMNS).intersection(self.data.columns)
             if provided and len(provided) != len(self.DEFAULT_STATE_COLUMNS):
-                raise ValueError("Supply all default state columns, or specify state_columns")
+                raise ValueError(
+                    "Supply all default state columns, or specify state_columns"
+                )
             state_columns = self.DEFAULT_STATE_COLUMNS if provided else ()
         if len(set(state_columns)) != len(state_columns):
             raise ValueError("State columns must be unique")
@@ -82,9 +124,13 @@ class SimpleTradingEnv:
             raise ValueError(f"Missing trading state columns: {sorted(missing)}")
         if state_columns:
             state_values = self.data[list(state_columns)].to_numpy(dtype=object)
-            if any(not isinstance(value, Integral) or isinstance(value, (bool, np.bool_))
-                   for value in state_values.flat):
-                raise ValueError("Trading state columns must contain finite integer states")
+            if any(
+                not isinstance(value, Integral) or isinstance(value, (bool, np.bool_))
+                for value in state_values.flat
+            ):
+                raise ValueError(
+                    "Trading state columns must contain finite integer states"
+                )
         self.state_columns = tuple(state_columns)
         self.transaction_cost = float(transaction_cost)
         self.slippage_bps = float(slippage_bps)
@@ -112,7 +158,9 @@ class SimpleTradingEnv:
             raise RuntimeError("Episode finished. Call reset() before stepping again")
         if action not in {"buy", "sell", "hold"}:
             raise ValueError(f"Unrecognized action: {action}")
-        if (action == "buy" and self.position == 1) or (action == "sell" and self.position == 0):
+        if (action == "buy" and self.position == 1) or (
+            action == "sell" and self.position == 0
+        ):
             raise ValueError(f"Cannot {action} when position is {self.position}")
         decision_close = float(self.data.iloc[self.index]["Close"])
         next_bar = self.data.iloc[self.index + 1]
@@ -144,8 +192,10 @@ class SimpleTradingEnv:
             raise ValueError("Total trading reward must remain finite") from exc
         if not np.isfinite(reward):
             raise ValueError("Trading reward must remain finite")
-        if not all(np.isfinite(value) for value in
-                   (updated_pnl, updated_fees, updated_slippage)):
+        if not all(
+            np.isfinite(value)
+            for value in (updated_pnl, updated_fees, updated_slippage)
+        ):
             raise ValueError("Total trading reward must remain finite")
         self.total_pnl = updated_pnl
         self.total_fees = updated_fees
@@ -157,10 +207,17 @@ class SimpleTradingEnv:
         self.position = next_position
         self.index += 1
         self.done = self.index == len(self.data) - 1
-        return self.get_state(), float(reward), self.done, {
-            "position": self.position, "fee": fee, "execution_price": execution_price,
-            "slippage_cost": slippage_cost,
-        }
+        return (
+            self.get_state(),
+            float(reward),
+            self.done,
+            {
+                "position": self.position,
+                "fee": fee,
+                "execution_price": execution_price,
+                "slippage_cost": slippage_cost,
+            },
+        )
 
     def episode_metrics(self) -> dict[str, float | int]:
         """Summarize marked-to-market episode results without forcing an exit."""
@@ -174,7 +231,9 @@ class SimpleTradingEnv:
             "fees_dollars": float(self.total_fees),
             "slippage_dollars": float(self.total_slippage),
             "intraday_exposure_fraction": self.invested_steps / steps if steps else 0.0,
-            "overnight_exposure_fraction": self.overnight_invested_steps / steps if steps else 0.0,
+            "overnight_exposure_fraction": self.overnight_invested_steps / steps
+            if steps
+            else 0.0,
             "terminal_position": self.position,
         }
 
@@ -186,7 +245,8 @@ def contiguous_trading_segments(data: pd.DataFrame) -> list[pd.DataFrame]:
     ordered = data.copy()
     if "Name" in ordered:
         ordered["Name"] = normalize_ticker_symbols(
-            ordered["Name"], context="Trading episodes require valid ticker names",
+            ordered["Name"],
+            context="Trading episodes require valid ticker names",
         )
     if "Date" in ordered:
         ordered["Date"] = parse_daily_dates(ordered["Date"], context="Trading dates")
@@ -195,30 +255,49 @@ def contiguous_trading_segments(data: pd.DataFrame) -> list[pd.DataFrame]:
     # Retain source-wide exchange calendars before isolating individual stocks.
     if "Session_Number" not in ordered and "Date" in ordered:
         ordered["Session_Number"] = session_positions(ordered)
-    symbol_groups = (group for _, group in ordered.groupby("Name", sort=False)) \
-        if "Name" in ordered else (ordered,)
+    symbol_groups = (
+        (group for _, group in ordered.groupby("Name", sort=False))
+        if "Name" in ordered
+        else (ordered,)
+    )
     segments = []
     for symbol in symbol_groups:
         boundaries = (~adjacent_session_flags(session_positions(symbol))).cumsum()
-        segments.extend(group.copy() for _, group in symbol.groupby(boundaries) if len(group) >= 2)
+        segments.extend(
+            group.copy() for _, group in symbol.groupby(boundaries) if len(group) >= 2
+        )
     return segments
 
 
 class QLearningAgent:
     """Tabular epsilon-greedy learner with correct terminal-state updates."""
 
-    def __init__(self, actions: tuple[str, ...] = ("buy", "sell", "hold"),
-                 alpha: float = 0.1, gamma: float = 0.95,
-                 epsilon: float = 0.1, seed: int = 42):
+    def __init__(
+        self,
+        actions: tuple[str, ...] = ("buy", "sell", "hold"),
+        alpha: float = 0.1,
+        gamma: float = 0.95,
+        epsilon: float = 0.1,
+        seed: int = 42,
+    ):
         actions = tuple(actions)
         supported = {"buy", "sell", "hold"}
-        if (not actions or any(not isinstance(action, str) for action in actions)
-                or len(set(actions)) != len(actions)
-                or any(action not in supported for action in actions)
-                or ("hold" not in actions and not {"buy", "sell"}.issubset(actions))
-                or any(not isinstance(value, Real) or isinstance(value, (bool, np.bool_))
-                       or not np.isfinite(value) for value in (alpha, gamma, epsilon))
-                or not 0 < alpha <= 1 or not 0 <= gamma <= 1 or not 0 <= epsilon <= 1):
+        if (
+            not actions
+            or any(not isinstance(action, str) for action in actions)
+            or len(set(actions)) != len(actions)
+            or any(action not in supported for action in actions)
+            or ("hold" not in actions and not {"buy", "sell"}.issubset(actions))
+            or any(
+                not isinstance(value, Real)
+                or isinstance(value, (bool, np.bool_))
+                or not np.isfinite(value)
+                for value in (alpha, gamma, epsilon)
+            )
+            or not 0 < alpha <= 1
+            or not 0 <= gamma <= 1
+            or not 0 <= epsilon <= 1
+        ):
             raise ValueError("Invalid Q-learning parameters")
         self.actions = actions
         self.alpha = alpha
@@ -232,8 +311,10 @@ class QLearningAgent:
             state = tuple(state_features)
         except TypeError as exc:
             raise ValueError("State components must be integers") from exc
-        if any(not isinstance(value, Integral) or isinstance(value, (bool, np.bool_))
-               for value in state):
+        if any(
+            not isinstance(value, Integral) or isinstance(value, (bool, np.bool_))
+            for value in state
+        ):
             raise ValueError("State components must be integers")
         return tuple(int(value) for value in state)
 
@@ -242,7 +323,9 @@ class QLearningAgent:
 
     def _valid_actions(self, state: tuple[int, ...]) -> tuple[str, ...]:
         if not state or state[-1] not in (0, 1):
-            raise ValueError("Last state component must be the current position (0 or 1)")
+            raise ValueError(
+                "Last state component must be the current position (0 or 1)"
+            )
         prohibited = "sell" if state[-1] == 0 else "buy"
         valid = tuple(action for action in self.actions if action != prohibited)
         if not valid:
@@ -261,8 +344,14 @@ class QLearningAgent:
         estimates = self._values(state) if explore else self.q_table[state]
         return max(available, key=estimates.__getitem__)
 
-    def update_q_value(self, state_features, action: str, reward: float,
-                       next_state_features, done: bool = False) -> None:
+    def update_q_value(
+        self,
+        state_features,
+        action: str,
+        reward: float,
+        next_state_features,
+        done: bool = False,
+    ) -> None:
         if not isinstance(done, (bool, np.bool_)):
             raise ValueError("done must be a boolean")
         state = self.get_state(state_features)
@@ -270,7 +359,9 @@ class QLearningAgent:
             raise ValueError(f"Unrecognized action: {action}")
         next_state = self.get_state(next_state_features)
         if len(next_state) != len(state):
-            raise ValueError("Current and next trading states must have the same dimensions")
+            raise ValueError(
+                "Current and next trading states must have the same dimensions"
+            )
         valid_next_actions = self._valid_actions(next_state)
         expected_position = {"buy": 1, "sell": 0, "hold": state[-1]}[action]
         if next_state[-1] != expected_position:
@@ -282,12 +373,23 @@ class QLearningAgent:
         if not np.isfinite(reward):
             raise ValueError("Reward must be finite")
         # Calculate and validate the update before changing either state entry.
-        future = (0.0 if done else max(self.q_table.get(next_state, {}).get(candidate, 0.0)
-                                      for candidate in valid_next_actions))
+        future = (
+            0.0
+            if done
+            else max(
+                self.q_table.get(next_state, {}).get(candidate, 0.0)
+                for candidate in valid_next_actions
+            )
+        )
         prior = self.q_table.get(state, {}).get(action, 0.0)
         try:
-            updated = math.fsum(((1 - self.alpha) * prior,
-                                 self.alpha * reward, self.alpha * self.gamma * future))
+            updated = math.fsum(
+                (
+                    (1 - self.alpha) * prior,
+                    self.alpha * reward,
+                    self.alpha * self.gamma * future,
+                )
+            )
         except OverflowError as exc:
             raise ValueError("Q-value update must remain finite") from exc
         if not np.isfinite(updated):
@@ -297,8 +399,9 @@ class QLearningAgent:
         current = self._values(state)
         current[action] = updated
 
-    def simulate_episode(self, env: SimpleTradingEnv, max_steps: int | None = None,
-                         *, train: bool = True) -> float:
+    def simulate_episode(
+        self, env: SimpleTradingEnv, max_steps: int | None = None, *, train: bool = True
+    ) -> float:
         if max_steps is not None and (
             not isinstance(max_steps, Integral)
             or isinstance(max_steps, (bool, np.bool_))
@@ -327,12 +430,16 @@ class QLearningAgent:
 
 
 if __name__ == "__main__":
-    demonstration = pd.DataFrame({
-        "Open": [99, 101, 102, 102, 103, 105, 105],
-        "Close": [100, 102, 101, 103, 105, 104, 106],
-    })
+    demonstration = pd.DataFrame(
+        {
+            "Open": [99, 101, 102, 102, 103, 105, 105],
+            "Close": [100, 102, 101, 103, 105, 104, 106],
+        }
+    )
     env = SimpleTradingEnv(demonstration)
     agent = QLearningAgent()
     for _ in range(50):
         agent.simulate_episode(env)
-    print(f"Demonstration episode reward (learning disabled): {agent.simulate_episode(env, train=False):.2f}")
+    print(
+        f"Demonstration episode reward (learning disabled): {agent.simulate_episode(env, train=False):.2f}"
+    )

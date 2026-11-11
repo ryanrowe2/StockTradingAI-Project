@@ -8,21 +8,36 @@ import pandas as pd
 if __package__:
     from .date_validation import parse_daily_dates
     from .price_validation import valid_price_bars
-    from .session_validation import adjacent_session_flags, session_positions, validate_session_positions
+    from .session_validation import (
+        adjacent_session_flags,
+        session_positions,
+        validate_session_positions,
+    )
     from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import parse_daily_dates
     from price_validation import valid_price_bars
-    from session_validation import adjacent_session_flags, session_positions, validate_session_positions
+    from session_validation import (
+        adjacent_session_flags,
+        session_positions,
+        validate_session_positions,
+    )
     from ticker_validation import normalize_ticker_symbols
 
 
-def compute_moving_average(df: pd.DataFrame, window: int = 20, column: str = "Close") -> pd.Series:
+def compute_moving_average(
+    df: pd.DataFrame, window: int = 20, column: str = "Close"
+) -> pd.Series:
     return df[column].rolling(window=window, min_periods=window).mean()
 
 
-def compute_rsi(df: pd.DataFrame, window: int = 14, column: str = "Close",
-                *, changes: pd.Series | None = None) -> pd.Series:
+def compute_rsi(
+    df: pd.DataFrame,
+    window: int = 14,
+    column: str = "Close",
+    *,
+    changes: pd.Series | None = None,
+) -> pd.Series:
     change = df[column].diff() if changes is None else changes
     gains = change.clip(lower=0).rolling(window, min_periods=window).mean()
     losses = (-change.clip(upper=0)).rolling(window, min_periods=window).mean()
@@ -32,8 +47,11 @@ def compute_rsi(df: pd.DataFrame, window: int = 14, column: str = "Close",
 
 
 def compute_macd(
-    df: pd.DataFrame, column: str = "Close", fast: int = 12,
-    slow: int = 26, signal: int = 9,
+    df: pd.DataFrame,
+    column: str = "Close",
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
 ) -> tuple[pd.Series, pd.Series]:
     close = df[column]
     fast_ema = close.ewm(span=fast, adjust=False, min_periods=fast).mean()
@@ -51,14 +69,18 @@ def _one_symbol_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     # single-session close-to-close change. Do not fabricate one from two
     # nonadjacent observed closes.
     change = frame["Close"].diff().where(adjacent)
-    true_range = pd.concat(
-        [
-            frame["High"] - frame["Low"],
-            (frame["High"] - previous_close).abs(),
-            (frame["Low"] - previous_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1).where(adjacent | previous_close.isna())
+    true_range = (
+        pd.concat(
+            [
+                frame["High"] - frame["Low"],
+                (frame["High"] - previous_close).abs(),
+                (frame["Low"] - previous_close).abs(),
+            ],
+            axis=1,
+        )
+        .max(axis=1)
+        .where(adjacent | previous_close.isna())
+    )
     frame["ATR"] = true_range.rolling(14, min_periods=14).mean()
     frame["MA_20"] = compute_moving_average(frame)
     # RSI must also avoid treating a multi-session price move as one day.
@@ -87,7 +109,9 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("A nonempty indicator DataFrame is required")
     df = df.copy()
     if not valid_price_bars(df, require_volume="Volume" in df).all():
-        raise ValueError("Indicator OHLC prices must be coherent and finite; supplied Volume must be nonnegative")
+        raise ValueError(
+            "Indicator OHLC prices must be coherent and finite; supplied Volume must be nonnegative"
+        )
     # The shared validator accepts numeric CSV strings; calculate on the
     # normalized numbers rather than attempting subtraction on strings.
     for column in ("Open", "High", "Low", "Close", "Volume"):
@@ -103,7 +127,8 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if "Date" not in df:
         raise ValueError("Date is required for multi-ticker indicators")
     df["Name"] = normalize_ticker_symbols(
-        df["Name"], context="Every indicator observation must have a ticker name",
+        df["Name"],
+        context="Every indicator observation must have a ticker name",
     )
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations in indicator input")
@@ -112,10 +137,14 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # for a peer on the same Exchange can expose a missing session here.
     if "Session_Number" not in df:
         df["Session_Number"] = session_positions(df)
-    return pd.concat(
-        [
-            _one_symbol_indicators(group.sort_values("Date"))
-            for _, group in df.groupby("Name", sort=True)
-        ],
-        axis=0,
-    ).sort_values(["Date", "Name"]).reset_index(drop=True)
+    return (
+        pd.concat(
+            [
+                _one_symbol_indicators(group.sort_values("Date"))
+                for _, group in df.groupby("Name", sort=True)
+            ],
+            axis=0,
+        )
+        .sort_values(["Date", "Name"])
+        .reset_index(drop=True)
+    )
