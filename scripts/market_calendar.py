@@ -99,15 +99,82 @@ class _HistoricalNYSEHolidays(AbstractHolidayCalendar):
     source-session attestations and are not inferred from these rules.
     """
 
+    # Friday observance was introduced at different times for different
+    # holidays. The pre-1971 Monday rules do not apply to these fixed dates.
     rules = [
-        Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),
-        Holiday("Washington's Birthday", month=2, day=22, observance=sunday_to_monday),
+        Holiday(
+            "New Year's Day through 1953",
+            month=1,
+            day=1,
+            observance=sunday_to_monday,
+            end_date="1953-12-31",
+        ),
+        Holiday(
+            "New Year's Day from 1954",
+            month=1,
+            day=1,
+            observance=nearest_workday,
+            start_date="1954-01-01",
+        ),
+        Holiday(
+            "Washington's Birthday through 1963",
+            month=2,
+            day=22,
+            observance=sunday_to_monday,
+            end_date="1963-12-31",
+        ),
+        Holiday(
+            "Washington's Birthday from 1964",
+            month=2,
+            day=22,
+            observance=nearest_workday,
+            start_date="1964-01-01",
+        ),
         GoodFriday,
-        Holiday("Memorial Day", month=5, day=30, observance=sunday_to_monday),
-        Holiday("Independence Day", month=7, day=4, observance=sunday_to_monday),
+        Holiday(
+            "Memorial Day through 1963",
+            month=5,
+            day=30,
+            observance=sunday_to_monday,
+            end_date="1963-12-31",
+        ),
+        Holiday(
+            "Memorial Day from 1964",
+            month=5,
+            day=30,
+            observance=nearest_workday,
+            start_date="1964-01-01",
+        ),
+        Holiday(
+            "Independence Day through 1953",
+            month=7,
+            day=4,
+            observance=sunday_to_monday,
+            end_date="1953-12-31",
+        ),
+        Holiday(
+            "Independence Day from 1954",
+            month=7,
+            day=4,
+            observance=nearest_workday,
+            start_date="1954-01-01",
+        ),
         Holiday("Labor Day", month=9, day=1, offset=DateOffset(weekday=MO(1))),
         Holiday("Thanksgiving", month=11, day=1, offset=DateOffset(weekday=TH(4))),
-        Holiday("Christmas Day", month=12, day=25, observance=sunday_to_monday),
+        Holiday(
+            "Christmas Day through 1953",
+            month=12,
+            day=25,
+            observance=sunday_to_monday,
+            end_date="1953-12-31",
+        ),
+        Holiday(
+            "Christmas Day from 1954",
+            month=12,
+            day=25,
+            observance=nearest_workday,
+            start_date="1954-01-01",
+        ),
     ]
 
 
@@ -159,6 +226,25 @@ def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIn
     ]
     closure_days = recurring_holidays.union(exceptions)
     return pd.bdate_range(start, end, freq=CustomBusinessDay(holidays=closure_days))
+
+
+# The Nasdaq quotation system launched on February 8, 1971. Its OTC market
+# traded briefly on September 27, 1985 while the NYSE remained closed by
+# Hurricane Gloria. A shortened session is still a valid daily price bar.
+_NASDAQ_FIRST_SESSION = pd.Timestamp("1971-02-08")
+_NASDAQ_OPEN_NYSE_CLOSED = pd.DatetimeIndex(["1985-09-27"])
+
+
+@lru_cache(maxsize=32)
+def _nasdaq_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
+    """NYSE-aligned Nasdaq schedule plus verified exchange-specific sessions."""
+    if end < _NASDAQ_FIRST_SESSION:
+        return pd.DatetimeIndex([])
+    start = max(start, _NASDAQ_FIRST_SESSION)
+    additions = _NASDAQ_OPEN_NYSE_CLOSED[
+        (_NASDAQ_OPEN_NYSE_CLOSED >= start) & (_NASDAQ_OPEN_NYSE_CLOSED <= end)
+    ]
+    return _scheduled_sessions(start, end).union(additions).sort_values()
 
 
 def _valid_daily_mask(dates: pd.DatetimeIndex) -> np.ndarray:
@@ -215,7 +301,9 @@ def validate_nyse_open_dates(
 
 
 # Explicit aliases for exchanges whose actual scheduled sessions are known.
-_US_EQUITY_EXCHANGES = frozenset({"NYSE", "XNYS", "NASDAQ", "XNAS"})
+_NYSE_EXCHANGES = frozenset({"NYSE", "XNYS"})
+_NASDAQ_EXCHANGES = frozenset({"NASDAQ", "XNAS"})
+_US_EQUITY_EXCHANGES = _NYSE_EXCHANGES | _NASDAQ_EXCHANGES
 _LONDON_EXCHANGES = frozenset({"LSE", "XLON"})
 _TORONTO_EXCHANGES = frozenset({"TSX", "XTSE"})
 _KNOWN_EXCHANGES = _US_EQUITY_EXCHANGES | _LONDON_EXCHANGES | _TORONTO_EXCHANGES
@@ -270,7 +358,16 @@ def exchange_open_mask(
                 verified_session_ordinals=verified_session_ordinals,
             )
         return result
-    if label in _US_EQUITY_EXCHANGES:
+    if label in _NASDAQ_EXCHANGES:
+        # Nasdaq cannot contain sessions before its February 1971 launch.
+        # On 1985-09-27 the OTC market traded until noon, unlike the NYSE.
+        result = nyse_open_mask(
+            dates, verified_session_ordinals=verified_session_ordinals
+        )
+        return (
+            result | dates.isin(_NASDAQ_OPEN_NYSE_CLOSED)
+        ) & (dates >= _NASDAQ_FIRST_SESSION)
+    if label in _NYSE_EXCHANGES:
         return nyse_open_mask(
             dates, verified_session_ordinals=verified_session_ordinals
         )
@@ -384,7 +481,10 @@ def inferred_equity_sessions(
         scheduled = _exchange_sessions(first, last, label)
         validate_exchange_open_dates(dates, label)
         return scheduled
-    if label in _US_EQUITY_EXCHANGES:
+    if label in _NASDAQ_EXCHANGES:
+        validate_exchange_open_dates(dates, label)
+        return _nasdaq_sessions(first, last)
+    if label in _NYSE_EXCHANGES:
         validate_exchange_open_dates(dates, label)
         return _scheduled_sessions(first, last)
     raise ValueError(

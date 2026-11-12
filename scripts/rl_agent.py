@@ -332,6 +332,9 @@ class QLearningAgent:
             or not 0 < alpha <= 1
             or not 0 <= gamma <= 1
             or not 0 <= epsilon <= 1
+            or not isinstance(seed, (int, np.integer))
+            or isinstance(seed, (bool, np.bool_))
+            or seed < 0
         ):
             raise ValueError("Invalid Q-learning parameters")
         self.actions = actions
@@ -339,7 +342,7 @@ class QLearningAgent:
         self.gamma = gamma
         self.epsilon = epsilon
         self.q_table: dict[tuple[int, ...], dict[str, float]] = {}
-        self.rng = random.Random(seed)
+        self.rng = random.Random(int(seed))
 
     def get_state(self, state_features) -> tuple[int, ...]:
         try:
@@ -401,12 +404,14 @@ class QLearningAgent:
         expected_position = {"buy": 1, "sell": 0, "hold": state[-1]}[action]
         if next_state[-1] != expected_position:
             raise ValueError("Next position is inconsistent with the trading action")
-        try:
-            reward = float(reward)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Reward must be finite") from exc
-        if not np.isfinite(reward):
-            raise ValueError("Reward must be finite")
+        if isinstance(reward, (bool, np.bool_)):
+            raise ValueError("Reward must be a finite real number")
+        # A float() conversion can discard the imaginary part of a NumPy
+        # complex scalar. Reuse the shared strict scalar validation instead.
+        scalar_reward = real_float_array([reward], context="Reward")
+        if scalar_reward.shape != (1,):
+            raise ValueError("Reward must be a finite real scalar")
+        reward = float(scalar_reward[0])
         # Calculate and validate the update before changing either state entry.
         future = (
             0.0

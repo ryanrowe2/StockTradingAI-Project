@@ -31,6 +31,14 @@ python scripts/data_processing.py
 python scripts/data_processing.py --ticker AAPL --output data/generated/aapl_stock_features.csv
 ```
 
+The source-derived session calendar excludes otherwise parseable records
+on closed NYSE dates, even when they belong to an unrelated ticker. Nasdaq
+historical inference rejects pre-launch (before 1971-02-08) observations,
+but includes the verified half-day session on 1985-09-27. Direct exchange
+validators preserve this distinction. Complex Q-learning rewards and
+unsupported seeds are rejected; scored ticker/date duplicates are rejected
+before date-block bootstrapping when a `Name` identifier is supplied.
+
 The source CSV is validated for required columns, explicit ISO year-first
 calendar dates (including non-zero-padded months/days), finite numeric values,
 positive OHLC prices, coherent daily high/low ranges, and unique `(Name, Date)`

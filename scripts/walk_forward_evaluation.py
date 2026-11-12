@@ -35,6 +35,7 @@ if __package__:
         validate_session_positions,
     )
     from .numeric_validation import binary_label_array, real_float_array
+    from .ticker_validation import normalize_ticker_symbols
     from .model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -63,6 +64,7 @@ else:
         validate_session_positions,
     )
     from numeric_validation import binary_label_array, real_float_array
+    from ticker_validation import normalize_ticker_symbols
     from model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -150,6 +152,15 @@ def _market_date_block_ids(
         frame, verified_datetime_dates=verified_datetime_dates
     )
     dates = parse_daily_dates(frame["Date"], context="Bootstrap dates")
+    if "Name" in frame:
+        symbols = normalize_ticker_symbols(
+            frame["Name"], context="Bootstrap ticker identities"
+        )
+        identities = pd.DataFrame(
+            {"Name": symbols.to_numpy(), "Date": dates.to_numpy()}
+        )
+        if identities.duplicated(["Name", "Date"]).any():
+            raise ValueError("Duplicate scored ticker/date observations")
     days = pd.DatetimeIndex(dates.unique()).sort_values()
     columns = ["Date"]
     if "Exchange" in frame:
@@ -450,6 +461,7 @@ def walk_forward_experiment(
             pd.DataFrame(
                 {
                     "Date": test["Date"].to_numpy(),
+                    "Name": test["Name"].to_numpy(),
                     **(
                         {"Exchange": test["Exchange"].to_numpy()}
                         if "Exchange" in test
