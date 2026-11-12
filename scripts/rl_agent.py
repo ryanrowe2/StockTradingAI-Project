@@ -17,7 +17,11 @@ import numpy as np
 import pandas as pd
 
 if __package__:
-    from .date_validation import mark_verified_daily_dates, parse_daily_dates, require_verified_daily_date_source
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from .session_validation import (
         adjacent_session_flags,
         session_positions,
@@ -25,7 +29,11 @@ if __package__:
     )
     from .ticker_validation import normalize_ticker_symbols
 else:
-    from date_validation import mark_verified_daily_dates, parse_daily_dates, require_verified_daily_date_source
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from session_validation import (
         adjacent_session_flags,
         session_positions,

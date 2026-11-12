@@ -9,11 +9,19 @@ from scipy.special import logsumexp
 from scipy.stats import multivariate_normal
 
 if __package__:
-    from .date_validation import mark_verified_daily_dates, parse_daily_dates, require_verified_daily_date_source
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from .session_validation import session_positions, validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
-    from date_validation import mark_verified_daily_dates, parse_daily_dates, require_verified_daily_date_source
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from session_validation import session_positions, validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 

@@ -1205,7 +1205,8 @@ def test_hmm_rejects_incomplete_ticker_identity():
     with pytest.raises(ValueError, match="one ticker"):
         _validated_indicators(
             frame.assign(Name=["AAA", " ", "AAA"]),
-            ("MA_20",), verified_datetime_dates=True,
+            ("MA_20",),
+            verified_datetime_dates=True,
         )
 
 

@@ -17,15 +17,17 @@ from scripts.technical_indicators import add_technical_indicators
 
 def bars(dates, exchange=None, ordinals=None):
     length = len(dates)
-    result = pd.DataFrame({
-        "Date": dates,
-        "Name": ["AAA"] * length,
-        "Open": [10.0] * length,
-        "High": [12.0] * length,
-        "Low": [9.0] * length,
-        "Close": [11.0] * length,
-        "Volume": [100] * length,
-    })
+    result = pd.DataFrame(
+        {
+            "Date": dates,
+            "Name": ["AAA"] * length,
+            "Open": [10.0] * length,
+            "High": [12.0] * length,
+            "Low": [9.0] * length,
+            "Close": [11.0] * length,
+            "Volume": [100] * length,
+        }
+    )
     if exchange is not None:
         result["Exchange"] = [exchange] * length
     if ordinals is not None:
@@ -93,11 +95,10 @@ def test_direct_hmm_helper_rejects_unverified_coerced_months():
     source["MA_20"] = [10.0, 11.0]
     with pytest.raises(ValueError, match="unknown original precision"):
         _validated_indicators(source, ("MA_20",))
-    assert len(
-        _validated_indicators(
-            source, ("MA_20",), verified_datetime_dates=True
-        )
-    ) == 2
+    assert (
+        len(_validated_indicators(source, ("MA_20",), verified_datetime_dates=True))
+        == 2
+    )
 
 
 def test_validated_frame_preserves_provenance_for_direct_apis():
