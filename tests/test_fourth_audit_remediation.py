@@ -97,6 +97,7 @@ def test_exchange_level_metadata_can_share_dates():
         }
     )
     validate_session_positions(frame)
+    validate_session_positions(frame, require_consecutive=True)
 
 
 def test_duplicate_exchange_level_dates_still_rejected():
