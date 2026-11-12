@@ -53,3 +53,43 @@ def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series
     except (TypeError, AttributeError, ValueError) as exc:
         raise ValueError(message) from exc
     return parsed
+
+
+# A validated DataFrame carries its source-date attestation into derived copies.
+# This marker is also an explicit caller assertion, never proof by itself.
+VERIFIED_DAILY_DATES_ATTR = "stocktrading_verified_daily_dates"
+
+
+def require_verified_daily_date_source(
+    frame: pd.DataFrame, *, verified_datetime_dates: bool = False
+) -> None:
+    """Reject previously coerced timestamps without a source-precision attestation.
+
+    DataFrame construction erases whether NumPy dates originally identified a
+    month or an actual day. Public APIs must not silently interpret the first
+    day of a month as a daily observation. Validated frames retain their
+    attestation in DataFrame.attrs; independent callers may explicitly attest.
+    """
+    if not isinstance(verified_datetime_dates, (bool, np.bool_)):
+        raise ValueError("verified_datetime_dates must be a boolean")
+    if "Date" not in frame:
+        return
+    supplied = frame["Date"]
+    ambiguous = (
+        pd.api.types.is_datetime64_any_dtype(supplied.dtype)
+        or supplied.map(lambda value: isinstance(value, pd.Timestamp)).any()
+    )
+    if ambiguous and not (
+        verified_datetime_dates or frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
+    ):
+        raise ValueError(
+            "Pandas datetime dates have unknown original precision; use original "
+            "ISO daily dates or explicitly set verified_datetime_dates=True "
+            "after verifying their source precision"
+        )
+
+
+def mark_verified_daily_dates(frame: pd.DataFrame) -> pd.DataFrame:
+    """Mark a frame whose source dates have already passed daily verification."""
+    frame.attrs[VERIFIED_DAILY_DATES_ATTR] = True
+    return frame

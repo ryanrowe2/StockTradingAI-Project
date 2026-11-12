@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-import exchange_calendars as exchange_calendars
-
+import exchange_calendars
 import numpy as np
 import pandas as pd
 from pandas.tseries.holiday import (
@@ -124,19 +123,26 @@ def validate_nyse_open_dates(dates: pd.DatetimeIndex) -> None:
 # Explicit aliases for exchanges whose actual scheduled sessions are known.
 _US_EQUITY_EXCHANGES = frozenset({"NYSE", "XNYS", "NASDAQ", "XNAS"})
 _LONDON_EXCHANGES = frozenset({"LSE", "XLON"})
+_TORONTO_EXCHANGES = frozenset({"TSX", "XTSE"})
+_KNOWN_EXCHANGES = _US_EQUITY_EXCHANGES | _LONDON_EXCHANGES | _TORONTO_EXCHANGES
 
 
 @lru_cache(maxsize=64)
-def _london_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
-    """Use the authoritative London Stock Exchange trading calendar.
-
-    Padding prevents a one-day date range or a range beginning on a holiday
-    from being rejected by the calendar constructor.
-    """
+def _exchange_sessions(
+    start: pd.Timestamp, end: pd.Timestamp, exchange: str
+) -> pd.DatetimeIndex:
+    """Official dated sessions for the London and Toronto stock exchanges."""
+    code = "XLON" if exchange in _LONDON_EXCHANGES else "XTSE"
+    # Explicit bounds prevent results from changing with today's date.
     calendar = exchange_calendars.get_calendar(
-        "XLON", start=start - pd.Timedelta(days=14), end=end + pd.Timedelta(days=14)
+        code, start=start - pd.Timedelta(days=14), end=end + pd.Timedelta(days=14)
     )
     return pd.DatetimeIndex(calendar.sessions_in_range(start, end))
+
+
+def _london_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
+    """Backward-compatible London calendar accessor."""
+    return _exchange_sessions(start, end, "XLON")
 
 
 def exchange_open_mask(
@@ -151,15 +157,15 @@ def exchange_open_mask(
     label = "NYSE" if exchange is None else exchange.strip().upper()
     if label in _US_EQUITY_EXCHANGES:
         return nyse_open_mask(dates)
-    if label in _LONDON_EXCHANGES:
+    if label in (_LONDON_EXCHANGES | _TORONTO_EXCHANGES):
         modern = dates >= pd.Timestamp("1971-01-01")
-        historical_saturday = (dates.dayofweek == 5) & (
+        historic_saturday = (dates.dayofweek == 5) & (
             dates <= LAST_NYSE_SATURDAY_SESSION
         )
-        valid = ~pd.isna(dates) & ((dates.dayofweek < 5) | historical_saturday)
+        valid = ~pd.isna(dates) & ((dates.dayofweek < 5) | historic_saturday)
         if modern.any():
             observed = dates[modern]
-            sessions = _london_sessions(observed.min(), observed.max())
+            sessions = _exchange_sessions(observed.min(), observed.max(), label)
             valid[modern] = observed.isin(sessions)
         return valid
     # Do not pretend to know a custom market's holidays or its exact ordinals.
@@ -193,8 +199,8 @@ def inferred_equity_sessions(
     Inferred dates must themselves be valid sessions. U.S. stocks without an
     Exchange label use the NYSE/Nasdaq regular-market schedule; declared LSE
     stocks use the London Stock Exchange schedule. For unknown exchanges,
-    observed weekdays are retained alongside the U.S. weekday baseline;
-    verified Session_Number metadata is required for exact custom adjacency.
+    no sessions are inferred for unknown exchanges: their callers must supply
+    independently verified Session_Number metadata.
     """
     if dates.empty:
         return pd.DatetimeIndex([])
@@ -207,12 +213,14 @@ def inferred_equity_sessions(
             "NYSE dates before 1971 require verified Session_Number metadata"
         )
     label = "NYSE" if exchange is None or nyse_only else exchange.strip().upper()
-    if label in _LONDON_EXCHANGES:
-        scheduled = _london_sessions(first, last)
+    if label in (_LONDON_EXCHANGES | _TORONTO_EXCHANGES):
+        scheduled = _exchange_sessions(first, last, label)
         validate_exchange_open_dates(dates, label)
         return scheduled
-    scheduled = _scheduled_sessions(first, last)
     if label in _US_EQUITY_EXCHANGES:
         validate_exchange_open_dates(dates, label)
-        return scheduled
-    return scheduled.union(dates.unique()).sort_values()
+        return _scheduled_sessions(first, last)
+    raise ValueError(
+        f"Unknown exchange {label!r} requires verified Session_Number metadata; "
+        "refusing to invent sessions from another market's calendar"
+    )

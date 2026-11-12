@@ -92,9 +92,8 @@ history. The aliases `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S.
 calendar, including when `Exchange` is omitted. The aliases `LSE` and `XLON`
 use the London Stock Exchange session calendar (including Boxing Day).
 Observed dates outside any recognized market's actual calendar are rejected,
-with or without supplied ordinals. Unrecognized explicit exchange labels retain
-the earlier observed-weekday fallback and require verified `Session_Number`
-metadata for trustworthy exact adjacency.
+with or without supplied ordinals. Unrecognized explicit exchange labels require verified `Session_Number`
+metadata; automatic inference is disabled for those markets.
 From 1971 onward, supplied NYSE ordinals must also advance by the exact number
 of scheduled market sessions between observations, preventing missing trading
 days from being concealed by compressed consecutive session numbers.
@@ -424,3 +423,17 @@ contamination.
 - [hmmlearn: Gaussian HMMs](https://hmmlearn.readthedocs.io/)
 - [scikit-learn: metrics](https://scikit-learn.org/stable/modules/model_evaluation.html)
 - [Source dataset: Stock Time Series 20050101 to 20171231](https://www.kaggle.com/datasets/szrlee/stock-time-series-20050101-to-20171231)
+
+**Exchange and date-source safeguards.** NYSE/XNYS, NASDAQ/XNAS, LSE/XLON, and
+TSX/XTSE observations use their corresponding trading calendars; inferred and
+supplied `Session_Number` values must preserve actual session gaps. Unknown
+explicit exchange identifiers must provide independently verified
+`Session_Number` values, rather than inheriting fictional sessions from the
+U.S. calendar. Unlabeled equity records use the U.S. calendar. Direct
+`add_technical_indicators`, `SimpleTradingEnv`,
+`contiguous_trading_segments`, and HMM entry points now require an explicit
+`verified_datetime_dates=True` attestation when supplied already-coerced
+pandas timestamps. Results of `validate_bars` carry their verified-date marker
+through normal pandas frame operations; raw ISO date strings remain supported.
+Do not attest to converted month/year-only dates without inspecting the
+original source precision.
