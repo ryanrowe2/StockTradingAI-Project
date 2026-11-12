@@ -13,9 +13,13 @@ from scripts.walk_forward_evaluation import paired_block_accuracy_intervals
 
 
 def _daily_dates(count: int = 60) -> list[str]:
-    return _scheduled_sessions(
-        pd.Timestamp("2024-01-02"), pd.Timestamp("2024-05-31")
-    )[:count].strftime("%Y-%m-%d").tolist()
+    return (
+        _scheduled_sessions(pd.Timestamp("2024-01-02"), pd.Timestamp("2024-05-31"))[
+            :count
+        ]
+        .strftime("%Y-%m-%d")
+        .tolist()
+    )
 
 
 def _split_frame(dates: list[str]) -> pd.DataFrame:
@@ -44,9 +48,7 @@ def test_split_accepts_day_precision_and_rejects_coerced_monthly_source():
     daily = _split_frame(_daily_dates())
     assert len(chronological_split(daily).train) > 0
     monthly = _split_frame(
-        pd.date_range("2019-01-01", periods=50, freq="MS")
-        .strftime("%Y-%m-%d")
-        .tolist()
+        pd.date_range("2019-01-01", periods=50, freq="MS").strftime("%Y-%m-%d").tolist()
     )
     monthly["Date"] = pd.to_datetime(monthly["Date"])
     monthly["Target_Date"] = pd.to_datetime(monthly["Target_Date"])
@@ -99,9 +101,7 @@ def test_bootstrap_uses_converted_numeric_string_probabilities():
     [
         pd.DataFrame({"Date": ["not-a-date"], "Session_Number": [-7]}),
         pd.DataFrame({"Date": ["2024-01-15"], "Session_Number": [7]}),
-        pd.DataFrame(
-            {"Date": ["2024-01-02", "2024-01-03"], "Session_Number": [7, 7]}
-        ),
+        pd.DataFrame({"Date": ["2024-01-02", "2024-01-03"], "Session_Number": [7, 7]}),
     ],
 )
 def test_session_accessor_rejects_invalid_supplied_metadata(frame):
