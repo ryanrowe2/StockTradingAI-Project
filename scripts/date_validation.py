@@ -137,17 +137,26 @@ def require_verified_daily_date_source(
     )
 
 
-def mark_verified_daily_dates(frame: pd.DataFrame) -> pd.DataFrame:
-    """Attest the current date values, including separate target-date identity.
+def mark_verified_daily_dates(
+    frame: pd.DataFrame,
+    *,
+    columns: tuple[str, ...] = ("Date", "Target_Date"),
+) -> pd.DataFrame:
+    """Explicitly attest only date columns with independently checked provenance.
 
-    Immutable row tokens permit validated subsets, sorting, and index resets
-    without trusting date columns that were replaced after validation.
+    Processing helpers that validated only observation dates must request
+    columns=("Date",). Earlier Target_Date tokens survive transformations,
+    so a modified target never acquires a fresh attestation inadvertently.
+    The default remains for explicit callers who have verified both columns
+    and for feature creation that derives a verified target.
     """
-    attested = {
-        column: _VerifiedRows(_verified_row_tokens(frame, column))
-        for column in ("Date", "Target_Date")
-        if column in frame
-    }
+    if any(name not in ("Date", "Target_Date") for name in columns):
+        raise ValueError("Only Date and Target_Date may be date-attested")
+    old = frame.attrs.get(_VERIFIED_ROWS_ATTR)
+    attestations = dict(old) if isinstance(old, dict) else {}
+    for column in columns:
+        if column in frame:
+            attestations[column] = _VerifiedRows(_verified_row_tokens(frame, column))
     frame.attrs[VERIFIED_DAILY_DATES_ATTR] = True
-    frame.attrs[_VERIFIED_ROWS_ATTR] = attested
+    frame.attrs[_VERIFIED_ROWS_ATTR] = attestations
     return frame
