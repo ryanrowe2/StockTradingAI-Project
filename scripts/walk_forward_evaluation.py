@@ -179,7 +179,8 @@ def _market_date_block_ids(
     if "Session_Number" in frame and "Name" not in frame:
         source_aliases = _normalized_exchange_labels(frame)
         market_names = (
-            source_aliases if source_aliases is not None
+            source_aliases
+            if source_aliases is not None
             else pd.Series("NYSE", index=frame.index)
         )
         conflicts = pd.DataFrame(
@@ -191,7 +192,9 @@ def _market_date_block_ids(
         )
         if (
             conflicts.groupby(["Exchange", "Date"])["Session_Number"]
-            .nunique().gt(1).any()
+            .nunique()
+            .gt(1)
+            .any()
         ):
             raise ValueError("Conflicting session ordinals for the same market date")
     # Modern official calendars supersede arbitrary offsets in per-ticker
