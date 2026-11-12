@@ -2595,9 +2595,9 @@ def test_trading_rejects_invalid_execution_costs(kwargs):
 
 
 def test_paired_market_date_bootstrap_is_deterministic_and_paired():
-    dates = _scheduled_sessions(
-        pd.Timestamp("2026-01-01"), pd.Timestamp("2026-02-15")
-    )[:20].repeat(2)
+    dates = _scheduled_sessions(pd.Timestamp("2026-01-01"), pd.Timestamp("2026-02-15"))[
+        :20
+    ].repeat(2)
     observed = pd.DataFrame(
         {
             "Date": dates,
