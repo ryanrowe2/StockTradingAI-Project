@@ -28,8 +28,7 @@ def verify_publisher_sources(
         not isinstance(expected, dict)
         or len(expected) != 31
         or names != set(expected)
-        or manifest.get("source_commit")
-        != "8da42f14ae64fca79b9b8b51208e98674fc3d4e9"
+        or manifest.get("source_commit") != "8da42f14ae64fca79b9b8b51208e98674fc3d4e9"
     ):
         raise ValueError("Publisher source file set or immutable commit is invalid")
     for name, upstream_blob in expected.items():
@@ -43,7 +42,9 @@ def verify_publisher_sources(
 
 def main() -> None:
     count = verify_publisher_sources()
-    print(f"Verified {count} historical ticker CSVs against immutable publisher Git blobs")
+    print(
+        f"Verified {count} historical ticker CSVs against immutable publisher Git blobs"
+    )
 
 
 if __name__ == "__main__":
