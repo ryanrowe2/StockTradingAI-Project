@@ -315,12 +315,26 @@ For tests, install the development requirements and run:
 python -m pip install -r requirements-dev.txt
 python -m pytest tests -q
 python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
+python -m scripts.verify_source_data
 ```
+
+The published source-data integrity snapshot is
+[`docs/source_data_manifest.json`](docs/source_data_manifest.json): SHA-256
+digests for all 33 CSVs, with exact row reconciliation between the combined
+source, 31 ticker files, and 2017 subset. This establishes release-internal
+byte integrity; the upstream license evidence is recorded separately in
+[`data/raw/README.md`](data/raw/README.md). CI checks branch-aware coverage
+and risk-weighted module thresholds, as well as fixed per-fold experimental
+snapshots. Windows/macOS runs use flexible dependencies as portability smoke
+tests; Ubuntu 24.04 remains the hash-locked reproducibility reference.
 
 The saved notebook tables and figures are **certified against the pinned
 Python 3.12 / Ubuntu 24.04 environment**. Python 3.10 and 3.11 are covered by
-the regression, lint and formatting matrix, but are not certified for
-byte-for-byte reproduction of those saved notebook outputs.
+the regression, lint and formatting matrix. Notebook text and rich output are
+compared exactly; PNG charts are decoded and compared using bounded visual
+difference tests, **not byte-for-byte PNG equality**. This protects saved
+research content from meaningful chart drift without implying identical image
+encoder metadata or platform rasterization.
 
 ### Interactive notebooks
 
