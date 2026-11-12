@@ -49,9 +49,8 @@ def test_valid_target_attestation_survives_bar_validation():
 def test_changed_target_cannot_be_reauthorized_by_bar_validation():
     changed = _attested_bars()
     changed.loc[0, "Target_Date"] = pd.Timestamp("2024-01-08")
-    prepared = validate_bars(changed)
     with pytest.raises(ValueError, match="unknown original precision or changed"):
-        require_verified_daily_date_source(prepared, column="Target_Date")
+        validate_bars(changed)
 
 
 def test_changed_target_cannot_be_reauthorized_by_indicator_calculation():
