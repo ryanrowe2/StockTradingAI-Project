@@ -186,7 +186,7 @@ def _market_date_block_ids(
         ):
             raise ValueError("Conflicting session ordinals for the same market date")
     metadata = metadata.drop_duplicates().copy()
-    mark_verified_daily_dates(metadata)
+    mark_verified_daily_dates(metadata, columns=("Date",))
     validate_session_positions(metadata)
 
     known_calendars = []
@@ -479,7 +479,7 @@ def walk_forward_experiment(
                 }
             )
         )
-    scored = mark_verified_daily_dates(pd.concat(scored_folds, ignore_index=True))
+    scored = mark_verified_daily_dates(pd.concat(scored_folds, ignore_index=True), columns=("Date",))
     intervals = paired_block_accuracy_intervals(
         scored,
         block_sessions=block_sessions,
