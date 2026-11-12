@@ -3378,7 +3378,11 @@ def test_historical_nyse_mask_rejects_impossible_weekends(closed):
     with pytest.raises(ValueError, match="closed-market date"):
         validate_nyse_open_dates(dates)
     # Saturday sessions genuinely occurred before May 24, 1952.
-    assert nyse_open_mask(pd.DatetimeIndex(["1951-01-06"])).tolist() == [True]
+    assert nyse_open_mask(pd.DatetimeIndex(["1951-01-06"])).tolist() == [False]
+    assert nyse_open_mask(
+        pd.DatetimeIndex(["1951-01-06"]),
+        verified_session_ordinals=True,
+    ).tolist() == [True]
 
 
 def test_validate_bars_does_not_trust_pandas_coerced_numpy_months():

@@ -47,8 +47,9 @@ Date-only U.S. equity data from 1971 onward use scheduled NYSE/Nasdaq sessions,
 including effective-dated holidays, 1972–1980 presidential Election Day
 closures, and exceptional full-day closures. The historical NYSE validator
 also recognizes documented 1968 Wednesday paperwork-crisis closures and
-other known special closures in 1968–1969; pre-1971 date evidence still
-requires verified session ordinals at the training and ingestion boundary. Observations on closed U.S. market
+other known special closures in 1968–1969. Standalone NYSE date validation
+also requires explicit verified session ordinals for any pre-1971 observations;
+that attestation remains required at training and ingestion boundaries. Observations on closed U.S. market
 dates are rejected even when `Exchange` is omitted or session ordinals are
 supplied. An optional `Exchange` column groups stocks on the same market:
 `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S. calendar;

@@ -115,13 +115,17 @@ def _valid_daily_mask(dates: pd.DatetimeIndex) -> np.ndarray:
     return ~pd.isna(dates) & (dates == dates.normalize())
 
 
-def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
-    """Identify known NYSE sessions; pre-1971 dates require external ordinals."""
+def nyse_open_mask(
+    dates: pd.DatetimeIndex, *, verified_session_ordinals: bool = False
+) -> np.ndarray:
+    """Identify NYSE sessions; pre-1971 candidates need attested ordinals."""
     daily = _valid_daily_mask(dates)
     if not daily.all():
         result = np.zeros(len(dates), dtype=bool)
         if daily.any():
-            result[daily] = nyse_open_mask(dates[daily])
+            result[daily] = nyse_open_mask(
+                dates[daily], verified_session_ordinals=verified_session_ordinals
+            )
         return result
     modern = dates >= pd.Timestamp("1971-01-01")
     # Pre-1971 holiday schedules still require verified ordinals, but Sunday
@@ -131,6 +135,7 @@ def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
         ~pd.isna(dates)
         & ((dates.dayofweek < 5) | historical_saturday)
         & ~dates.isin(_HISTORICAL_NYSE_CLOSURES)
+        & ((dates >= pd.Timestamp("1971-01-01")) | verified_session_ordinals)
     )
     if modern.any():
         observed = dates[modern]
@@ -139,13 +144,15 @@ def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
     return valid
 
 
-def validate_nyse_open_dates(dates: pd.DatetimeIndex) -> None:
-    """Reject recorded NYSE trades on known closed dates from 1971 onward.
-
-    Earlier verified sessions remain caller-supplied because the modern calendar
-    deliberately cannot infer the NYSE's pre-1971 historical schedule.
-    """
-    impossible = dates[~nyse_open_mask(dates)]
+def validate_nyse_open_dates(
+    dates: pd.DatetimeIndex, *, verified_session_ordinals: bool = False
+) -> None:
+    """Reject known closed dates and unverified pre-1971 NYSE sessions."""
+    impossible = dates[
+        ~nyse_open_mask(
+            dates, verified_session_ordinals=verified_session_ordinals
+        )
+    ]
     if not impossible.empty:
         raise ValueError(
             f"NYSE observations contain a closed-market date: {impossible[0].date()}"
@@ -209,7 +216,9 @@ def exchange_open_mask(
             )
         return result
     if label in _US_EQUITY_EXCHANGES:
-        return nyse_open_mask(dates)
+        return nyse_open_mask(
+            dates, verified_session_ordinals=verified_session_ordinals
+        )
     if label in (_LONDON_EXCHANGES | _TORONTO_EXCHANGES):
         modern = dates >= pd.Timestamp("1971-01-01")
         if label in _LONDON_EXCHANGES:
