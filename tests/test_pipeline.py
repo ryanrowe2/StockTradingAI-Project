@@ -2302,11 +2302,11 @@ def test_supplied_session_ordinals_do_not_allow_weekend_stock_bars():
             "Session_Number": [0, 1],
         }
     )
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         validate_bars(bars)
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         add_technical_indicators(bars)
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         SimpleTradingEnv(bars)
 
 
@@ -3193,7 +3193,7 @@ def test_historical_summer_saturday_after_last_nyse_session_is_rejected():
             "Session_Number": [500, 501],
         }
     )
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         validate_bars(bars)
 
 
