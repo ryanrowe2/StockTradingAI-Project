@@ -24,7 +24,7 @@ def real_float_array(values, *, context: str, allow_missing: bool = False) -> np
         raise ValueError(f"{context}: real numeric values are required") from exc
     valid = ~np.isinf(converted) if allow_missing else np.isfinite(converted)
     if not valid.all():
-        raise ValueError(f"{context}: values must be finite")
+        raise ValueError(f"{context} must be finite (nonfinite input)")
     return converted
 
 
