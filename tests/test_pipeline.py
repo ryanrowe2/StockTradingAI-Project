@@ -852,6 +852,7 @@ def test_hmm_training_never_learns_a_transition_across_discarded_market_sessions
 
 def test_hmm_fitting_rejects_history_without_consecutive_market_sessions():
     data = prepare_features(synthetic_bars()).query("Name == 'AAA'").iloc[:60].copy()
+    data["Exchange"] = "XTEST"  # Exact custom-market ordinals are caller-verified.
     data["Session_Number"] = np.arange(len(data)) * 2
     with pytest.raises(
         ValueError, match="Insufficient consecutive-session transitions"
@@ -961,6 +962,7 @@ def test_hmm_large_gap_restarts_in_constant_time():
         {
             "Date": ["2020-01-02", "2020-01-03"],
             "Session_Number": pd.Series([0, 10**12], dtype="uint64"),
+            "Exchange": ["XTEST", "XTEST"],
             "MA_20": [0.0, 0.0],
         }
     )
@@ -1197,10 +1199,14 @@ def test_hmm_rejects_incomplete_ticker_identity():
             "MA_20": [1.0, 2.0, 3.0],
         }
     )
+    mark_verified_daily_dates(frame)
     with pytest.raises(ValueError, match="one ticker"):
-        _validated_indicators(frame, ("MA_20",))
+        _validated_indicators(frame, ("MA_20",), verified_datetime_dates=True)
     with pytest.raises(ValueError, match="one ticker"):
-        _validated_indicators(frame.assign(Name=["AAA", " ", "AAA"]), ("MA_20",))
+        _validated_indicators(
+            frame.assign(Name=["AAA", " ", "AAA"]),
+            ("MA_20",), verified_datetime_dates=True,
+        )
 
 
 @pytest.mark.parametrize(
@@ -2331,6 +2337,7 @@ def test_holdout_trading_is_split_into_independent_contiguous_episodes():
                 pd.Timestamp("2024-01-08"), pd.Timestamp("2024-02-01")
             )[:6],
             "Name": ["AAPL"] * 6,
+            "Exchange": ["XTEST"] * 6,
             "Open": [10.0] * 6,
             "Close": [11.0] * 6,
             "Session_Number": [0, 1, 3, 4, 6, 8],
@@ -2440,6 +2447,10 @@ def test_direct_trading_rejects_weekday_gap_without_session_metadata():
     with pytest.raises(ValueError, match="consecutive market sessions"):
         SimpleTradingEnv(frame)
     frame["Session_Number"] = [0, 1]
+    with pytest.raises(ValueError, match="Session_Number spacing"):
+        SimpleTradingEnv(frame)
+    # A genuinely adjacent session is accepted with verified ordinals.
+    frame["Date"] = ["2024-02-26", "2024-02-27"]
     assert len(SimpleTradingEnv(frame).data) == 2
 
 
@@ -3229,11 +3240,11 @@ def test_supplied_nyse_ordinals_cannot_compress_missing_sessions(exchange):
             "Volume": [100, 100],
         }
     )
-    with pytest.raises(ValueError, match="spacing.*NYSE"):
+    with pytest.raises(ValueError, match=r"spacing.*(?:NYSE|XNYS)"):
         validate_bars(bars)
-    with pytest.raises(ValueError, match="spacing.*NYSE"):
+    with pytest.raises(ValueError, match=r"spacing.*(?:NYSE|XNYS)"):
         add_technical_indicators(bars)
-    with pytest.raises(ValueError, match="spacing.*NYSE"):
+    with pytest.raises(ValueError, match=r"spacing.*(?:NYSE|XNYS)"):
         SimpleTradingEnv(bars)
 
     # Preserve the actual Tuesday session with a one-position gap.
@@ -3258,7 +3269,7 @@ def test_supplied_nyse_ordinals_respect_holidays_and_offsets():
         }
     )
     assert len(validate_bars(bars)) == 2
-    with pytest.raises(ValueError, match="spacing.*NYSE"):
+    with pytest.raises(ValueError, match=r"spacing.*(?:NYSE|XNYS)"):
         validate_bars(bars.assign(Session_Number=[100, 102]))
     # Exact NYSE spacing cannot be imposed on an unrelated exchange.
     assert (
