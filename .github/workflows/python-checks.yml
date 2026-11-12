@@ -11,6 +11,9 @@ permissions:
 
 jobs:
   verify:
+    # These are the protected branch's required checks. Requiring the
+    # portable smoke job here makes Windows/macOS failures block merging.
+    needs: portable-smoke
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
