@@ -74,6 +74,11 @@ DEFAULT_OUTPUT = (
     Path(__file__).resolve().parents[1] / "data/generated/walk_forward_metrics.json"
 )
 
+# Bounded bootstrap execution: 1,000,000 result rows ~= 32 MB for four
+# float64 scores. Draw indices/selected blocks use at most 100,000 cells.
+MAX_BOOTSTRAP_SAMPLES = 1_000_000
+MAX_BOOTSTRAP_BATCH_CELLS = 100_000
+
 
 def _validate_bootstrap_configuration(
     block_sessions: int, bootstrap_samples: int
@@ -84,11 +89,110 @@ def _validate_bootstrap_configuration(
         or block_sessions < 1
         or not isinstance(bootstrap_samples, int)
         or isinstance(bootstrap_samples, bool)
-        or bootstrap_samples < 100
+        or not 100 <= bootstrap_samples <= MAX_BOOTSTRAP_SAMPLES
     ):
         raise ValueError(
-            "block_sessions must be positive and bootstrap_samples at least 100"
+            "block_sessions must be positive and bootstrap_samples must be "
+            f"between 100 and {MAX_BOOTSTRAP_SAMPLES:,}"
         )
+
+
+def _market_date_block_ids(
+    frame: pd.DataFrame,
+    block_sessions: int,
+    *,
+    verified_datetime_dates: bool = False,
+) -> np.ndarray:
+    """Return gap-aware, cross-ticker paired blocks for observed market dates.
+
+    Verified historical and custom-market ordinals are sufficient where the
+    modern exchange calendar cannot be inferred; known modern markets use
+    scheduled sessions even if a source omits some observations.
+    """
+    if "Date" not in frame or frame.empty:
+        raise ValueError("Nonempty market dates are required for resampling")
+    if not isinstance(block_sessions, int) or isinstance(block_sessions, bool):
+        raise ValueError("block_sessions must be a positive integer")
+    if block_sessions < 1:
+        raise ValueError("block_sessions must be a positive integer")
+    require_verified_daily_date_source(
+        frame, verified_datetime_dates=verified_datetime_dates
+    )
+    dates = parse_daily_dates(frame["Date"], context="Bootstrap dates")
+    days = pd.DatetimeIndex(dates.unique()).sort_values()
+    columns = ["Date"]
+    if "Exchange" in frame:
+        columns.append("Exchange")
+    if "Session_Number" in frame:
+        columns.append("Session_Number")
+    metadata = frame.loc[:, columns].drop_duplicates().copy()
+    metadata["Date"] = parse_daily_dates(metadata["Date"], context="Bootstrap dates")
+    exchanges = _normalized_exchange_labels(metadata)
+    if exchanges is not None:
+        metadata["Exchange"] = exchanges
+        metadata["Name"] = metadata["Exchange"]
+    mark_verified_daily_dates(metadata)
+    validate_session_positions(metadata)
+
+    known_calendars = []
+    grouping = (
+        metadata.groupby("Exchange", sort=False)
+        if exchanges is not None
+        else (("NYSE", metadata),)
+    )
+    ordinal_groups = []
+    for exchange, group in grouping:
+        exchange_dates = pd.DatetimeIndex(group["Date"])
+        if exchange in _KNOWN_EXCHANGES and (
+            exchange_dates >= pd.Timestamp("1971-01-01")
+        ).all():
+            known_calendars.append(
+                inferred_equity_sessions(
+                    exchange_dates,
+                    start=exchange_dates.min(),
+                    end=exchange_dates.max(),
+                    exchange=exchange,
+                )
+            )
+        else:
+            if "Session_Number" not in group:
+                raise ValueError(
+                    "Historical and custom exchanges require verified "
+                    "Session_Number metadata"
+                )
+            ordinal_groups.append(group.sort_values("Date"))
+    calendar = days
+    for known_sessions in known_calendars:
+        calendar = calendar.union(known_sessions).sort_values()
+    timeline_positions = calendar.get_indexer(days)
+    increments = np.diff(timeline_positions, prepend=timeline_positions[0])
+    increments[0] = 1
+    for group in ordinal_groups:
+        positions = [int(v) for v in group["Session_Number"]]
+        observed = pd.DatetimeIndex(group["Date"])
+        for earlier, later, previous, current in zip(
+            observed[:-1],
+            observed[1:],
+            positions[:-1],
+            positions[1:],
+            strict=True,
+        ):
+            first_index, last_index = days.get_indexer([earlier, later])
+            covered = int(increments[first_index + 1 : last_index + 1].sum())
+            if current - previous > covered:
+                # Only the existence of a gap matters; assigning the actual
+                # gap size could overflow int64 for far-apart uint64 ordinals.
+                increments[last_index] = max(int(increments[last_index]), 2)
+    blocks = np.empty(len(days), dtype=np.int64)
+    current_block = -1
+    sessions_in_block = 0
+    for index, step in enumerate(increments):
+        if index == 0 or step != 1 or sessions_in_block == block_sessions:
+            current_block += 1
+            sessions_in_block = 0
+        blocks[index] = current_block
+        sessions_in_block += 1
+    return blocks[days.get_indexer(dates)]
 
 
 def paired_block_accuracy_intervals(
@@ -127,83 +231,9 @@ def paired_block_accuracy_intervals(
         or ((probabilities < 0) | (probabilities > 1)).any()
     ):
         raise ValueError("Bootstrap probabilities must be finite values in [0, 1]")
-    dates = parse_daily_dates(scored["Date"], context="Bootstrap dates")
-    require_verified_daily_date_source(
-        scored, verified_datetime_dates=verified_datetime_dates
+    block_id = _market_date_block_ids(
+        scored, block_sessions, verified_datetime_dates=verified_datetime_dates
     )
-    days = pd.DatetimeIndex(dates.unique()).sort_values()
-    columns = ["Date"]
-    if "Exchange" in scored:
-        columns.append("Exchange")
-    if "Session_Number" in scored:
-        columns.append("Session_Number")
-    metadata = scored.loc[:, columns].drop_duplicates().copy()
-    metadata["Date"] = parse_daily_dates(metadata["Date"], context="Bootstrap dates")
-    exchanges = _normalized_exchange_labels(metadata)
-    if exchanges is not None:
-        metadata["Exchange"] = exchanges
-        # Use the actual exchange as the market identity, not the same date
-        # appearing on different exchanges as a duplicate observation.
-        metadata["Name"] = metadata["Exchange"]
-    mark_verified_daily_dates(metadata)
-    validate_session_positions(metadata)
-
-    # Blocks represent *actual contiguous market sessions*, not consecutive
-    # rows after missing trading dates have been filtered from the dataset.
-    known_calendars = []
-    grouping = (
-        metadata.groupby("Exchange", sort=False)
-        if exchanges is not None
-        else (("NYSE", metadata),)
-    )
-    custom_groups = []
-    for exchange, group in grouping:
-        if exchange in _KNOWN_EXCHANGES:
-            known_calendars.append(
-                inferred_equity_sessions(
-                    pd.DatetimeIndex(group["Date"]),
-                    start=days.min(),
-                    end=days.max(),
-                    exchange=exchange,
-                )
-            )
-        else:
-            custom_groups.append(group.sort_values("Date"))
-    calendar = days
-    for known_sessions in known_calendars:
-        calendar = calendar.union(known_sessions).sort_values()
-    timeline_positions = calendar.get_indexer(days)
-    increments = np.diff(timeline_positions, prepend=timeline_positions[0])
-    increments[0] = 1
-    for group in custom_groups:
-        if "Session_Number" not in group:
-            raise ValueError(
-                "Custom exchanges require verified Session_Number metadata"
-            )
-        positions = [int(v) for v in group["Session_Number"]]
-        observed = pd.DatetimeIndex(group["Date"])
-        for earlier, later, previous, current in zip(
-            observed[:-1],
-            observed[1:],
-            positions[:-1],
-            positions[1:],
-            strict=True,
-        ):
-            first_index, last_index = days.get_indexer([earlier, later])
-            covered = int(increments[first_index + 1 : last_index + 1].sum())
-            required_gap = current - previous
-            if required_gap > covered:
-                increments[last_index] += required_gap - covered
-    blocks = np.empty(len(days), dtype=np.int64)
-    current_block = -1
-    sessions_in_block = 0
-    for i, step in enumerate(increments):
-        if i == 0 or step != 1 or sessions_in_block == block_sessions:
-            current_block += 1
-            sessions_in_block = 0
-        blocks[i] = current_block
-        sessions_in_block += 1
-    block_id = blocks[days.get_indexer(dates)]
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")
     expected = (scored["actual"] == scored["majority"]).to_numpy(dtype=int)
@@ -225,8 +255,12 @@ def paired_block_accuracy_intervals(
         .to_numpy(dtype=float)
     )
     rng = np.random.default_rng(seed)
-    draws = rng.integers(0, len(blocks), size=(bootstrap_samples, len(blocks)))
-    samples = blocks[draws].sum(axis=1)
+    samples = np.empty((bootstrap_samples, blocks.shape[1]), dtype=np.float64)
+    batch_size = max(1, MAX_BOOTSTRAP_BATCH_CELLS // len(blocks))
+    for first in range(0, bootstrap_samples, batch_size):
+        count = min(batch_size, bootstrap_samples - first)
+        draws = rng.integers(0, len(blocks), size=(count, len(blocks)))
+        samples[first : first + count] = blocks[draws].sum(axis=1)
     denominators = samples[:, 0]
     benchmark_accuracy = samples[:, 1] / denominators
     result = {}
@@ -285,10 +319,10 @@ def walk_forward_experiment(
         ].copy()
         if min(len(train), len(validation), len(test)) == 0:
             raise ValueError(f"Fold {number + 1} has an empty chronological partition")
-        if test["Date"].nunique() <= block_sessions:
+        if len(np.unique(_market_date_block_ids(test, block_sessions))) < 2:
             raise ValueError(
-                f"Fold {number + 1} has too few test dates for two "
-                f"{block_sessions}-session bootstrap blocks"
+                f"Fold {number + 1} has too few independent trading-session "
+                "blocks for bootstrap evaluation"
             )
         symbols = set(prepared["Name"])
         if any(set(part["Name"]) != symbols for part in (train, validation, test)):

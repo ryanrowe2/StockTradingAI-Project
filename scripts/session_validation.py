@@ -187,6 +187,12 @@ def validate_session_positions(
                 )
 
     if SESSION_COLUMN not in frame:
+        if "Date" in frame and (
+            pd.DatetimeIndex(frame["Date"]) < pd.Timestamp("1971-01-01")
+        ).any():
+            raise ValueError(
+                "Trading dates before 1971 require verified Session_Number metadata"
+            )
         if exchanges is not None and (~exchanges.isin(_KNOWN_EXCHANGES)).any():
             raise ValueError(
                 "Unknown exchanges require verified Session_Number metadata"

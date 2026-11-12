@@ -162,9 +162,24 @@ def exchange_open_mask(
         return nyse_open_mask(dates)
     if label in (_LONDON_EXCHANGES | _TORONTO_EXCHANGES):
         modern = dates >= pd.Timestamp("1971-01-01")
-        historic_saturday = (dates.dayofweek == 5) & (
-            dates <= LAST_NYSE_SATURDAY_SESSION
-        )
+        if label in _LONDON_EXCHANGES:
+            # London suspended Saturday sessions during WWI and reopened them
+            # 1931-09-19 through 1934-05-26. NYSE's 1952 cutoff does not apply.
+            historic_saturday = (dates.dayofweek == 5) & (
+                (dates < pd.Timestamp("1914-01-01"))
+                | (
+                    (dates >= pd.Timestamp("1931-09-19"))
+                    & (dates <= pd.Timestamp("1934-05-26"))
+                )
+            )
+        else:
+            # The historical TSX schedule is not authoritatively inferred.
+            # A caller-supplied, verified ordinal may attest old Saturdays.
+            historic_saturday = (
+                (dates.dayofweek == 5)
+                & ~modern
+                & verified_session_ordinals
+            )
         valid = ~pd.isna(dates) & ((dates.dayofweek < 5) | historic_saturday)
         if modern.any():
             observed = dates[modern]
