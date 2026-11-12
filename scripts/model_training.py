@@ -251,13 +251,17 @@ def fit_network(
         or equivalent_sample_size <= 0
     ):
         raise ValueError("BDeu equivalent_sample_size must be a finite positive number")
+    validated = df[[*features, "Trend"]].copy()
+    validated["Trend"] = binary_label_array(
+        validated["Trend"].to_numpy(), context="Training labels"
+    )
     network = DiscreteBayesianNetwork([(name, "Trend") for name in features])
     # Specify the full bin vocabulary even when a particular training period
     # does not observe one of its bins.
     state_names = {name: list(range(num_bins)) for name in features}
     state_names["Trend"] = [0, 1]
     network.fit(
-        df[[*features, "Trend"]],
+        validated,
         estimator=DiscreteBayesianEstimator(
             prior_type="BDeu",
             equivalent_sample_size=equivalent_sample_size,
@@ -329,9 +333,29 @@ def train_and_select(
     include_predictions: bool = False,
 ) -> dict:
     """Select prior strength on validation; refit and score on test once."""
+    try:
+        sample_sizes = tuple(sample_sizes)
+    except TypeError as exc:
+        raise ValueError("sample_sizes must be nonempty positive finite priors") from exc
+    if not sample_sizes or any(
+        not isinstance(size, Real)
+        or isinstance(size, (bool, np.bool_))
+        or not np.isfinite(size)
+        or size <= 0
+        for size in sample_sizes
+    ):
+        raise ValueError("sample_sizes must be nonempty positive finite priors")
+    labels = {
+        name: binary_label_array(part["Trend"].to_numpy(), context=f"{name} labels")
+        for name, part in (
+            ("Training", split.train),
+            ("Validation", split.validation),
+            ("Test", split.test),
+        )
+    }
     binner = QuantileBinner(num_bins).fit(split.train, features)
     train = binner.transform(split.train, features)
-    train["Trend"] = split.train["Trend"].to_numpy(dtype=int)
+    train["Trend"] = labels["Training"]
     validation = binner.transform(split.validation, features)
 
     choices = []
@@ -350,7 +374,9 @@ def train_and_select(
     combined = pd.concat([split.train, split.validation], ignore_index=True)
     final_binner = QuantileBinner(num_bins).fit(combined, features)
     combined_discrete = final_binner.transform(combined, features)
-    combined_discrete["Trend"] = combined["Trend"].to_numpy(dtype=int)
+    combined_discrete["Trend"] = np.concatenate(
+        (labels["Training"], labels["Validation"])
+    )
     final_network = fit_network(combined_discrete, features, num_bins, best_size)
     test = final_binner.transform(split.test, features)
     probabilities = predict_up_probability(final_network, test)

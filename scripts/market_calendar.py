@@ -26,6 +26,21 @@ from pandas.tseries.offsets import CustomBusinessDay, DateOffset
 
 LAST_NYSE_SATURDAY_SESSION = pd.Timestamp("1952-05-24")
 
+# Source: NYSE historical special-closures register. During the 1968
+# paperwork crisis trading was suspended every Wednesday from June 12
+# through year-end. The exchange also closed July 5 and other listed days.
+_HISTORICAL_NYSE_CLOSURES = pd.DatetimeIndex(
+    [
+        "1968-02-12",
+        "1968-04-09",
+        "1968-07-05",
+        "1968-11-05",
+        "1969-02-10",
+        "1969-03-31",
+        "1969-07-21",
+    ]
+).union(pd.date_range("1968-06-12", "1968-12-31", freq="W-WED"))
+
 
 class _NYSEHolidays(AbstractHolidayCalendar):
     rules = [
@@ -112,7 +127,11 @@ def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
     # Pre-1971 holiday schedules still require verified ordinals, but Sunday
     # was never a session, and Saturday trading stopped after May 24, 1952.
     historical_saturday = (dates.dayofweek == 5) & (dates <= LAST_NYSE_SATURDAY_SESSION)
-    valid = ~pd.isna(dates) & ((dates.dayofweek < 5) | historical_saturday)
+    valid = (
+        ~pd.isna(dates)
+        & ((dates.dayofweek < 5) | historical_saturday)
+        & ~dates.isin(_HISTORICAL_NYSE_CLOSURES)
+    )
     if modern.any():
         observed = dates[modern]
         scheduled = _scheduled_sessions(observed.min(), observed.max())
@@ -173,6 +192,8 @@ def exchange_open_mask(
     if exchange is not None and (not isinstance(exchange, str) or not exchange.strip()):
         raise ValueError("Exchange must be a nonempty identifier")
     label = "NYSE" if exchange is None else exchange.strip().upper()
+    if label in {"N/A", "NAN", "NULL", "NONE", "<NA>"}:
+        raise ValueError("Exchange must be a valid nonplaceholder identifier")
     if label not in _KNOWN_EXCHANGES and not verified_session_ordinals:
         raise ValueError(
             f"Unknown exchange {label!r} requires verified Session_Number metadata"
