@@ -43,3 +43,21 @@ jobs:
           python -m scripts.model_training --ticker AAPL --target next_open_to_close --output data/generated/aapl_executable_metrics.json
           python -m scripts.walk_forward_evaluation --ticker AAPL --folds 2 --bootstrap-samples 100 --output data/generated/aapl_walk_forward_metrics.json
           python -m scripts.refresh_notebooks --check
+      - name: Recalculate five-fold report for documentation
+        if: matrix.python-version == '3.12'
+        run: |
+          python - <<'PY'
+          import json
+          from scripts.walk_forward_evaluation import walk_forward_experiment
+
+          for target in ("close_to_close", "next_open_to_close"):
+              result = walk_forward_experiment(target=target)
+              fields = {
+                  "target": target,
+                  "majority": result["majority_accuracy"],
+                  "baseline": result["baseline"]["accuracy"],
+                  "enhanced": result["enhanced"]["accuracy"],
+                  "interval": result["accuracy_lift_over_majority_95pct_block_intervals"],
+              }
+              print("GAP_AWARE_5FOLD=" + json.dumps(fields), flush=True)
+          PY
