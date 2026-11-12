@@ -149,9 +149,7 @@ def validate_nyse_open_dates(
 ) -> None:
     """Reject known closed dates and unverified pre-1971 NYSE sessions."""
     impossible = dates[
-        ~nyse_open_mask(
-            dates, verified_session_ordinals=verified_session_ordinals
-        )
+        ~nyse_open_mask(dates, verified_session_ordinals=verified_session_ordinals)
     ]
     if not impossible.empty:
         raise ValueError(

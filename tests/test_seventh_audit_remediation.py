@@ -124,9 +124,11 @@ def test_historical_nyse_special_closures_are_not_sessions(closed):
 def test_historical_nearby_nyse_open_days_and_saturday_preserved():
     dates = pd.DatetimeIndex(["1968-07-09", "1968-07-11", "1951-01-06"])
     assert nyse_open_mask(dates).tolist() == [False, False, False]
-    assert nyse_open_mask(
-        dates, verified_session_ordinals=True
-    ).tolist() == [True, True, True]
+    assert nyse_open_mask(dates, verified_session_ordinals=True).tolist() == [
+        True,
+        True,
+        True,
+    ]
 
 
 @pytest.mark.parametrize("alias", ["N/A", " NaN ", "NULL", "none", "<NA>"])
