@@ -266,10 +266,15 @@ from AAPL's own eligible dates: in this version, training ends 2013-04-01 and
 validation ends 2015-08-17, versus 2013-03-28 and 2015-08-13 in the 31-stock
 comparison. Its metrics are therefore not an identical-period replication.
 
-For an exact version snapshot of the verified **Python 3.12 / Linux** experiment
-environment, install `requirements-repro-py312.txt` instead of the flexible
-requirements files. It pins both direct and transitive dependencies; use
-`requirements.txt` / `requirements-dev.txt` for other supported environments.
+For reproducible **Ubuntu 24.04 Linux x86_64** environments, choose the
+SHA-256-verified lockfile matching the interpreter version:
+`requirements-repro-py310.txt`, `requirements-repro-py311.txt`, or
+`requirements-repro-py312.txt`. Each lock pins direct and transitive
+dependencies to the exact wheel distributions used in CI. Run
+`python -m pip install --require-hashes -r requirements-repro-py311.txt`
+for Python 3.11 (substitute the matching file for 3.10 or 3.12).
+For other platforms, use the flexible `requirements.txt` and
+`requirements-dev.txt` with a separately resolved, platform-specific lock.
 
 For tests, install the development requirements and run:
 
@@ -334,7 +339,9 @@ StockTradingAI-Project/
 ├── tests/                         # Automated pipeline regression tests
 ├── .github/workflows/             # Automated verification on pushes / PRs
 ├── requirements.txt
-├── requirements-repro-py312.txt   # Tested, pinned Python 3.12/Linux environment
+├── requirements-repro-py310.txt   # Hashed Python 3.10/Linux environment
+├── requirements-repro-py311.txt   # Hashed Python 3.11/Linux environment
+├── requirements-repro-py312.txt   # Hashed Python 3.12/Linux environment
 ├── requirements-dev.txt
 └── LICENSE                        # MIT license for original software and docs
 ```
