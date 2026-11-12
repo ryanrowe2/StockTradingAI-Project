@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import copy
-import random
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -131,13 +129,11 @@ def test_q_agent_accepts_numpy_int_seed_and_reproduces_random_stream():
     assert [one.choose_action((0,)) for _ in range(20)] == [
         two.choose_action((0,)) for _ in range(20)
     ]
-    assert one.rng.random() == two.rng.random() == random.Random(17).random() or (
-        one.rng.random() != two.rng.random()
-    ) is False
+    assert one.rng.random() == two.rng.random()
 
 
 def _scores() -> pd.DataFrame:
-    dates = pd.bdate_range("2024-05-01", periods=20)
+    dates = pd.bdate_range("2024-04-01", periods=20)
     return pd.DataFrame(
         {
             "Date": dates.repeat(2),
