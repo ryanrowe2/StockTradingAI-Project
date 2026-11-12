@@ -1,0 +1,22 @@
+name: Cleanup merged temporary branches
+
+on:
+  push:
+    branches: [Milestone3]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  clean-merged-branches:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Preserve milestones and delete only verified merged temporary branches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/cleanup_merged_branches.py --execute
