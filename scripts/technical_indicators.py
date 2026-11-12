@@ -132,7 +132,7 @@ def add_technical_indicators(
             df[column] = pd.to_numeric(df[column], errors="raise")
     if "Date" in df:
         df["Date"] = parse_daily_dates(df["Date"], context="Indicator dates")
-        mark_verified_daily_dates(df)
+        mark_verified_daily_dates(df, columns=("Date",))
     if "Name" not in df.columns:
         if "Date" in df and df["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates in indicator input")
@@ -144,7 +144,7 @@ def add_technical_indicators(
         df["Name"],
         context="Every indicator observation must have a ticker name",
     )
-    mark_verified_daily_dates(df)
+    mark_verified_daily_dates(df, columns=("Date",))
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations in indicator input")
     validate_session_positions(df)
@@ -161,5 +161,6 @@ def add_technical_indicators(
             axis=0,
         )
         .sort_values(["Date", "Name"])
-        .reset_index(drop=True)
+        .reset_index(drop=True),
+        columns=("Date",),
     )
