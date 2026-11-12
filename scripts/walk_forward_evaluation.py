@@ -26,8 +26,11 @@ if __package__:
         parse_daily_dates,
         require_verified_daily_date_source,
     )
-    from .market_calendar import validate_exchange_open_dates
-    from .session_validation import validate_session_positions
+    from .market_calendar import inferred_equity_sessions
+    from .session_validation import (
+        _normalized_exchange_labels,
+        validate_session_positions,
+    )
     from .model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -47,8 +50,11 @@ else:
         parse_daily_dates,
         require_verified_daily_date_source,
     )
-    from market_calendar import validate_exchange_open_dates
-    from session_validation import validate_session_positions
+    from market_calendar import inferred_equity_sessions
+    from session_validation import (
+        _normalized_exchange_labels,
+        validate_session_positions,
+    )
     from model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -120,24 +126,58 @@ def paired_block_accuracy_intervals(
         scored, verified_datetime_dates=verified_datetime_dates
     )
     days = pd.DatetimeIndex(dates.unique()).sort_values()
+    # Evaluate each market on its own calendar. Shared dates across tickers
+    # belong to the same paired resampling block, but missing actual exchange
+    # sessions start a new block instead of masquerading as adjacent days.
+    exchanges = _normalized_exchange_labels(scored)
+    metadata = pd.DataFrame({"Date": dates.to_numpy()})
+    if exchanges is not None:
+        metadata["Exchange"] = exchanges.to_numpy()
     if "Session_Number" in scored:
-        columns = ["Date", "Session_Number"]
-        if "Exchange" in scored:
-            columns.append("Exchange")
-        metadata = scored.loc[:, columns].drop_duplicates().copy()
-        if "Exchange" in metadata:
-            metadata["Name"] = metadata["Exchange"]
-        mark_verified_daily_dates(metadata)
-        validate_session_positions(metadata)
-    elif "Exchange" in scored:
-        labels = scored["Exchange"].astype(str).str.strip().str.upper()
-        for exchange, indices in scored.groupby(labels, sort=False).indices.items():
-            validate_exchange_open_dates(
-                pd.DatetimeIndex(dates.iloc[indices].unique()), str(exchange)
-            )
+        metadata["Session_Number"] = scored["Session_Number"].to_numpy()
+    metadata = metadata.drop_duplicates().reset_index(drop=True)
+    mark_verified_daily_dates(metadata)
+    validate_session_positions(metadata)
+    if "Session_Number" in metadata:
+        if exchanges is None:
+            # No Exchange means that all positions refer to the default NYSE.
+            if metadata["Date"].duplicated().any():
+                raise ValueError(
+                    "Conflicting session ordinals for the same market date"
+                )
+        market_groups = (
+            metadata.groupby("Exchange", sort=False)
+            if exchanges is not None
+            else [(None, metadata)]
+        )
     else:
-        validate_exchange_open_dates(days)
-    block_id = days.get_indexer(dates) // block_sessions
+        market_groups = (
+            metadata.groupby("Exchange", sort=False)
+            if exchanges is not None
+            else [(None, metadata)]
+        )
+    gap_starts = np.zeros(len(days), dtype=bool)
+    for exchange, group in market_groups:
+        ordered = group.sort_values("Date").drop_duplicates("Date")
+        group_dates = pd.DatetimeIndex(ordered["Date"])
+        if "Session_Number" in ordered:
+            positions = ordered["Session_Number"].tolist()
+        else:
+            schedule = inferred_equity_sessions(group_dates, exchange=exchange)
+            positions = schedule.get_indexer(group_dates).tolist()
+        for index in range(1, len(group_dates)):
+            if int(positions[index]) != int(positions[index - 1]) + 1:
+                gap_starts[days.get_indexer([group_dates[index]])[0]] = True
+    per_date_blocks = np.empty(len(days), dtype=np.int64)
+    block_number = 0
+    block_length = 0
+    for index in range(len(days)):
+        if index and (gap_starts[index] or block_length >= block_sessions):
+            block_number += 1
+            block_length = 0
+        per_date_blocks[index] = block_number
+        block_length += 1
+    block_id = per_date_blocks[days.get_indexer(dates)]
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")
     expected = (scored["actual"] == scored["majority"]).to_numpy(dtype=int)
@@ -277,6 +317,16 @@ def walk_forward_experiment(
             pd.DataFrame(
                 {
                     "Date": test["Date"].to_numpy(),
+                    **(
+                        {"Exchange": test["Exchange"].to_numpy()}
+                        if "Exchange" in test
+                        else {}
+                    ),
+                    **(
+                        {"Session_Number": test["Session_Number"].to_numpy()}
+                        if "Session_Number" in test
+                        else {}
+                    ),
                     "actual": test["Trend"].to_numpy(dtype=int),
                     "majority": majority,
                     "baseline_prob": baseline["test_probabilities"],
