@@ -364,7 +364,10 @@ def prepare_features(
     if not features or any(feature not in MODEL_FEATURES for feature in features):
         raise ValueError(f"Model features must be drawn from {MODEL_FEATURES}")
     required = list(features) + ["Target_Date"]
-    source = source.replace([np.inf, -np.inf], np.nan)
+    # Only model features need nonfinite replacement. Applying DataFrame.replace
+    # to object-precision target ordinals can silently downcast them and emits
+    # a pandas FutureWarning that changes published notebook output.
+    source[list(features)] = source[list(features)].replace([np.inf, -np.inf], np.nan)
     prepared = source.dropna(subset=required).reset_index(drop=True)
     # The target ordinal is exact source metadata, not a float-derived label.
     # Keep the integer dtype (including uint64 source positions) end-to-end.
