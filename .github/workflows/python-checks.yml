@@ -39,7 +39,9 @@ jobs:
           python -m pytest tests/test_second_audit_remediation.py -q
       - name: Run regression tests with coverage
         run: |
-          python -m coverage run --branch --source=scripts -m pytest tests -q
+          # Application/research coverage: infrastructure-only GitHub maintenance
+          # tools have their own unit tests and native Actions verification.
+          python -m coverage run --branch --source=scripts --omit=scripts/cleanup_merged_branches.py,scripts/generate_portable_lock.py -m pytest tests -q
           python -m coverage report --fail-under=88
           python -m coverage json -o coverage-summary.json
           python -m scripts.verify_coverage
