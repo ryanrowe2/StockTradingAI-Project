@@ -74,7 +74,7 @@ def test_large_sample_count_rejected_before_allocation():
         )
 
 
-def test_batched_bootstrap_remains_deterministic():
+def test_batched_bootstrap_remains_deterministic(monkeypatch):
     from scripts.market_calendar import _scheduled_sessions
 
     dates = (
@@ -86,6 +86,11 @@ def test_batched_bootstrap_remains_deterministic():
     one = paired_block_accuracy_intervals(
         frame, block_sessions=5, bootstrap_samples=150, seed=21
     )
+    import scripts.walk_forward_evaluation as evaluation
+
+    # Force many small batches to verify that batched and monolithic RNG
+    # draws produce the same seeded intervals.
+    monkeypatch.setattr(evaluation, "MAX_BOOTSTRAP_BATCH_CELLS", 14)
     two = paired_block_accuracy_intervals(
         frame, block_sessions=5, bootstrap_samples=150, seed=21
     )
