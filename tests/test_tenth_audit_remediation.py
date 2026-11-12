@@ -28,9 +28,7 @@ def _attested_bars():
         {
             "Name": ["AAA", "AAA", "AAA"],
             "Date": ["2024-01-02", "2024-01-03", "2024-01-04"],
-            "Target_Date": pd.to_datetime(
-                ["2024-01-03", "2024-01-04", "2024-01-05"]
-            ),
+            "Target_Date": pd.to_datetime(["2024-01-03", "2024-01-04", "2024-01-05"]),
             "Open": [10, 11, 12],
             "High": [12, 13, 14],
             "Low": [9, 10, 11],
@@ -144,19 +142,14 @@ def _historical_bundled_source(tmp_path, monkeypatch):
     ]
     path.write_text(
         "Date,Name,Open,High,Low,Close,Volume\n"
-        + "".join(
-            f"{day},{symbol},10,12,9,11,100\n"
-            for day, symbol in entries
-        ),
+        + "".join(f"{day},{symbol},10,12,9,11,100\n" for day, symbol in entries),
         encoding="utf-8",
     )
     monkeypatch.setattr(data_processing, "DEFAULT_RAW_DATA", path)
     return path
 
 
-def test_bundled_nasdaq_halfday_preserved_without_fake_nyse_gap(
-    tmp_path, monkeypatch
-):
+def test_bundled_nasdaq_halfday_preserved_without_fake_nyse_gap(tmp_path, monkeypatch):
     path = _historical_bundled_source(tmp_path, monkeypatch)
     calendar = data_processing._bundled_session_calendar()
     assert calendar.strftime("%Y-%m-%d").tolist() == [
@@ -183,9 +176,7 @@ def test_bundled_nyse_closed_date_stays_rejected_even_if_nasdaq_open(
         data_processing.load_data(path, tickers=("IBM",))
 
 
-def test_bundled_modern_source_keeps_historical_output_schema(
-    tmp_path, monkeypatch
-):
+def test_bundled_modern_source_keeps_historical_output_schema(tmp_path, monkeypatch):
     path = tmp_path / data_processing.DEFAULT_RAW_DATA.name
     path.write_text(
         "Date,Name,Open,High,Low,Close,Volume\n"
