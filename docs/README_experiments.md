@@ -394,7 +394,8 @@ python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
 ```
 
 The test suite covers finite OHLCV and date validation, global market-session
-uniqueness, all bundled individual-stock versus combined-source feature parity,
+uniqueness (including direct inferred-session APIs), binary training-label
+validation, prior-grid validation, and documented 1968–1969 historical closures, all bundled individual-stock versus combined-source feature parity,
 invalid unrelated dates, direct weekday-gap handling, model-specific feature
 eligibility, invalid priors and unknown categorical evidence, numeric-string
 input normalization, ticker-name formats, per-ticker indicators, price-scale
