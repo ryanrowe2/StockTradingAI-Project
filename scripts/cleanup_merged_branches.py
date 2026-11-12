@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
+import time
 
 PRODUCTION = "Milestone3"
 SUPERSEDED = {
@@ -38,6 +40,40 @@ def request(path: str, *, method: str = "GET") -> object:
         if method == "DELETE":
             return {}
         return json.loads(response.read().decode("utf-8"))
+
+
+TRANSIENT_HTTP = {429, 500, 502, 503, 504}
+
+
+def delete_verified_branch(name: str, expected_sha: str) -> None:
+    """Retry transient GitHub gateway failures without deleting a moved ref."""
+    ref = urllib.parse.quote(name, safe="")
+    for attempt in range(5):
+        try:
+            latest = request("git/ref/heads/" + ref)
+        except urllib.error.HTTPError as error:
+            if error.code == 404 and attempt:
+                # A prior DELETE may have committed before its gateway failed.
+                return
+            if error.code not in TRANSIENT_HTTP or attempt == 4:
+                raise
+            time.sleep(min(2**attempt, 8))
+            continue
+        if latest["object"]["sha"] != expected_sha:
+            raise RuntimeError(f"Unsafe branch-head change: {name}")
+        try:
+            request("git/refs/heads/" + ref, method="DELETE")
+            return
+        except urllib.error.HTTPError as error:
+            if error.code not in TRANSIENT_HTTP or attempt == 4:
+                raise
+            print(
+                f"Transient GitHub HTTP {error.code} deleting {name}; "
+                f"rechecking SHA before retry {attempt + 2}/5",
+                flush=True,
+            )
+            time.sleep(min(2**attempt, 8))
+    raise RuntimeError(f"Exhausted safe deletion attempts: {name}")
 
 
 def full_collection(path: str) -> list[dict]:
@@ -101,16 +137,10 @@ def main() -> None:
         if not reason:
             preserved.append(name)
             continue
-        path = "git/ref/heads/" + urllib.parse.quote(name, safe="")
-        fresh = request(path)
-        if fresh["object"]["sha"] != branch["commit"]["sha"]:
-            raise RuntimeError(f"Branch moved during cleanup: {name}")
         verb = "DELETE" if args.execute else "WOULD DELETE"
         print(f"{verb}: {name} — {reason}", flush=True)
         if args.execute:
-            request(
-                "git/refs/heads/" + urllib.parse.quote(name, safe=""), method="DELETE"
-            )
+            delete_verified_branch(name, branch["commit"]["sha"])
             deleted.append(name)
     if args.execute:
         remaining = {item["name"] for item in full_collection("branches")}
