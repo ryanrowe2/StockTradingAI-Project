@@ -372,18 +372,16 @@ def _validate_direct_model_split(split: ChronologicalSplit) -> None:
         if (targets <= dates).any():
             raise ValueError(f"{label} labels must follow their feature dates")
         normalized_symbols = part["Name"].astype("string").str.strip().str.upper()
-        if pd.DataFrame(
-            {"Name": normalized_symbols, "Date": dates}
-        ).duplicated(["Name", "Date"]).any():
-            raise ValueError(f"{label} partition has duplicate observations")
-        if label == "Training" and (
-            (dates > first).any() or (targets > first).any()
+        if (
+            pd.DataFrame({"Name": normalized_symbols, "Date": dates})
+            .duplicated(["Name", "Date"])
+            .any()
         ):
+            raise ValueError(f"{label} partition has duplicate observations")
+        if label == "Training" and ((dates > first).any() or (targets > first).any()):
             raise ValueError("Training partition crosses its chronological boundary")
         if label == "Validation" and (
-            (dates <= first).any()
-            or (dates > second).any()
-            or (targets > second).any()
+            (dates <= first).any() or (dates > second).any() or (targets > second).any()
         ):
             raise ValueError("Validation partition crosses its chronological boundary")
         if label == "Test" and (dates <= second).any():
