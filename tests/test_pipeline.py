@@ -518,12 +518,13 @@ def test_historical_supervised_targets_are_next_market_session_only():
     raw = load_data(DEFAULT_RAW_DATA)
     prepared = prepare_features(raw)
     calendar = raw[["Name", "Date", "Session_Number"]].rename(
-        columns={"Date": "Target_Date", "Session_Number": "Target_Session"},
+        columns={"Date": "Target_Date", "Session_Number": "Expected_Target_Session"},
     )
     checked = prepared.merge(
         calendar, on=["Name", "Target_Date"], validate="many_to_one"
     )
-    assert (checked.Target_Session - checked.Session_Number).eq(1).all()
+    assert (checked.Expected_Target_Session - checked.Session_Number).eq(1).all()
+    assert checked["Target_Session"].eq(checked["Expected_Target_Session"]).all()
 
 
 def test_csv_loader_preserves_literal_ticker_na():

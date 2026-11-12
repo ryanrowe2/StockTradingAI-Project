@@ -170,6 +170,7 @@ def validate_session_positions(
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
 
+    exchanges = None
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
         exchanges = _normalized_exchange_labels(frame)

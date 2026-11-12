@@ -88,11 +88,9 @@ def _verified_row_tokens(frame: pd.DataFrame, column: str) -> frozenset[int]:
         columns.append("Date")
     columns.append(column)
     identifying = frame[columns].copy()
-    for date_column in ("Date", "Target_Date"):
-        if date_column in identifying:
-            identifying[date_column] = parse_daily_dates(
-                identifying[date_column], context="Attested dates"
-            )
+    # Capture the values exactly as supplied. The ordinary date validator still
+    # rejects malformed dates; creating an attestation must not itself fail
+    # before that validation boundary can report its own error.
     return frozenset(
         int(value)
         for value in pd.util.hash_pandas_object(identifying, index=False).to_numpy()
