@@ -34,7 +34,7 @@ if __package__:
         _normalized_exchange_labels,
         validate_session_positions,
     )
-    from .numeric_validation import real_float_array
+    from .numeric_validation import binary_label_array, real_float_array
     from .model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -62,7 +62,7 @@ else:
         _normalized_exchange_labels,
         validate_session_positions,
     )
-    from numeric_validation import real_float_array
+    from numeric_validation import binary_label_array, real_float_array
     from model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -99,6 +99,21 @@ def _validate_bootstrap_configuration(
             "block_sessions must be positive and bootstrap_samples must be "
             f"between 100 and {MAX_BOOTSTRAP_SAMPLES:,}"
         )
+
+
+def _validate_bootstrap_seed(seed: int) -> None:
+    """Reject unsupported RNG seeds before loading data or fitting models."""
+    if (
+        not isinstance(seed, (int, np.integer))
+        or isinstance(seed, (bool, np.bool_))
+        or seed < 0
+    ):
+        raise ValueError("Bootstrap seed must be a nonnegative integer")
+    # NumPy also enforces its own range and SeedSequence constraints.
+    try:
+        np.random.default_rng(seed)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Bootstrap seed must be a valid nonnegative integer") from exc
 
 
 def _validate_bootstrap_workload(block_count: int, bootstrap_samples: int) -> None:
@@ -141,12 +156,20 @@ def _market_date_block_ids(
         columns.append("Exchange")
     if "Session_Number" in frame:
         columns.append("Session_Number")
-    metadata = frame.loc[:, columns].drop_duplicates().copy()
+    metadata = frame.loc[:, columns].copy()
     metadata["Date"] = parse_daily_dates(metadata["Date"], context="Bootstrap dates")
     exchanges = _normalized_exchange_labels(metadata)
     if exchanges is not None:
         metadata["Exchange"] = exchanges
         metadata["Name"] = metadata["Exchange"]
+    # Equivalent ticker exchange aliases can contribute observations on the
+    # same market date. Normalize before deduplicating, while refusing
+    # inconsistent session numbers for a single canonical market/date.
+    if "Session_Number" in metadata:
+        identities = ["Date", "Exchange"] if exchanges is not None else ["Date"]
+        if metadata.groupby(identities, dropna=False)["Session_Number"].nunique().gt(1).any():
+            raise ValueError("Conflicting session ordinals for the same market date")
+    metadata = metadata.drop_duplicates().copy()
     mark_verified_daily_dates(metadata)
     validate_session_positions(metadata)
 
@@ -230,17 +253,19 @@ def paired_block_accuracy_intervals(
     it does not supply a guarantee of profitability or future generalization.
     """
     _validate_bootstrap_configuration(block_sessions, bootstrap_samples)
+    _validate_bootstrap_seed(seed)
     if scored.empty:
         raise ValueError("Cannot bootstrap an empty holdout")
     required = {"Date", "actual", "majority", "baseline_prob", "enhanced_prob"}
     missing = required - set(scored.columns)
     if missing:
         raise ValueError(f"Missing bootstrap columns: {sorted(missing)}")
-    if (
-        not scored["actual"].isin((0, 1)).all()
-        or not scored["majority"].isin((0, 1)).all()
-    ):
-        raise ValueError("Bootstrap actual and majority labels must be binary (0 or 1)")
+    actual_labels = binary_label_array(
+        scored["actual"].to_numpy(), context="Bootstrap actual labels"
+    )
+    majority_labels = binary_label_array(
+        scored["majority"].to_numpy(), context="Bootstrap majority labels"
+    )
     try:
         probabilities = real_float_array(
             scored[["baseline_prob", "enhanced_prob"]],
@@ -268,8 +293,8 @@ def paired_block_accuracy_intervals(
     )
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")
-    expected = (scored["actual"] == scored["majority"]).to_numpy(dtype=int)
-    actual = scored["actual"].to_numpy(dtype=int)
+    expected = (actual_labels == majority_labels).astype(int)
+    actual = actual_labels
     baseline = (actual == (probabilities[:, 0] >= 0.5)).astype(int)
     enhanced = (actual == (probabilities[:, 1] >= 0.5)).astype(int)
     blocks = (
@@ -328,6 +353,7 @@ def walk_forward_experiment(
     if not isinstance(folds, int) or isinstance(folds, bool) or not 1 <= folds <= 5:
         raise ValueError("folds must be an integer between 1 and 5")
     _validate_bootstrap_configuration(block_sessions, bootstrap_samples)
+    _validate_bootstrap_seed(seed)
     data = load_data(raw_data, tickers=tickers)
     prepared = prepare_features(data, target=target, verified_datetime_dates=True)
     dates = pd.DatetimeIndex(prepared["Date"].unique()).sort_values()

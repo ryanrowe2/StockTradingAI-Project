@@ -170,7 +170,15 @@ def exchange_open_mask(
     arbitrary international exchange. Historical pre-1971 sessions with
     supplied ordinals retain the project’s existing partial calendar policy.
     """
+    if exchange is not None and (
+        not isinstance(exchange, str) or not exchange.strip()
+    ):
+        raise ValueError("Exchange must be a nonempty identifier")
     label = "NYSE" if exchange is None else exchange.strip().upper()
+    if label not in _KNOWN_EXCHANGES and not verified_session_ordinals:
+        raise ValueError(
+            f"Unknown exchange {label!r} requires verified Session_Number metadata"
+        )
     daily = _valid_daily_mask(dates)
     if not daily.all():
         result = np.zeros(len(dates), dtype=bool)
