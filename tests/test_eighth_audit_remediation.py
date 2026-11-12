@@ -107,7 +107,7 @@ def test_historical_regular_holidays_respect_pre_1971_rules():
 
 def test_gap_policy_for_observation_windows_and_adjacent_returns():
     sessions = inferred_equity_sessions(
-        pd.DatetimeIndex(["2024-01-02", "2024-03-29"])
+        pd.DatetimeIndex(["2024-01-02", "2024-03-28"])
     )
     dates = sessions.delete(23)
     prices = pd.Series(np.linspace(100.0, 150.0, len(dates)))
