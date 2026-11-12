@@ -16,6 +16,7 @@ if __package__:
     )
     from .session_validation import session_positions, validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
+    from .numeric_validation import real_float_array
 else:
     from date_validation import (
         mark_verified_daily_dates,
@@ -24,6 +25,7 @@ else:
     )
     from session_validation import session_positions, validate_session_positions
     from ticker_validation import normalize_ticker_symbols
+    from numeric_validation import real_float_array
 
 
 DEFAULT_INDICATORS = ("MA_20", "RSI_14", "MACD")
@@ -101,8 +103,9 @@ def _validated_indicators(
         raise ValueError("Duplicate dates for a single ticker")
     validate_session_positions(ordered)
     clean = ordered.dropna(subset=list(indicators)).copy()
-    if not np.isfinite(clean[list(indicators)].to_numpy(dtype=float)).all():
-        raise ValueError("Indicator values must be finite")
+    real_float_array(
+        clean[list(indicators)], context="Indicator values"
+    )
     return ordered if keep_missing else clean
 
 

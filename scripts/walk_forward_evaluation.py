@@ -34,6 +34,7 @@ if __package__:
         _normalized_exchange_labels,
         validate_session_positions,
     )
+    from .numeric_validation import real_float_array
     from .model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -61,6 +62,7 @@ else:
         _normalized_exchange_labels,
         validate_session_positions,
     )
+    from numeric_validation import real_float_array
     from model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -228,7 +230,10 @@ def paired_block_accuracy_intervals(
     ):
         raise ValueError("Bootstrap actual and majority labels must be binary (0 or 1)")
     try:
-        probabilities = scored[["baseline_prob", "enhanced_prob"]].to_numpy(dtype=float)
+        probabilities = real_float_array(
+            scored[["baseline_prob", "enhanced_prob"]],
+            context="Bootstrap probabilities",
+        )
     except (TypeError, ValueError) as exc:
         raise ValueError(
             "Bootstrap probabilities must be numeric values in [0, 1]"
