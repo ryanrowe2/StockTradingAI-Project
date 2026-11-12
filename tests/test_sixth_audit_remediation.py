@@ -42,7 +42,9 @@ def _london_scores():
 
 def test_london_aliases_with_same_date_are_one_bootstrap_market():
     scored = _london_scores()
-    blocks = _market_date_block_ids(scored, block_sessions=10, allow_unidentified_rows=True)
+    blocks = _market_date_block_ids(
+        scored, block_sessions=10, allow_unidentified_rows=True
+    )
     assert blocks[:20].tolist() == [0] * 20
     assert len(np.unique(blocks)) == 3
     result = paired_block_accuracy_intervals(
@@ -54,7 +56,9 @@ def test_london_aliases_with_same_date_are_one_bootstrap_market():
 def test_same_market_aliases_with_equal_ordinals_are_deduplicated():
     scored = _london_scores()
     scored["Session_Number"] = np.repeat(np.arange(24), 2)
-    blocks = _market_date_block_ids(scored, block_sessions=10, allow_unidentified_rows=True)
+    blocks = _market_date_block_ids(
+        scored, block_sessions=10, allow_unidentified_rows=True
+    )
     assert len(np.unique(blocks)) == 3
 
 
