@@ -21,7 +21,9 @@ MODULE_FLOORS = {
 
 def validate_report(report: dict) -> None:
     if report.get("meta", {}).get("branch_coverage") is not True:
-        raise ValueError("Coverage must measure decisions/branches, not statements alone")
+        raise ValueError(
+            "Coverage must measure decisions/branches, not statements alone"
+        )
     total = report.get("totals", {}).get("percent_covered")
     if not isinstance(total, (int, float)) or total < 88.0:
         raise ValueError(f"Combined branch-aware coverage below 88%: {total!r}")
