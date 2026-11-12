@@ -68,7 +68,7 @@ def adjacent_session_flags(positions: pd.Series, *, forward: bool = False) -> pd
         for value in numbers
     ):
         raise ValueError("Session positions must be nonnegative integers")
-    adjacent = [later == earlier + 1 for earlier, later in pairwise(numbers)]
+    adjacent = [int(later) == int(earlier) + 1 for earlier, later in pairwise(numbers)]
     values = adjacent + [False] if forward else [False] + adjacent
     return pd.Series(values, index=positions.index, dtype=bool)
 
