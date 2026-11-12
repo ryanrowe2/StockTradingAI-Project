@@ -186,3 +186,38 @@ def test_nyse_calendar_rejects_timezone_aware_and_intraday_dates():
     assert not nyse_open_mask(
         pd.DatetimeIndex(["2024-01-09"], tz="UTC")
     ).any()
+
+
+def test_walk_forward_rejects_bootstrap_workload_before_model_fitting(monkeypatch):
+    from scripts.data_processing import validate_bars
+    import scripts.walk_forward_evaluation as evaluation
+
+    sessions = _scheduled_sessions(
+        pd.Timestamp("2024-01-02"), pd.Timestamp("2024-12-31")
+    )[:135]
+    close = 100 + np.arange(len(sessions)) * 0.05
+    prices = validate_bars(
+        pd.DataFrame(
+            {
+                "Date": sessions,
+                "Name": ["AAPL"] * len(sessions),
+                "Open": close - 0.1,
+                "High": close + 1.0,
+                "Low": close - 1.0,
+                "Close": close,
+                "Volume": [1000] * len(sessions),
+            }
+        ),
+        verified_datetime_dates=True,
+    )
+    monkeypatch.setattr(evaluation, "load_data", lambda *args, **kwargs: prices)
+    monkeypatch.setattr(
+        evaluation,
+        "train_and_select",
+        lambda *args, **kwargs: pytest.fail("Model fitting ran before workload check"),
+    )
+    monkeypatch.setattr(evaluation, "MAX_BOOTSTRAP_DRAW_CELLS", 50)
+    with pytest.raises(ValueError, match="Bootstrap workload"):
+        evaluation.walk_forward_experiment(
+            "synthetic.csv", folds=2, bootstrap_samples=100, block_sessions=1
+        )
