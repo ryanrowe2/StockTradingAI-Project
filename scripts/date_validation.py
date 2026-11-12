@@ -66,11 +66,10 @@ def _date_pairs(frame: pd.DataFrame) -> frozenset[tuple[int, int]]:
     if "Date" not in frame or "Target_Date" not in frame:
         return frozenset()
     dates = parse_daily_dates(frame["Date"], context="Feature dates").astype("int64")
-    targets = parse_daily_dates(
-        frame["Target_Date"], context="Target dates"
-    ).astype("int64")
+    targets = parse_daily_dates(frame["Target_Date"], context="Target dates").astype(
+        "int64"
+    )
     return frozenset(zip(dates, targets, strict=True))
-
 
 
 def require_verified_daily_date_source(
@@ -96,8 +95,7 @@ def require_verified_daily_date_source(
         or supplied.map(lambda value: isinstance(value, pd.Timestamp)).any()
     )
     attested = (
-        verified_datetime_dates
-        or frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
+        verified_datetime_dates or frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
     )
     if ambiguous and not attested:
         raise ValueError(
@@ -110,9 +108,7 @@ def require_verified_daily_date_source(
         and ambiguous
         and not verified_datetime_dates
         and frame.attrs.get(VERIFIED_TARGET_PAIRS_ATTR) is not None
-        and not _date_pairs(frame).issubset(
-            frame.attrs[VERIFIED_TARGET_PAIRS_ATTR]
-        )
+        and not _date_pairs(frame).issubset(frame.attrs[VERIFIED_TARGET_PAIRS_ATTR])
     ):
         raise ValueError(
             "Target_Date source verification is stale: target dates changed "
