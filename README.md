@@ -1,23 +1,23 @@
 # Probabilistic Stock Trading Agent
 
-**Bayesian networks · Time-series feature engineering · Hidden Markov models · Q-learning**
+**Bayesian Networks · Hidden Markov Models · Q-Learning · Quantitative Research**
 
-A Python research project exploring probabilistic next-session stock-direction prediction and sequential trading decisions. The system turns daily equity observations into technical indicators, estimates conditional probabilities with Bayesian networks, analyzes latent market regimes with a Gaussian Hidden Markov model, and experiments with an interpretable Q-learning agent.
+A reproducible Python research system for analyzing historical equity markets, predicting next-session price direction, identifying latent market regimes, and evaluating experimental trading decisions.
 
-The project emphasizes **reproducible experiments, chronological evaluation, and modular model implementations**.
+The project integrates probabilistic machine learning, time-series feature engineering, reinforcement learning, and rigorous chronological evaluation into a modular, independently tested research environment.
 
-## Project at a glance
+## Project at a Glance
 
-| Component | Implementation |
-| --- | --- |
-| Historical data | 93,612 source observations across 31 stocks, 2006–2017 |
-| Feature engineering | ATR, RSI, MACD, moving averages, Bollinger Bands, and price-normalized returns and ranges |
-| Probabilistic prediction | Baseline and enhanced discrete Bayesian networks with BDeu smoothing |
-| Regime analysis | Gaussian HMM with forward-filtered state inference |
-| Trading experiment | Long-or-flat Q-learning agent with next-open execution and transaction costs |
-| Evaluation | Chronological training/validation/test periods and classification metrics |
+| Metric | Verified Result |
+|---|---|
+| Historical dataset | 93,612 observations across 31 stocks (2006–2017) |
+| Modeling approaches | Bayesian networks, Gaussian HMMs, tabular Q-learning |
+| Automated tests | 555 passing tests on each of five CI environments |
+| Branch-aware research-code coverage | 90.3% |
+| Reproducibility | SHA-256-locked dependencies, validated notebooks, pinned research results |
+| CI environments | Linux/Python 3.10–3.12, Windows Server 2025, macOS 15 |
 
-### System architecture
+## System Architecture
 
 ```mermaid
 flowchart TD
@@ -34,6 +34,63 @@ flowchart TD
     E --> J
     J --> K["Segment-safe frozen-policy evaluation on later price history"]
 ```
+
+The research pipeline consists of three integrated modeling components:
+
+**1. Probabilistic prediction**
+
+Engineers historical technical indicators and trains discrete Bayesian networks using BDeu parameter estimation. Compares baseline and enhanced feature sets using chronological training, validation, and test partitions.
+
+**2. Market regime modeling**
+
+Uses a Gaussian Hidden Markov model to characterize latent market states, with forward-filtered inference and explicit handling of missing market sessions.
+
+**3. Reinforcement-learning trading research**
+
+Implements a tabular Q-learning agent with position-aware actions, next-session-open execution, transaction costs, and frozen-policy evaluation against a buy-and-hold comparator.
+
+All components share validated market-session handling and causal feature preparation to prevent future-data leakage and inconsistent historical observations.
+
+## Historical Research Results
+
+### Bayesian-network holdout evaluation
+
+| Model | Test Accuracy |
+|---|---:|
+| Majority-class benchmark | 52.09% |
+| Baseline Bayesian network | 51.72% |
+| Enhanced Bayesian network | 50.96% |
+
+Neither model outperformed the majority-class benchmark in the reported holdout evaluation.
+
+Five-fold expanding-window experiments additionally evaluated close-to-close and next-open-to-close predictions. Accuracy improvements over the majority benchmark were small, with reported 95% bootstrap intervals spanning zero.
+
+In the separate historical AAPL trading experiment, the Q-learning policy generated **+$29.10** in one-share holdout profit, compared with **+$53.07** for the buy-and-hold comparator.
+
+These experiments demonstrate reproducible modeling and evaluation. They do not establish a statistically reliable trading advantage or real-world profitability. The historical universe is not point-in-time investable and may contain selection or survivorship bias.
+
+## Engineering and Reproducibility
+
+- **555 automated tests** passed independently on each of five Linux, Windows, and macOS CI environments.
+- **90.3% branch-aware research-code coverage**, with six additional module-specific coverage requirements.
+- Versioned, SHA-256-verified dependency environments for reproducible execution.
+- Verified source-data integrity across 33 CSV files, including equivalence checks against 31 original publisher files.
+- Pinned experimental metrics, notebook outputs, and five-fold walk-forward results, reproduced by GitHub Actions.
+- Protected release branch with verified pull-request checks and automatic cleanup of merged temporary branches.
+
+**Verification:** [Certified GitHub Actions results](https://github.com/ryanrowe2/StockTradingAI-Project/actions/runs/43297446884)
+
+**Data provenance:** [Historical dataset and CC0 publisher license evidence](data/raw/README.md)
+
+**Research methodology:** [Experiment Reproduction Guide](docs/README_experiments.md)
+
+**Implementation:** Python · pandas · NumPy · scikit-learn · pgmpy · hmmlearn · GitHub Actions
+
+---
+
+*Detailed architecture, modeling methodology, experimental results, reproduction instructions, and technical documentation follow below.*
+
+## Detailed Architecture and Implementation Notes
 
 Each ticker's indicators and next-session labels are computed independently. Ticker
 identifiers are normalized consistently, including for direct indicator calls;
