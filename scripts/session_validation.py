@@ -195,7 +195,6 @@ def validate_session_positions(
         )
 
     if "Date" in frame:
-        dates = pd.DatetimeIndex(frame["Date"])
         exchange_labels = _normalized_exchange_labels(frame)
         if exchange_labels is not None:
             groups = (group for _, group in frame.groupby(exchange_labels, sort=False))
