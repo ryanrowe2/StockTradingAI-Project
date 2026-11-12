@@ -101,6 +101,18 @@ def _validate_bootstrap_configuration(
         )
 
 
+def _validate_bootstrap_workload(block_count: int, bootstrap_samples: int) -> None:
+    """Reject expensive resampling before model fitting or random allocation."""
+    total = block_count * bootstrap_samples
+    if total > MAX_BOOTSTRAP_DRAW_CELLS:
+        raise ValueError(
+            "Bootstrap workload exceeds the allowed random-block selection budget "
+            f"({total:,} > {MAX_BOOTSTRAP_DRAW_CELLS:,})"
+        )
+    if block_count > MAX_BOOTSTRAP_BATCH_CELLS:
+        raise ValueError("Too many independent blocks for bounded bootstrap batches")
+
+
 def _market_date_block_ids(
     frame: pd.DataFrame,
     block_sessions: int,
@@ -266,14 +278,7 @@ def paired_block_accuracy_intervals(
         .sum()
         .to_numpy(dtype=float)
     )
-    draw_count = bootstrap_samples * len(blocks)
-    if draw_count > MAX_BOOTSTRAP_DRAW_CELLS:
-        raise ValueError(
-            "Bootstrap workload exceeds the allowed random-block selection budget "
-            f"({draw_count:,} > {MAX_BOOTSTRAP_DRAW_CELLS:,})"
-        )
-    if len(blocks) > MAX_BOOTSTRAP_BATCH_CELLS:
-        raise ValueError("Too many independent blocks for bounded bootstrap batches")
+    _validate_bootstrap_workload(len(blocks), bootstrap_samples)
     rng = np.random.default_rng(seed)
     samples = np.empty((bootstrap_samples, blocks.shape[1]), dtype=np.float64)
     batch_size = max(1, MAX_BOOTSTRAP_BATCH_CELLS // len(blocks))
@@ -350,11 +355,15 @@ def walk_forward_experiment(
     planned_holdout = pd.concat(
         [partition[-1] for partition in fold_partitions], ignore_index=True
     )
-    if len(np.unique(_market_date_block_ids(planned_holdout, block_sessions))) < 2:
+    planned_blocks = len(
+        np.unique(_market_date_block_ids(planned_holdout, block_sessions))
+    )
+    if planned_blocks < 2:
         raise ValueError(
             "Walk-forward holdout has too few independent trading-session "
             "blocks for bootstrap evaluation"
         )
+    _validate_bootstrap_workload(planned_blocks, bootstrap_samples)
     fold_reports = []
     scored_folds = []
     scored_row_indices: set[int] = set()

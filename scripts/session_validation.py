@@ -19,6 +19,7 @@ if __package__:
         inferred_equity_sessions,
         validate_exchange_open_dates,
     )
+    from .ticker_validation import normalize_ticker_symbols
 else:
     from date_validation import (
         mark_verified_daily_dates,
@@ -31,6 +32,7 @@ else:
         inferred_equity_sessions,
         validate_exchange_open_dates,
     )
+    from ticker_validation import normalize_ticker_symbols
 
 
 SESSION_COLUMN = "Session_Number"
@@ -47,10 +49,22 @@ def _normalized_exchange_labels(frame: pd.DataFrame) -> pd.Series | None:
     ):
         raise ValueError("Exchange must contain nonempty exchange identifiers")
     normalized = values.str.strip().str.upper()
+    # Aliases represent the same market/session timeline, not separate
+    # exchanges with apparently missing observations.
+    normalized = normalized.replace(
+        {"XNYS": "NYSE", "XNAS": "NASDAQ", "XLON": "LSE", "XTSE": "TSX"}
+    )
     if normalized.isin(("", "N/A", "NAN", "NULL", "NONE", "<NA>")).any():
         raise ValueError("Exchange must contain nonempty exchange identifiers")
     if "Name" in frame:
-        assignments = pd.DataFrame({"Name": frame["Name"], "Exchange": normalized})
+        assignments = pd.DataFrame(
+            {
+                "Name": normalize_ticker_symbols(
+                    frame["Name"], context="Invalid ticker identifier"
+                ),
+                "Exchange": normalized,
+            }
+        )
         if assignments.groupby("Name", dropna=False)["Exchange"].nunique().gt(1).any():
             raise ValueError("Each ticker must belong to exactly one Exchange")
     return normalized
@@ -102,6 +116,10 @@ def session_positions(
                 _calendar_bounds(supplied_dates, calendar_start, calendar_end)
         return frame[SESSION_COLUMN]
     if "Date" not in frame:
+        if "Exchange" in frame:
+            raise ValueError(
+                "Exchange-aware positions require Date or verified Session_Number"
+            )
         return pd.Series(np.arange(len(frame), dtype=np.int64), index=frame.index)
     dates = pd.DatetimeIndex(parse_daily_dates(frame["Date"], context="Trading dates"))
     if (dates.dayofweek >= 5).any():
@@ -159,12 +177,23 @@ def validate_session_positions(
     require_verified_daily_date_source(
         frame, verified_datetime_dates=verified_datetime_dates
     )
+    exchanges = _normalized_exchange_labels(frame)
+    if "Date" not in frame and exchanges is not None and SESSION_COLUMN not in frame:
+        raise ValueError(
+            "Exchange-aware positions require Date or verified Session_Number"
+        )
     if "Date" in frame:
         # Check the daily identity before duplicate or ordinal comparisons.
         # Otherwise, two times (or differently formatted strings) on the same
         # calendar day can masquerade as separate trading sessions.
         frame = frame.copy()
         frame["Date"] = parse_daily_dates(frame["Date"], context="Trading dates")
+        if "Name" in frame:
+            frame["Name"] = normalize_ticker_symbols(
+                frame["Name"], context="Invalid ticker identifier"
+            )
+        if exchanges is not None:
+            frame["Exchange"] = exchanges
         mark_verified_daily_dates(frame)
         # Exchange-level session feeds have one row per exchange/date even
         # without ticker names. A shared date across markets is not a duplicate.
@@ -177,10 +206,8 @@ def validate_session_positions(
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
 
-    exchanges = None
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
-        exchanges = _normalized_exchange_labels(frame)
         if exchanges is None:
             validate_exchange_open_dates(checked_dates)
         else:
@@ -288,11 +315,12 @@ def validate_session_positions(
                     "Trading observations must occupy consecutive market sessions"
                 )
     elif "Date" not in frame:
-        groups = (
-            (group for _, group in frame.groupby("Name", sort=False))
-            if "Name" in frame
-            else (frame,)
-        )
+        if "Name" in frame:
+            groups = (group for _, group in frame.groupby("Name", sort=False))
+        elif exchanges is not None:
+            groups = (group for _, group in frame.groupby(exchanges, sort=False))
+        else:
+            groups = (frame,)
         for group in groups:
             sequence = group[SESSION_COLUMN].tolist()
             if any(later <= earlier for earlier, later in pairwise(sequence)):
