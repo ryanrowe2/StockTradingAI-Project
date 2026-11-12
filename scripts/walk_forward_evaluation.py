@@ -143,9 +143,10 @@ def _market_date_block_ids(
     ordinal_groups = []
     for exchange, group in grouping:
         exchange_dates = pd.DatetimeIndex(group["Date"])
-        if exchange in _KNOWN_EXCHANGES and (
-            exchange_dates >= pd.Timestamp("1971-01-01")
-        ).all():
+        if (
+            exchange in _KNOWN_EXCHANGES
+            and (exchange_dates >= pd.Timestamp("1971-01-01")).all()
+        ):
             known_calendars.append(
                 inferred_equity_sessions(
                     exchange_dates,

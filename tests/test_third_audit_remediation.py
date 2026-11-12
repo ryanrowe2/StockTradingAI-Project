@@ -93,6 +93,9 @@ def test_batched_bootstrap_remains_deterministic():
 
 
 def test_verified_historical_datetime_provenance():
-    frame = _scores(pd.to_datetime(["1951-01-05", "1951-01-06", "1951-01-08", "1951-01-09"]), ordinals=[400, 401, 402, 403])
+    frame = _scores(
+        pd.to_datetime(["1951-01-05", "1951-01-06", "1951-01-08", "1951-01-09"]),
+        ordinals=[400, 401, 402, 403],
+    )
     mark_verified_daily_dates(frame)
     assert len(np.unique(_market_date_block_ids(frame, 2))) == 2
