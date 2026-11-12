@@ -144,6 +144,7 @@ def add_technical_indicators(
         df["Name"],
         context="Every indicator observation must have a ticker name",
     )
+    mark_verified_daily_dates(df)
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations in indicator input")
     validate_session_positions(df)
@@ -151,7 +152,7 @@ def add_technical_indicators(
     # for a peer on the same Exchange can expose a missing session here.
     if "Session_Number" not in df:
         df["Session_Number"] = session_positions(df)
-    return (
+    return mark_verified_daily_dates(
         pd.concat(
             [
                 _one_symbol_indicators(group.sort_values("Date"))

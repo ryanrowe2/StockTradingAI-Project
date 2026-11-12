@@ -61,6 +61,13 @@ def adjacent_session_flags(positions: pd.Series, *, forward: bool = False) -> pd
     numbers = positions.tolist()
     if not numbers:
         return pd.Series(index=positions.index, dtype=bool)
+    if any(
+        not isinstance(number, (int, np.integer))
+        or isinstance(number, (bool, np.bool_))
+        or number < 0
+        for number in numbers
+    ):
+        raise ValueError("Session positions must be nonnegative integer ordinals")
     adjacent = [int(later) == int(earlier) + 1 for earlier, later in pairwise(numbers)]
     values = adjacent + [False] if forward else [False] + adjacent
     return pd.Series(values, index=positions.index, dtype=bool)
@@ -163,6 +170,7 @@ def validate_session_positions(
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
 
+    exchanges = None
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
         exchanges = _normalized_exchange_labels(frame)
@@ -179,6 +187,10 @@ def validate_session_positions(
                 )
 
     if SESSION_COLUMN not in frame:
+        if exchanges is not None and (~exchanges.isin(_KNOWN_EXCHANGES)).any():
+            raise ValueError(
+                "Unknown exchanges require verified Session_Number metadata"
+            )
         return
 
     positions = frame[SESSION_COLUMN]

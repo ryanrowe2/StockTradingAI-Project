@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime
 
 import numpy as np
@@ -58,6 +59,42 @@ def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series
 # A validated DataFrame carries its source-date attestation into derived copies.
 # This marker is also an explicit caller assertion, never proof by itself.
 VERIFIED_DAILY_DATES_ATTR = "stocktrading_verified_daily_dates"
+_VERIFIED_ROWS_ATTR = "stocktrading_verified_date_rows"
+
+
+@dataclass(frozen=True)
+class _VerifiedRows:
+    """Immutable attestation shared cheaply across pandas-derived DataFrames."""
+
+    values: frozenset[int]
+
+    def __deepcopy__(self, memo: dict) -> "_VerifiedRows":
+        # Pandas deep-copies attrs on nearly every Series/DataFrame operation.
+        # Copying tens of thousands of immutable row hashes each time makes
+        # model training and notebook reproduction prohibitively slow.
+        return self
+
+
+def _verified_row_tokens(frame: pd.DataFrame, column: str) -> frozenset[int]:
+    """Bind date attestation to row identities, surviving filtering and reordering.
+
+    An attestation for Date must not silently authorize a subsequently replaced
+    Target_Date, even when pandas preserves DataFrame.attrs.
+    """
+    columns = []
+    if "Name" in frame:
+        columns.append("Name")
+    if column == "Target_Date" and "Date" in frame:
+        columns.append("Date")
+    columns.append(column)
+    identifying = frame[columns].copy()
+    # Capture the values exactly as supplied. The ordinary date validator still
+    # rejects malformed dates; creating an attestation must not itself fail
+    # before that validation boundary can report its own error.
+    return frozenset(
+        int(value)
+        for value in pd.util.hash_pandas_object(identifying, index=False).to_numpy()
+    )
 
 
 def require_verified_daily_date_source(
@@ -82,17 +119,35 @@ def require_verified_daily_date_source(
         pd.api.types.is_datetime64_any_dtype(supplied.dtype)
         or supplied.map(lambda value: isinstance(value, pd.Timestamp)).any()
     )
-    if ambiguous and not (
-        verified_datetime_dates or frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
+    if not ambiguous or verified_datetime_dates:
+        return
+    attested = frame.attrs.get(_VERIFIED_ROWS_ATTR)
+    if (
+        frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
+        and isinstance(attested, dict)
+        and column in attested
+        and isinstance(attested[column], _VerifiedRows)
+        and _verified_row_tokens(frame, column).issubset(attested[column].values)
     ):
-        raise ValueError(
-            "Pandas datetime dates have unknown original precision; use original "
-            "ISO daily dates or explicitly set verified_datetime_dates=True "
-            "after verifying their source precision"
-        )
+        return
+    raise ValueError(
+        "Pandas datetime dates have unknown original precision or changed since "
+        "attestation; use original ISO daily dates or explicitly set "
+        "verified_datetime_dates=True after verifying their source precision"
+    )
 
 
 def mark_verified_daily_dates(frame: pd.DataFrame) -> pd.DataFrame:
-    """Mark a frame whose source dates have already passed daily verification."""
+    """Attest the current date values, including separate target-date identity.
+
+    Immutable row tokens permit validated subsets, sorting, and index resets
+    without trusting date columns that were replaced after validation.
+    """
+    attested = {
+        column: _VerifiedRows(_verified_row_tokens(frame, column))
+        for column in ("Date", "Target_Date")
+        if column in frame
+    }
     frame.attrs[VERIFIED_DAILY_DATES_ATTR] = True
+    frame.attrs[_VERIFIED_ROWS_ATTR] = attested
     return frame

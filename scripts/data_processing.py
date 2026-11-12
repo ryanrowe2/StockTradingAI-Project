@@ -227,6 +227,7 @@ def validate_bars(
         df["Name"],
         context="Every observation must have a ticker symbol",
     )
+    mark_verified_daily_dates(df)
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
     input_tickers = set(df["Name"])
@@ -249,7 +250,9 @@ def validate_bars(
             "No valid OHLCV observations remain for ticker(s) "
             f"{', '.join(missing_tickers)}"
         )
-    return df.sort_values(["Name", "Date"]).reset_index(drop=True)
+    return mark_verified_daily_dates(
+        df.sort_values(["Name", "Date"]).reset_index(drop=True)
+    )
 
 
 def validate_raw_bar_records(records: Iterable[Mapping[str, object]]) -> pd.DataFrame:
@@ -349,13 +352,32 @@ def prepare_features(
     source["Target_Date"] = (
         source.groupby("Name", sort=False)["Date"].shift(-1).where(adjacent_target)
     )
+    # Shift object-precision ordinals before dropping targets; a float64
+    # intermediate would corrupt exact uint64 ordinals above 2**53.
+    source["Target_Session"] = (
+        source.groupby("Name", sort=False)[SESSION_COLUMN]
+        .transform(lambda positions: positions.astype(object).shift(-1))
+        .where(adjacent_target)
+    )
     reference_price = source["Close"] if target == "close_to_close" else next_open
     source["Trend"] = (next_close > reference_price).astype("int64")
     if not features or any(feature not in MODEL_FEATURES for feature in features):
         raise ValueError(f"Model features must be drawn from {MODEL_FEATURES}")
     required = list(features) + ["Target_Date"]
-    source = source.replace([np.inf, -np.inf], np.nan)
+    # Only model features need nonfinite replacement. Applying DataFrame.replace
+    # to object-precision target ordinals can silently downcast them and emits
+    # a pandas FutureWarning that changes published notebook output.
+    source[list(features)] = source[list(features)].replace([np.inf, -np.inf], np.nan)
     prepared = source.dropna(subset=required).reset_index(drop=True)
+    # The target ordinal is exact source metadata, not a float-derived label.
+    # Keep the integer dtype (including uint64 source positions) end-to-end.
+    if prepared["Target_Session"].isna().any():
+        raise ValueError("Prepared target sessions must be present")
+    prepared["Target_Session"] = pd.Series(
+        prepared["Target_Session"].tolist(),
+        index=prepared.index,
+        dtype=source[SESSION_COLUMN].dtype,
+    )
     if prepared.empty:
         raise ValueError(
             "No usable feature observations remain after indicator warm-up; "

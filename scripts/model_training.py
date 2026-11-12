@@ -38,7 +38,11 @@ if __package__:
         parse_daily_dates,
         require_verified_daily_date_source,
     )
-    from .market_calendar import validate_exchange_open_dates
+    from .market_calendar import (
+        _KNOWN_EXCHANGES,
+        inferred_equity_sessions,
+        validate_exchange_open_dates,
+    )
     from .session_validation import validate_session_positions
 else:
     from data_processing import (
@@ -49,7 +53,11 @@ else:
         prepare_features,
     )
     from date_validation import parse_daily_dates, require_verified_daily_date_source
-    from market_calendar import validate_exchange_open_dates
+    from market_calendar import (
+        _KNOWN_EXCHANGES,
+        inferred_equity_sessions,
+        validate_exchange_open_dates,
+    )
     from session_validation import validate_session_positions
 
 
@@ -94,6 +102,58 @@ def chronological_split(
             )
     else:
         validate_exchange_open_dates(pd.DatetimeIndex(target_date))
+
+    # Validate the supervised horizon itself, not only chronological ordering.
+    # Custom/historical markets have no independently inferrable schedule; they
+    # must provide the ordinal of the target session at feature preparation.
+    if "Target_Session" in df:
+        if "Session_Number" not in df:
+            raise ValueError("Target_Session requires Session_Number metadata")
+        source_positions = df["Session_Number"]
+        target_positions = df["Target_Session"]
+        for positions, label in (
+            (source_positions, "Session_Number"),
+            (target_positions, "Target_Session"),
+        ):
+            if (
+                positions.isna().any()
+                or not pd.api.types.is_integer_dtype(positions.dtype)
+                or pd.api.types.is_bool_dtype(positions.dtype)
+                or (positions < 0).any()
+            ):
+                raise ValueError(f"{label} must contain nonnegative integer ordinals")
+        if any(
+            int(target) != int(source) + 1
+            for source, target in zip(source_positions, target_positions, strict=True)
+        ):
+            raise ValueError("Target_Date must be the next market session")
+    labels = (
+        df["Exchange"].astype(str).str.strip().str.upper()
+        if "Exchange" in df
+        else pd.Series("NYSE", index=df.index)
+    )
+    for exchange, indices in df.groupby(labels, sort=False).indices.items():
+        source_dates = pd.DatetimeIndex(date.iloc[indices])
+        destination_dates = pd.DatetimeIndex(target_date.iloc[indices])
+        if exchange not in _KNOWN_EXCHANGES or source_dates.min() < pd.Timestamp(
+            "1971-01-01"
+        ):
+            if "Target_Session" not in df:
+                raise ValueError(
+                    "Custom or historical market targets require verified "
+                    "Target_Session metadata"
+                )
+            continue
+        sessions = inferred_equity_sessions(
+            source_dates,
+            start=source_dates.min(),
+            end=destination_dates.max(),
+            exchange=str(exchange),
+        )
+        start_positions = sessions.get_indexer(source_dates)
+        end_positions = sessions.get_indexer(destination_dates)
+        if ((end_positions - start_positions) != 1).any():
+            raise ValueError("Target_Date must be the next market session")
     dates = pd.DatetimeIndex(date.unique()).sort_values()
     if len(dates) < 15:
         raise ValueError("At least 15 distinct trading dates are required")
