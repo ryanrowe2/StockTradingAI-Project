@@ -360,7 +360,11 @@ def prepare_features(
     if not features or any(feature not in MODEL_FEATURES for feature in features):
         raise ValueError(f"Model features must be drawn from {MODEL_FEATURES}")
     required = list(features) + ["Target_Date"]
+    # Preserve exact object-backed ordinals: a broad DataFrame.replace can
+    # silently downcast large uint64 session identifiers through float64.
+    target_positions = source.pop("Target_Session_Number")
     source = source.replace([np.inf, -np.inf], np.nan)
+    source["Target_Session_Number"] = target_positions.astype(object)
     prepared = source.dropna(subset=required).reset_index(drop=True)
     if prepared.empty:
         raise ValueError(
