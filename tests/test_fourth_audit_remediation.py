@@ -78,7 +78,8 @@ def test_custom_market_missing_session_breaks_shared_date_blocks():
                 Exchange="XTEST", Session_Number=pd.Series([100, 103], dtype="int64")
             ),
             _scores(["2024-01-16", "2024-01-17", "2024-01-18"]).assign(
-                Exchange="NYSE", Session_Number=pd.Series([400, 401, 402], dtype="int64")
+                Exchange="NYSE",
+                Session_Number=pd.Series([400, 401, 402], dtype="int64"),
             ),
         ],
         ignore_index=True,
@@ -115,9 +116,7 @@ def test_bootstrap_work_budget_rejected_before_random_allocation(monkeypatch):
 
     monkeypatch.setattr(evaluation, "MAX_BOOTSTRAP_DRAW_CELLS", 200)
     with pytest.raises(ValueError, match="workload"):
-        paired_block_accuracy_intervals(
-            frame, block_sessions=1, bootstrap_samples=100
-        )
+        paired_block_accuracy_intervals(frame, block_sessions=1, bootstrap_samples=100)
     assert MAX_BOOTSTRAP_DRAW_CELLS >= 200
 
 
@@ -133,7 +132,9 @@ def test_drawdown_overflow_is_reported():
 
 def test_reasonable_bootstrap_still_produces_finite_intervals():
     frame = _scores(_nyse_dates(30))
-    result = paired_block_accuracy_intervals(frame, block_sessions=5, bootstrap_samples=100)
+    result = paired_block_accuracy_intervals(
+        frame, block_sessions=5, bootstrap_samples=100
+    )
     assert all(np.isfinite(values).all() for values in result.values())
 
 
