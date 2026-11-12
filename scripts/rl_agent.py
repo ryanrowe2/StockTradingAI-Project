@@ -98,7 +98,7 @@ class SimpleTradingEnv:
             self.data["Date"] = parse_daily_dates(
                 self.data["Date"], context="Trading dates"
             )
-            mark_verified_daily_dates(self.data)
+            mark_verified_daily_dates(self.data, columns=("Date",))
             self.data = self.data.sort_values("Date", kind="stable")
         self.data = self.data.reset_index(drop=True)
         if "Date" in self.data and self.data["Date"].duplicated().any():
@@ -284,7 +284,7 @@ def contiguous_trading_segments(
         )
     if "Date" in ordered:
         ordered["Date"] = parse_daily_dates(ordered["Date"], context="Trading dates")
-        mark_verified_daily_dates(ordered)
+        mark_verified_daily_dates(ordered, columns=("Date",))
         ordered = ordered.sort_values("Date", kind="stable")
     validate_session_positions(ordered)
     # Retain source-wide exchange calendars before isolating individual stocks.
