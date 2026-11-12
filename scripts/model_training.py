@@ -399,7 +399,6 @@ def train_and_select(
     include_predictions: bool = False,
 ) -> dict:
     """Select prior strength on validation; refit and score on test once."""
-    _validate_direct_model_split(split)
     try:
         sample_sizes = tuple(sample_sizes)
     except TypeError as exc:
@@ -422,6 +421,7 @@ def train_and_select(
             ("Test", split.test),
         )
     }
+    _validate_direct_model_split(split)
     binner = QuantileBinner(num_bins).fit(split.train, features)
     train = binner.transform(split.train, features)
     train["Trend"] = labels["Training"]
