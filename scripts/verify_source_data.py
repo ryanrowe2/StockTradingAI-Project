@@ -51,7 +51,12 @@ def calculate_manifest(data_dir: Path = DATA_DIR) -> dict:
             f"Combined source differs from individual ticker files: {missing} "
             f"individual-only rows, {extra} combined-only rows"
         )
-    subset = Counter(row for row, count in master.items() for _ in range(count) if row[0].startswith("2017-"))
+    subset = Counter(
+        row
+        for row, count in master.items()
+        for _ in range(count)
+        if row[0].startswith("2017-")
+    )
     if _contents(files[1]) != subset:
         raise ValueError("2017 source is not the corresponding complete-data subset")
     hashes = {
@@ -71,19 +76,27 @@ def calculate_manifest(data_dir: Path = DATA_DIR) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--emit", action="store_true", help="Print candidate manifest for review")
+    parser.add_argument(
+        "--emit", action="store_true", help="Print candidate manifest for review"
+    )
     args = parser.parse_args()
     observed = calculate_manifest()
     if args.emit:
         print("SOURCE_MANIFEST_JSON=" + json.dumps(observed, sort_keys=True))
         return
     if not MANIFEST.is_file():
-        raise ValueError("Source-data manifest missing; generate and review --emit output")
+        raise ValueError(
+            "Source-data manifest missing; generate and review --emit output"
+        )
     expected = json.loads(MANIFEST.read_text(encoding="utf-8"))
     if expected != observed:
-        raise ValueError("Source-data SHA-256 manifest or row reconciliation has changed")
-    print(f"Verified {len(observed['files_sha256'])} bundled source files and "
-          f"{observed['row_count']:,} unique ticker/day source rows")
+        raise ValueError(
+            "Source-data SHA-256 manifest or row reconciliation has changed"
+        )
+    print(
+        f"Verified {len(observed['files_sha256'])} bundled source files and "
+        f"{observed['row_count']:,} unique ticker/day source rows"
+    )
 
 
 if __name__ == "__main__":
