@@ -166,7 +166,14 @@ def validate_session_positions(
         frame = frame.copy()
         frame["Date"] = parse_daily_dates(frame["Date"], context="Trading dates")
         mark_verified_daily_dates(frame)
-        identity = ["Name", "Date"] if "Name" in frame else ["Date"]
+        # Exchange-level session feeds have one row per exchange/date even
+        # without ticker names. A shared date across markets is not a duplicate.
+        if "Name" in frame:
+            identity = ["Name", "Date"]
+        elif "Exchange" in frame:
+            identity = ["Exchange", "Date"]
+        else:
+            identity = ["Date"]
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
 

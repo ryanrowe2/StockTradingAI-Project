@@ -164,8 +164,12 @@ class SimpleTradingEnv:
         return self.get_state()
 
     def get_state(self) -> tuple[int, ...]:
-        row = self.data.iloc[self.index]
-        return tuple(int(row[field]) for field in self.state_columns) + (self.position,)
+        # A mixed price/state row may be coerced to float64 by pandas,
+        # corrupting exact int64 / uint64 state values above 2**53.
+        return tuple(
+            int(self.data[column].iloc[self.index])
+            for column in self.state_columns
+        ) + (self.position,)
 
     def step(self, action: str) -> tuple[tuple[int, ...], float, bool, dict]:
         if self.done:
@@ -236,7 +240,15 @@ class SimpleTradingEnv:
     def episode_metrics(self) -> dict[str, float | int]:
         """Summarize marked-to-market episode results without forcing an exit."""
         equity = np.asarray(self.equity_curve, dtype=float)
-        drawdown = np.maximum.accumulate(equity) - equity
+        # Subtracting two finite equity values can still overflow float64.
+        # Fail explicitly rather than report an infinite drawdown.
+        try:
+            with np.errstate(over="raise", invalid="raise"):
+                drawdown = np.maximum.accumulate(equity) - equity
+        except FloatingPointError as exc:
+            raise ValueError("Trading drawdown must remain finite") from exc
+        if not np.isfinite(drawdown).all():
+            raise ValueError("Trading drawdown must remain finite")
         steps = len(equity) - 1
         return {
             "pnl": float(self.total_pnl),

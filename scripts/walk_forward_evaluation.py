@@ -78,6 +78,8 @@ DEFAULT_OUTPUT = (
 # float64 scores. Draw indices/selected blocks use at most 100,000 cells.
 MAX_BOOTSTRAP_SAMPLES = 1_000_000
 MAX_BOOTSTRAP_BATCH_CELLS = 100_000
+# Cap total random block selections, not only the peak batch allocation.
+MAX_BOOTSTRAP_DRAW_CELLS = 50_000_000
 
 
 def _validate_bootstrap_configuration(
@@ -140,50 +142,54 @@ def _market_date_block_ids(
         if exchanges is not None
         else (("NYSE", metadata),)
     )
-    ordinal_groups = []
+    # Track missing sessions within each market independently: a traded date
+    # in a different exchange does not replace an absent London/NYSE session.
+    gap_boundaries = np.zeros(len(days), dtype=bool)
     for exchange, group in grouping:
-        exchange_dates = pd.DatetimeIndex(group["Date"])
+        group = group.sort_values("Date")
+        observed = pd.DatetimeIndex(group["Date"])
         if (
             exchange in _KNOWN_EXCHANGES
-            and (exchange_dates >= pd.Timestamp("1971-01-01")).all()
+            and (observed >= pd.Timestamp("1971-01-01")).all()
         ):
-            known_calendars.append(
-                inferred_equity_sessions(
-                    exchange_dates,
-                    start=exchange_dates.min(),
-                    end=exchange_dates.max(),
-                    exchange=exchange,
-                )
+            schedule = inferred_equity_sessions(
+                observed,
+                start=observed.min(),
+                end=observed.max(),
+                exchange=exchange,
             )
+            known_calendars.append(schedule)
+            positions = schedule.get_indexer(observed)
+            has_gap = np.diff(positions) > 1
         else:
             if "Session_Number" not in group:
                 raise ValueError(
                     "Historical and custom exchanges require verified "
                     "Session_Number metadata"
                 )
-            ordinal_groups.append(group.sort_values("Date"))
+            positions = [int(value) for value in group["Session_Number"]]
+            has_gap = [
+                following > preceding + 1
+                for preceding, following in zip(
+                    positions[:-1], positions[1:], strict=True
+                )
+            ]
+        for earlier, missing_session in zip(observed[:-1], has_gap, strict=True):
+            if missing_session:
+                # A missing market session must separate any shared global
+                # observations after 'earlier' from the preceding block.
+                # For custom exchanges, its exact missing date is unknown;
+                # this conservative boundary never resamples across the gap.
+                boundary = days.searchsorted(earlier, side="right")
+                if boundary < len(days):
+                    gap_boundaries[boundary] = True
     calendar = days
     for known_sessions in known_calendars:
         calendar = calendar.union(known_sessions).sort_values()
     timeline_positions = calendar.get_indexer(days)
     increments = np.diff(timeline_positions, prepend=timeline_positions[0])
     increments[0] = 1
-    for group in ordinal_groups:
-        positions = [int(v) for v in group["Session_Number"]]
-        observed = pd.DatetimeIndex(group["Date"])
-        for earlier, later, previous, current in zip(
-            observed[:-1],
-            observed[1:],
-            positions[:-1],
-            positions[1:],
-            strict=True,
-        ):
-            first_index, last_index = days.get_indexer([earlier, later])
-            covered = int(increments[first_index + 1 : last_index + 1].sum())
-            if current - previous > covered:
-                # Only the existence of a gap matters; assigning the actual
-                # gap size could overflow int64 for far-apart uint64 ordinals.
-                increments[last_index] = max(int(increments[last_index]), 2)
+    increments[gap_boundaries] = np.maximum(increments[gap_boundaries], 2)
     blocks = np.empty(len(days), dtype=np.int64)
     current_block = -1
     sessions_in_block = 0
@@ -255,6 +261,14 @@ def paired_block_accuracy_intervals(
         .sum()
         .to_numpy(dtype=float)
     )
+    draw_count = bootstrap_samples * len(blocks)
+    if draw_count > MAX_BOOTSTRAP_DRAW_CELLS:
+        raise ValueError(
+            "Bootstrap workload exceeds the allowed random-block selection budget "
+            f"({draw_count:,} > {MAX_BOOTSTRAP_DRAW_CELLS:,})"
+        )
+    if len(blocks) > MAX_BOOTSTRAP_BATCH_CELLS:
+        raise ValueError("Too many independent blocks for bounded bootstrap batches")
     rng = np.random.default_rng(seed)
     samples = np.empty((bootstrap_samples, blocks.shape[1]), dtype=np.float64)
     batch_size = max(1, MAX_BOOTSTRAP_BATCH_CELLS // len(blocks))
@@ -320,16 +334,21 @@ def walk_forward_experiment(
         ].copy()
         if min(len(train), len(validation), len(test)) == 0:
             raise ValueError(f"Fold {number + 1} has an empty chronological partition")
-        if len(np.unique(_market_date_block_ids(test, block_sessions))) < 2:
-            raise ValueError(
-                f"Fold {number + 1} has too few independent trading-session "
-                "blocks for bootstrap evaluation"
-            )
         symbols = set(prepared["Name"])
         if any(set(part["Name"]) != symbols for part in (train, validation, test)):
             raise ValueError(f"Fold {number + 1} has incomplete ticker coverage")
         fold_partitions.append(
             (number, train_end, validation_end, test_end, train, validation, test)
+        )
+    # The published bootstrap is pooled across folds. Check pooled holdout
+    # feasibility before fitting rather than requiring two blocks per fold.
+    planned_holdout = pd.concat(
+        [partition[-1] for partition in fold_partitions], ignore_index=True
+    )
+    if len(np.unique(_market_date_block_ids(planned_holdout, block_sessions))) < 2:
+        raise ValueError(
+            "Walk-forward holdout has too few independent trading-session "
+            "blocks for bootstrap evaluation"
         )
     fold_reports = []
     scored_folds = []
