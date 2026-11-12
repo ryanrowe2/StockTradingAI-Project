@@ -141,12 +141,9 @@ def paired_block_accuracy_intervals(
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")
     expected = (scored["actual"] == scored["majority"]).to_numpy(dtype=int)
-    baseline = (scored["actual"] == (scored["baseline_prob"] >= 0.5)).to_numpy(
-        dtype=int
-    )
-    enhanced = (scored["actual"] == (scored["enhanced_prob"] >= 0.5)).to_numpy(
-        dtype=int
-    )
+    actual = scored["actual"].to_numpy(dtype=int)
+    baseline = (actual == (probabilities[:, 0] >= 0.5)).astype(int)
+    enhanced = (actual == (probabilities[:, 1] >= 0.5)).astype(int)
     blocks = (
         pd.DataFrame(
             {
