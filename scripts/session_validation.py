@@ -87,9 +87,7 @@ def session_positions(
         validate_session_positions(
             frame, verified_datetime_dates=verified_datetime_dates
         )
-        if "Date" in frame and (
-            calendar_start is not None or calendar_end is not None
-        ):
+        if "Date" in frame and (calendar_start is not None or calendar_end is not None):
             supplied_dates = pd.DatetimeIndex(
                 parse_daily_dates(frame["Date"], context="Trading dates")
             )
