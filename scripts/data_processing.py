@@ -350,7 +350,8 @@ def prepare_features(
         source.groupby("Name", sort=False)["Date"].shift(-1).where(adjacent_target)
     )
     source["Target_Session_Number"] = (
-        source.groupby("Name", sort=False)[SESSION_COLUMN]
+        source.assign(_target_session=source[SESSION_COLUMN].astype(object))
+        .groupby("Name", sort=False)["_target_session"]
         .shift(-1)
         .where(adjacent_target)
     )
