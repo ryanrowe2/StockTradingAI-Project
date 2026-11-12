@@ -1,14 +1,7 @@
 name: Generate native SHA256 locks
 
 on:
-  push:
-    branches:
-      - fix/portable-hash-locks-and-branch-hygiene-20261112
-    paths:
-      - scripts/generate_portable_lock.py
-      - .github/workflows/generate-portable-locks.yml
-      - requirements-dev.txt
-      - requirements.txt
+  workflow_dispatch:
 
 permissions:
   contents: read
