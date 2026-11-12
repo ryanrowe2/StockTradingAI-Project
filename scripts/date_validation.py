@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime
 
 import numpy as np
@@ -61,6 +62,19 @@ VERIFIED_DAILY_DATES_ATTR = "stocktrading_verified_daily_dates"
 _VERIFIED_ROWS_ATTR = "stocktrading_verified_date_rows"
 
 
+@dataclass(frozen=True)
+class _VerifiedRows:
+    """Immutable attestation shared cheaply across pandas-derived DataFrames."""
+
+    values: frozenset[int]
+
+    def __deepcopy__(self, memo: dict) -> "_VerifiedRows":
+        # Pandas deep-copies attrs on nearly every Series/DataFrame operation.
+        # Copying tens of thousands of immutable row hashes each time makes
+        # model training and notebook reproduction prohibitively slow.
+        return self
+
+
 def _verified_row_tokens(frame: pd.DataFrame, column: str) -> frozenset[int]:
     """Bind date attestation to row identities, surviving filtering and reordering.
 
@@ -114,7 +128,8 @@ def require_verified_daily_date_source(
         frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
         and isinstance(attested, dict)
         and column in attested
-        and _verified_row_tokens(frame, column).issubset(attested[column])
+        and isinstance(attested[column], _VerifiedRows)
+        and _verified_row_tokens(frame, column).issubset(attested[column].values)
     ):
         return
     raise ValueError(
@@ -131,7 +146,7 @@ def mark_verified_daily_dates(frame: pd.DataFrame) -> pd.DataFrame:
     without trusting date columns that were replaced after validation.
     """
     attested = {
-        column: _verified_row_tokens(frame, column)
+        column: _VerifiedRows(_verified_row_tokens(frame, column))
         for column in ("Date", "Target_Date")
         if column in frame
     }
