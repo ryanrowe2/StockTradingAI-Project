@@ -215,6 +215,17 @@ def validate_session_positions(
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
 
+    # An unknown historical schedule is a missing-attestation error, not
+    # evidence that a specific ordinary weekday was a market closure.
+    if (
+        "Date" in frame
+        and SESSION_COLUMN not in frame
+        and (pd.DatetimeIndex(frame["Date"]) < pd.Timestamp("1971-01-01")).any()
+    ):
+        raise ValueError(
+            "Trading dates before 1971 require verified Session_Number metadata"
+        )
+
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
         if exchanges is None:
