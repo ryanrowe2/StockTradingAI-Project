@@ -177,7 +177,7 @@ def test_mutated_verified_target_column_cannot_inherit_original_attestation():
     frame["Date"] = pd.to_datetime(frame["Date"])
     frame["Target_Date"] = pd.to_datetime(frame["Target_Date"])
     mark_verified_daily_dates(frame)
-    frame["Target_Date"] = pd.date_range("2019-01-01", periods=len(frame), freq="MS")
+    frame["Target_Date"] = pd.date_range("2025-01-01", periods=len(frame), freq="MS")
     with pytest.raises(ValueError, match="verification is stale"):
         chronological_split(frame)
 
@@ -186,7 +186,7 @@ def test_unknown_weekday_exchange_requires_verified_ordinals():
     frame = pd.DataFrame(
         {"Exchange": ["XTEST", "XTEST"], "Date": ["2024-01-08", "2024-01-09"]}
     )
-    with pytest.raises(ValueError, match="requires verified Session_Number"):
+    with pytest.raises(ValueError, match="require verified Session_Number"):
         validate_session_positions(frame)
 
 
