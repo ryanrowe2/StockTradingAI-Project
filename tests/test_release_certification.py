@@ -16,8 +16,7 @@ def _coverage_fixture():
         "meta": {"branch_coverage": True},
         "totals": {"percent_covered": 95.0},
         "files": {
-            module: {"summary": {"percent_covered": 100.0}}
-            for module in MODULE_FLOORS
+            module: {"summary": {"percent_covered": 100.0}} for module in MODULE_FLOORS
         },
     }
 
@@ -68,9 +67,7 @@ def test_source_manifest_cli_checks_committed_digest(monkeypatch, capsys):
     assert "Verified 33 bundled source files" in capsys.readouterr().out
 
 
-def test_source_manifest_cli_rejects_missing_reviewed_manifest(
-    monkeypatch, tmp_path
-):
+def test_source_manifest_cli_rejects_missing_reviewed_manifest(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["source-data"])
     monkeypatch.setattr(verify_source_data, "MANIFEST", tmp_path / "missing.json")
     with pytest.raises(ValueError, match="manifest missing"):
