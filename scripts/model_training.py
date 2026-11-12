@@ -329,6 +329,67 @@ def classification_metrics(
     return result
 
 
+def _validate_direct_model_split(split: ChronologicalSplit) -> None:
+    """Reject overlapping periods and future labels in caller-created splits.
+
+    The standard pipeline constructs a validated ChronologicalSplit, but the
+    training API can be invoked directly with an arbitrary dataclass. Check
+    the actual observations and target dates before fitting any model.
+    """
+    if not isinstance(split, ChronologicalSplit):
+        raise ValueError("A valid ChronologicalSplit is required")
+    try:
+        first = pd.Timestamp(split.train_end)
+        second = pd.Timestamp(split.validation_end)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid chronological split boundaries") from exc
+    if (
+        pd.isna(first)
+        or pd.isna(second)
+        or first >= second
+        or first.tzinfo is not None
+        or second.tzinfo is not None
+        or first != first.normalize()
+        or second != second.normalize()
+    ):
+        raise ValueError("Invalid chronological split boundaries")
+    for label, part in (
+        ("Training", split.train),
+        ("Validation", split.validation),
+        ("Test", split.test),
+    ):
+        if not isinstance(part, pd.DataFrame) or part.empty:
+            raise ValueError(f"{label} partition must be a nonempty DataFrame")
+        missing = {"Name", "Date", "Target_Date", "Trend"} - set(part.columns)
+        if missing:
+            raise ValueError(f"{label} partition is missing {sorted(missing)}")
+        require_verified_daily_date_source(part)
+        require_verified_daily_date_source(part, column="Target_Date")
+        dates = parse_daily_dates(part["Date"], context=f"{label} feature dates")
+        targets = parse_daily_dates(
+            part["Target_Date"], context=f"{label} target dates"
+        )
+        if (targets <= dates).any():
+            raise ValueError(f"{label} labels must follow their feature dates")
+        normalized_symbols = part["Name"].astype("string").str.strip().str.upper()
+        if pd.DataFrame(
+            {"Name": normalized_symbols, "Date": dates}
+        ).duplicated(["Name", "Date"]).any():
+            raise ValueError(f"{label} partition has duplicate observations")
+        if label == "Training" and (
+            (dates > first).any() or (targets > first).any()
+        ):
+            raise ValueError("Training partition crosses its chronological boundary")
+        if label == "Validation" and (
+            (dates <= first).any()
+            or (dates > second).any()
+            or (targets > second).any()
+        ):
+            raise ValueError("Validation partition crosses its chronological boundary")
+        if label == "Test" and (dates <= second).any():
+            raise ValueError("Test partition overlaps earlier chronological periods")
+
+
 def train_and_select(
     split: ChronologicalSplit,
     features: tuple[str, ...],
@@ -338,6 +399,7 @@ def train_and_select(
     include_predictions: bool = False,
 ) -> dict:
     """Select prior strength on validation; refit and score on test once."""
+    _validate_direct_model_split(split)
     try:
         sample_sizes = tuple(sample_sizes)
     except TypeError as exc:
