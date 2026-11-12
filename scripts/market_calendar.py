@@ -34,8 +34,7 @@ LAST_NYSE_SATURDAY_SESSION = pd.Timestamp("1952-05-24")
 # from June 12 through year-end was a nontrading day.
 _HISTORICAL_ELECTION_DAYS = pd.DatetimeIndex(
     [
-        pd.Timestamp(year, 11, 1)
-        + pd.offsets.WeekOfMonth(week=0, weekday=1)
+        pd.date_range(f"{year}-11-02", f"{year}-11-08", freq="W-TUE")[0]
         for year in range(1952, 1969)
     ]
 )
