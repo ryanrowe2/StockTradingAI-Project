@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -104,7 +103,8 @@ def main() -> None:
         fresh = request(path)
         if fresh["object"]["sha"] != branch["commit"]["sha"]:
             raise RuntimeError(f"Branch moved during cleanup: {name}")
-        print(f'{"DELETE" if args.execute else "WOULD DELETE"}: {name} — {reason}', flush=True)
+        verb = "DELETE" if args.execute else "WOULD DELETE"
+        print(f"{verb}: {name} — {reason}", flush=True)
         if args.execute:
             request("git/refs/heads/" + urllib.parse.quote(name, safe=""), method="DELETE")
             deleted.append(name)
