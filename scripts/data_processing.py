@@ -155,8 +155,11 @@ def _custom_source_session_positions(
     if reference.empty:
         raise ValueError("No usable market dates remain for session inference")
     reference["Date"] = parsed.loc[valid]
-    mark_verified_daily_dates(reference)
+    # Date attestation hashes the canonical ticker identity. Normalize Name
+    # before recording that attestation, otherwise " aapl " and "AAPL" can
+    # disagree with their own verified row identity during selected loads.
     reference["Name"] = reference["Name"].astype(str).str.strip().str.upper()
+    mark_verified_daily_dates(reference)
     # An unrelated pre-1971 record must not make a selected modern ticker
     # depend on an historical calendar that requires verified metadata.
     if parsed.loc[selected_mask].min() >= pd.Timestamp("1971-01-01"):
@@ -185,6 +188,16 @@ def _custom_source_session_positions(
             dates = pd.DatetimeIndex(reference.loc[indices, "Date"])
             invalid_peers.extend(indices[~exchange_open_mask(dates, str(exchange))])
         reference = reference.drop(index=invalid_peers)
+        # Only the requested symbol's records are part of the strict input
+        # contract. Duplicate observations from unrelated peer symbols do not
+        # create additional market sessions and must not invalidate a valid
+        # ticker selection. Preserve duplicates for the requested ticker so
+        # validate_bars() can still reject its corrupted source.
+        unrelated = ~reference.index.isin(source.index[selected_mask])
+        duplicate_peers = unrelated & reference.duplicated(
+            ["Name", "Date"], keep="first"
+        )
+        reference = reference.loc[~duplicate_peers]
     else:
         reference = reference.loc[selected_mask]
     inferred = session_positions(reference, calendar_start=start, calendar_end=end)

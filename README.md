@@ -66,6 +66,12 @@ observed holiday weekdays. Callers can supply verified `Session_Number`
 metadata, required for pre-1971 NYSE dates where automatic inference cannot
 safely reconstruct the historical schedule. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
+Observation-window indicators (moving average, Bollinger Bands, and MACD)
+retain earlier valid prices across market-session gaps, deliberately measuring
+the most recent *observed* prices, not a guaranteed number of consecutive
+sessions. Their windows never include future prices; returns, RSI changes,
+and ATR's true range are invalidated at gaps because they require adjacent
+sessions. The gap policy is covered by dedicated regression tests.
 For recognized exchanges from 1971 onward, supplied ordinals must have
 the same spacing as actual scheduled market sessions, so an omitted Tuesday
 cannot be disguised as the next session after Monday. Verified session ordinals
@@ -185,6 +191,14 @@ In the separate AAPL trading notebook, the frozen Q-learning policy earned
 **+$53.07** for the next-open buy-and-hold comparator. These historical
 experiments demonstrate the implementation and its limitations; they do not
 establish predictive superiority or deployable trading profitability.
+
+**Universe-selection limitation:** The fixed 31-symbol historical sample is
+not a point-in-time reconstruction of an investable index. It does not track
+all delisted securities or historical constituent changes and may contain
+selection/survivorship bias. The sample must not be treated as a market-wide
+strategy evaluation. A broader research release would require a licensed,
+point-in-time universe including delisted instruments, corporate actions and
+transaction-ready historical quotes.
 
 For a signal acted upon at the *next open*, an additional supervised target
 tests whether that session's close is above its own open. This isolates an

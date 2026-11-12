@@ -26,20 +26,39 @@ from pandas.tseries.offsets import CustomBusinessDay, DateOffset
 
 LAST_NYSE_SATURDAY_SESSION = pd.Timestamp("1952-05-24")
 
-# Source: NYSE historical special-closures register. During the 1968
-# paperwork crisis trading was suspended every Wednesday from June 12
-# through year-end. The exchange also closed July 5 and other listed days.
-_HISTORICAL_NYSE_CLOSURES = pd.DatetimeIndex(
+# Historical full-day NYSE closures, cross-checked against the exchange
+# calendars' XNYS special-closing history and the NYSE special-closings
+# register. Election Day closed the exchange annually through 1968; from
+# 1972 onward the relevant presidential-election exceptions are in the
+# modern schedule below. In the 1968 paperwork crisis, every Wednesday
+# from June 12 through year-end was a nontrading day.
+_HISTORICAL_ELECTION_DAYS = pd.DatetimeIndex(
     [
-        "1968-02-12",
-        "1968-04-09",
-        "1968-07-05",
-        "1968-11-05",
-        "1969-02-10",
-        "1969-03-31",
-        "1969-07-21",
+        pd.date_range(f"{year}-11-02", f"{year}-11-08", freq="W-TUE")[0]
+        for year in range(1952, 1969)
     ]
-).union(pd.date_range("1968-06-12", "1968-12-31", freq="W-WED"))
+)
+_HISTORICAL_NYSE_CLOSURES = (
+    pd.DatetimeIndex(
+        [
+            "1954-12-24",
+            "1956-12-24",
+            "1958-12-26",
+            "1961-05-29",
+            "1963-11-25",
+            "1965-12-24",
+            "1968-02-12",
+            "1968-04-09",
+            "1968-07-05",
+            "1968-11-05",
+            "1969-02-10",
+            "1969-03-31",
+            "1969-07-21",
+        ]
+    )
+    .union(_HISTORICAL_ELECTION_DAYS)
+    .union(pd.date_range("1968-06-12", "1968-12-31", freq="W-WED"))
+)
 
 
 class _NYSEHolidays(AbstractHolidayCalendar):
@@ -69,6 +88,40 @@ class _NYSEHolidays(AbstractHolidayCalendar):
         Holiday("Thanksgiving", month=11, day=1, offset=DateOffset(weekday=TH(4))),
         Holiday("Christmas Day", month=12, day=25, observance=nearest_workday),
     ]
+
+
+class _HistoricalNYSEHolidays(AbstractHolidayCalendar):
+    """Documented recurring NYSE closures for the 1952–1970 weekday era.
+
+    Before the 1971 Uniform Monday Holiday Act, Washington's Birthday was
+    February 22 and Decoration/Memorial Day was May 30, rather than the
+    present-day Monday observances. Earlier periods still require independent
+    source-session attestations and are not inferred from these rules.
+    """
+
+    rules = [
+        Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),
+        Holiday("Washington's Birthday", month=2, day=22, observance=sunday_to_monday),
+        GoodFriday,
+        Holiday("Memorial Day", month=5, day=30, observance=sunday_to_monday),
+        Holiday("Independence Day", month=7, day=4, observance=sunday_to_monday),
+        Holiday("Labor Day", month=9, day=1, offset=DateOffset(weekday=MO(1))),
+        Holiday("Thanksgiving", month=11, day=1, offset=DateOffset(weekday=TH(4))),
+        Holiday("Christmas Day", month=12, day=25, observance=sunday_to_monday),
+    ]
+
+
+@lru_cache(maxsize=64)
+def _historical_regular_holidays(
+    start: pd.Timestamp, end: pd.Timestamp
+) -> pd.DatetimeIndex:
+    """Known recurring closures, without inventing a pre-1952 market calendar."""
+    first_supported = pd.Timestamp("1952-01-01")
+    if end < first_supported:
+        return pd.DatetimeIndex([])
+    return _HistoricalNYSEHolidays().holidays(
+        start=max(start, first_supported), end=end
+    )
 
 
 # Special NYSE market-wide closures beyond the regular recurring holidays.
@@ -137,6 +190,10 @@ def nyse_open_mask(
         & ~dates.isin(_HISTORICAL_NYSE_CLOSURES)
         & ((dates >= pd.Timestamp("1971-01-01")) | verified_session_ordinals)
     )
+    historical = dates[~modern]
+    if len(historical):
+        known_regular = _historical_regular_holidays(historical.min(), historical.max())
+        valid[~modern] &= ~historical.isin(known_regular)
     if modern.any():
         observed = dates[modern]
         scheduled = _scheduled_sessions(observed.min(), observed.max())

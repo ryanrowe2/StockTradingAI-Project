@@ -158,6 +158,14 @@ The pipeline computes indicators on each ticker's chronological series independe
 | MACD | Twelve-period EMA minus twenty-six-period EMA, plus nine-period signal EMA |
 | Bollinger Bands | Twenty-period mean ± two rolling standard deviations |
 | Return / Return_Lag1 | Fractional change between consecutive source-market sessions and its preceding value; unavailable across missing bars |
+
+The gap policy is intentionally feature-specific. Return and RSI differences,
+and ATR true range, require consecutive source sessions and become unavailable
+after an omitted session until their valid rolling history recovers. MA_20,
+Bollinger Bands, and MACD use an observation-count/EMA horizon over prior valid
+prices; they retain information across omitted sessions and do not claim a
+fixed calendar-time or consecutive-session horizon. This is causal and is
+explicitly regression-tested.
 | Close_Lag1 | Previous observed closing price for the same ticker |
 | Intraday_Return | (Close − Open) / Open |
 | Daily_Range | (High − Low) / Open |
@@ -282,6 +290,14 @@ block setting fails explicitly instead of presenting a degenerate 95% interval.
 The same preflight rejects estimated resampling work exceeding the configured
 random-block draw budget before any model fitting begins. Random seeds
 must be nonnegative integers and are checked before source-data loading.
+
+**Historical-universe limitation:** The provided 31 stocks are a fixed
+third-party sample rather than point-in-time index constituents. Historical
+membership, delisted instruments and complete corporate-action data were
+not supplied. As a result, the comparisons have potential survivorship and
+selection bias, and their measured accuracy cannot establish market-wide
+deployability. Addressing that research limitation requires a separate,
+licensed point-in-time dataset and rerunning the whole pipeline.
 
 ## 3. Gaussian HMM regime experiment
 
