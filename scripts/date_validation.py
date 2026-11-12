@@ -58,6 +58,19 @@ def parse_daily_dates(values: pd.Series, *, context: str = "Dates") -> pd.Series
 # A validated DataFrame carries its source-date attestation into derived copies.
 # This marker is also an explicit caller assertion, never proof by itself.
 VERIFIED_DAILY_DATES_ATTR = "stocktrading_verified_daily_dates"
+VERIFIED_TARGET_PAIRS_ATTR = "stocktrading_verified_target_pairs"
+
+
+def _date_pairs(frame: pd.DataFrame) -> frozenset[tuple[int, int]]:
+    """Capture verified date-to-target identities, surviving ordinary row subsets."""
+    if "Date" not in frame or "Target_Date" not in frame:
+        return frozenset()
+    dates = parse_daily_dates(frame["Date"], context="Feature dates").astype("int64")
+    targets = parse_daily_dates(
+        frame["Target_Date"], context="Target dates"
+    ).astype("int64")
+    return frozenset(zip(dates, targets, strict=True))
+
 
 
 def require_verified_daily_date_source(
@@ -82,17 +95,34 @@ def require_verified_daily_date_source(
         pd.api.types.is_datetime64_any_dtype(supplied.dtype)
         or supplied.map(lambda value: isinstance(value, pd.Timestamp)).any()
     )
-    if ambiguous and not (
-        verified_datetime_dates or frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
-    ):
+    attested = (
+        verified_datetime_dates
+        or frame.attrs.get(VERIFIED_DAILY_DATES_ATTR) is True
+    )
+    if ambiguous and not attested:
         raise ValueError(
             "Pandas datetime dates have unknown original precision; use original "
             "ISO daily dates or explicitly set verified_datetime_dates=True "
             "after verifying their source precision"
+        )
+    if (
+        column == "Target_Date"
+        and ambiguous
+        and not verified_datetime_dates
+        and frame.attrs.get(VERIFIED_TARGET_PAIRS_ATTR) is not None
+        and not _date_pairs(frame).issubset(
+            frame.attrs[VERIFIED_TARGET_PAIRS_ATTR]
+        )
+    ):
+        raise ValueError(
+            "Target_Date source verification is stale: target dates changed "
+            "after their verified feature/target pairs were recorded"
         )
 
 
 def mark_verified_daily_dates(frame: pd.DataFrame) -> pd.DataFrame:
     """Mark a frame whose source dates have already passed daily verification."""
     frame.attrs[VERIFIED_DAILY_DATES_ATTR] = True
+    if "Date" in frame and "Target_Date" in frame:
+        frame.attrs[VERIFIED_TARGET_PAIRS_ATTR] = _date_pairs(frame)
     return frame

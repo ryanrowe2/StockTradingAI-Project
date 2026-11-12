@@ -38,7 +38,11 @@ if __package__:
         parse_daily_dates,
         require_verified_daily_date_source,
     )
-    from .market_calendar import validate_exchange_open_dates
+    from .market_calendar import (
+        inferred_equity_sessions,
+        validate_exchange_open_dates,
+        _KNOWN_EXCHANGES,
+    )
     from .session_validation import validate_session_positions
 else:
     from data_processing import (
@@ -49,7 +53,11 @@ else:
         prepare_features,
     )
     from date_validation import parse_daily_dates, require_verified_daily_date_source
-    from market_calendar import validate_exchange_open_dates
+    from market_calendar import (
+        inferred_equity_sessions,
+        validate_exchange_open_dates,
+        _KNOWN_EXCHANGES,
+    )
     from session_validation import validate_session_positions
 
 
@@ -94,6 +102,43 @@ def chronological_split(
             )
     else:
         validate_exchange_open_dates(pd.DatetimeIndex(target_date))
+    # A valid future exchange date is not necessarily the next trading date.
+    # Check the actual session horizon independently of the supplied labels.
+    exchanges = (
+        df["Exchange"].astype(str).str.strip().str.upper()
+        if "Exchange" in df
+        else pd.Series("NYSE", index=df.index)
+    )
+    for exchange, indices in df.groupby(exchanges, sort=False).indices.items():
+        observed = pd.DatetimeIndex(date.iloc[indices])
+        targets = pd.DatetimeIndex(target_date.iloc[indices])
+        if exchange in _KNOWN_EXCHANGES:
+            combined = observed.append(targets)
+            sessions = inferred_equity_sessions(combined, exchange=str(exchange))
+            if not (
+                (sessions.get_indexer(targets) - sessions.get_indexer(observed)) == 1
+            ).all():
+                raise ValueError(
+                    "Every Target_Date must identify the next trading session"
+                )
+        else:
+            if "Session_Number" not in df or "Target_Session_Number" not in df:
+                raise ValueError(
+                    "Custom-market targets require verified Target_Session_Number metadata"
+                )
+            current = df["Session_Number"].iloc[indices].to_numpy(dtype=object)
+            future = df["Target_Session_Number"].iloc[indices].to_numpy(dtype=object)
+            if any(
+                not isinstance(a, (int, np.integer))
+                or not isinstance(b, (int, np.integer))
+                or isinstance(a, (bool, np.bool_))
+                or isinstance(b, (bool, np.bool_))
+                or b != a + 1
+                for a, b in zip(current, future, strict=True)
+            ):
+                raise ValueError(
+                    "Custom-market targets must identify the next trading session"
+                )
     dates = pd.DatetimeIndex(date.unique()).sort_values()
     if len(dates) < 15:
         raise ValueError("At least 15 distinct trading dates are required")
