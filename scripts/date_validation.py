@@ -61,7 +61,10 @@ VERIFIED_DAILY_DATES_ATTR = "stocktrading_verified_daily_dates"
 
 
 def require_verified_daily_date_source(
-    frame: pd.DataFrame, *, verified_datetime_dates: bool = False
+    frame: pd.DataFrame,
+    *,
+    verified_datetime_dates: bool = False,
+    column: str = "Date",
 ) -> None:
     """Reject previously coerced timestamps without a source-precision attestation.
 
@@ -72,9 +75,9 @@ def require_verified_daily_date_source(
     """
     if not isinstance(verified_datetime_dates, (bool, np.bool_)):
         raise ValueError("verified_datetime_dates must be a boolean")
-    if "Date" not in frame:
+    if column not in frame:
         return
-    supplied = frame["Date"]
+    supplied = frame[column]
     ambiguous = (
         pd.api.types.is_datetime64_any_dtype(supplied.dtype)
         or supplied.map(lambda value: isinstance(value, pd.Timestamp)).any()

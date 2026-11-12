@@ -14,7 +14,6 @@ if __package__:
         require_verified_daily_date_source,
     )
     from .market_calendar import (
-        LAST_NYSE_SATURDAY_SESSION,
         _KNOWN_EXCHANGES,
         _calendar_bounds,
         inferred_equity_sessions,
@@ -27,7 +26,6 @@ else:
         require_verified_daily_date_source,
     )
     from market_calendar import (
-        LAST_NYSE_SATURDAY_SESSION,
         _KNOWN_EXCHANGES,
         _calendar_bounds,
         inferred_equity_sessions,
@@ -86,6 +84,15 @@ def session_positions(
         frame, verified_datetime_dates=verified_datetime_dates
     )
     if SESSION_COLUMN in frame:
+        validate_session_positions(
+            frame, verified_datetime_dates=verified_datetime_dates
+        )
+        if "Date" in frame and (calendar_start is not None or calendar_end is not None):
+            supplied_dates = pd.DatetimeIndex(
+                parse_daily_dates(frame["Date"], context="Trading dates")
+            )
+            if not supplied_dates.empty:
+                _calendar_bounds(supplied_dates, calendar_start, calendar_end)
         return frame[SESSION_COLUMN]
     if "Date" not in frame:
         return pd.Series(np.arange(len(frame), dtype=np.int64), index=frame.index)
@@ -158,13 +165,6 @@ def validate_session_positions(
 
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
-        historic_saturday = (checked_dates.dayofweek == 5) & (
-            checked_dates <= LAST_NYSE_SATURDAY_SESSION
-        )
-        if ((checked_dates.dayofweek >= 5) & ~historic_saturday).any():
-            raise ValueError(
-                "Trading dates must fall on weekdays, except verified historical Saturday sessions"
-            )
         exchanges = _normalized_exchange_labels(frame)
         if exchanges is None:
             validate_exchange_open_dates(checked_dates)
@@ -172,7 +172,11 @@ def validate_session_positions(
             for exchange, indices in frame.groupby(
                 exchanges, sort=False
             ).indices.items():
-                validate_exchange_open_dates(checked_dates.take(indices), str(exchange))
+                validate_exchange_open_dates(
+                    checked_dates.take(indices),
+                    str(exchange),
+                    verified_session_ordinals=SESSION_COLUMN in frame,
+                )
 
     if SESSION_COLUMN not in frame:
         return
@@ -189,14 +193,6 @@ def validate_session_positions(
         )
 
     if "Date" in frame:
-        dates = pd.DatetimeIndex(frame["Date"])
-        historic_saturday = (dates.dayofweek == 5) & (
-            dates <= LAST_NYSE_SATURDAY_SESSION
-        )
-        if ((dates.dayofweek >= 5) & ~historic_saturday).any():
-            raise ValueError(
-                "Trading dates must fall on weekdays, except verified historical Saturday sessions"
-            )
         exchange_labels = _normalized_exchange_labels(frame)
         if exchange_labels is not None:
             groups = (group for _, group in frame.groupby(exchange_labels, sort=False))

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [Milestone3]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -15,17 +18,15 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install supported environment
+      - name: Install verified version-specific environment
         run: |
-          if [ "${{ matrix.python-version }}" = "3.12" ]; then
-            python -m pip install --require-hashes -r requirements-repro-py312.txt
-          else
-            python -m pip install -r requirements-dev.txt
-          fi
+          python -m pip install --require-hashes -r requirements-repro-py${{ matrix.python-version == '3.10' && '310' || matrix.python-version == '3.11' && '311' || '312' }}.txt
       - name: Run regression tests with coverage
         run: |
           python -m coverage run --source=scripts -m pytest tests -q

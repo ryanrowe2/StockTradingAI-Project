@@ -2302,11 +2302,11 @@ def test_supplied_session_ordinals_do_not_allow_weekend_stock_bars():
             "Session_Number": [0, 1],
         }
     )
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         validate_bars(bars)
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         add_technical_indicators(bars)
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         SimpleTradingEnv(bars)
 
 
@@ -2595,7 +2595,9 @@ def test_trading_rejects_invalid_execution_costs(kwargs):
 
 
 def test_paired_market_date_bootstrap_is_deterministic_and_paired():
-    dates = pd.bdate_range("2026-01-01", periods=20).repeat(2)
+    dates = _scheduled_sessions(pd.Timestamp("2026-01-01"), pd.Timestamp("2026-02-15"))[
+        :20
+    ].repeat(2)
     observed = pd.DataFrame(
         {
             "Date": dates,
@@ -2607,12 +2609,14 @@ def test_paired_market_date_bootstrap_is_deterministic_and_paired():
     )
     first = paired_block_accuracy_intervals(
         observed,
+        verified_datetime_dates=True,
         block_sessions=5,
         bootstrap_samples=100,
         seed=11,
     )
     assert first == paired_block_accuracy_intervals(
         observed,
+        verified_datetime_dates=True,
         block_sessions=5,
         bootstrap_samples=100,
         seed=11,
@@ -2747,7 +2751,9 @@ def test_mlk_nyse_holiday_only_applies_from_1998():
 def test_block_bootstrap_rejects_invalid_scores(column, value):
     scored = pd.DataFrame(
         {
-            "Date": pd.bdate_range("2026-01-05", periods=30),
+            "Date": _scheduled_sessions(
+                pd.Timestamp("2026-01-05"), pd.Timestamp("2026-03-10")
+            )[:30],
             "actual": [0, 1] * 15,
             "majority": [0] * 30,
             "baseline_prob": [0.2] * 30,
@@ -2759,14 +2765,19 @@ def test_block_bootstrap_rejects_invalid_scores(column, value):
     scored.loc[0, column] = value
     with pytest.raises(ValueError, match="Bootstrap"):
         paired_block_accuracy_intervals(
-            scored, block_sessions=10, bootstrap_samples=100
+            scored,
+            block_sessions=10,
+            bootstrap_samples=100,
+            verified_datetime_dates=True,
         )
 
 
 def test_block_bootstrap_rejects_one_independent_date_block():
     scored = pd.DataFrame(
         {
-            "Date": pd.bdate_range("2026-01-05", periods=8),
+            "Date": _scheduled_sessions(
+                pd.Timestamp("2026-01-05"), pd.Timestamp("2026-01-30")
+            )[:8],
             "actual": [0, 1] * 4,
             "majority": [0] * 8,
             "baseline_prob": [0.8] * 8,
@@ -2775,7 +2786,10 @@ def test_block_bootstrap_rejects_one_independent_date_block():
     )
     with pytest.raises(ValueError, match="at least two chronological date blocks"):
         paired_block_accuracy_intervals(
-            scored, block_sessions=10, bootstrap_samples=100
+            scored,
+            block_sessions=10,
+            bootstrap_samples=100,
+            verified_datetime_dates=True,
         )
 
 
@@ -2796,7 +2810,10 @@ def test_block_bootstrap_rejects_intraday_timestamps_as_sessions():
     )
     with pytest.raises(ValueError, match="Bootstrap dates"):
         paired_block_accuracy_intervals(
-            scored, block_sessions=10, bootstrap_samples=100
+            scored,
+            block_sessions=10,
+            bootstrap_samples=100,
+            verified_datetime_dates=True,
         )
 
 
@@ -3176,7 +3193,7 @@ def test_historical_summer_saturday_after_last_nyse_session_is_rejected():
             "Session_Number": [500, 501],
         }
     )
-    with pytest.raises(ValueError, match="weekdays"):
+    with pytest.raises(ValueError, match="closed-market date"):
         validate_bars(bars)
 
 

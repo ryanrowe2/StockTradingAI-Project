@@ -34,7 +34,12 @@ if __package__:
         load_data,
         prepare_features,
     )
-    from .date_validation import parse_daily_dates
+    from .date_validation import (
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
+    from .market_calendar import validate_exchange_open_dates
+    from .session_validation import validate_session_positions
 else:
     from data_processing import (
         DEFAULT_RAW_DATA,
@@ -43,7 +48,9 @@ else:
         load_data,
         prepare_features,
     )
-    from date_validation import parse_daily_dates
+    from date_validation import parse_daily_dates, require_verified_daily_date_source
+    from market_calendar import validate_exchange_open_dates
+    from session_validation import validate_session_positions
 
 
 BASELINE_FEATURES = ("Return", "Intraday_Return", "Daily_Range")
@@ -74,6 +81,19 @@ def chronological_split(
     target_date = parse_daily_dates(df["Target_Date"], context="Target dates")
     if (target_date <= date).any():
         raise ValueError("Every Target_Date must follow its observation Date")
+    require_verified_daily_date_source(df)
+    require_verified_daily_date_source(df, column="Target_Date")
+    validate_session_positions(df)
+    if "Exchange" in df:
+        labels = df["Exchange"].astype(str).str.strip().str.upper()
+        for exchange, indices in df.groupby(labels, sort=False).indices.items():
+            validate_exchange_open_dates(
+                pd.DatetimeIndex(target_date.iloc[indices]),
+                str(exchange),
+                verified_session_ordinals="Session_Number" in df,
+            )
+    else:
+        validate_exchange_open_dates(pd.DatetimeIndex(target_date))
     dates = pd.DatetimeIndex(date.unique()).sort_values()
     if len(dates) < 15:
         raise ValueError("At least 15 distinct trading dates are required")

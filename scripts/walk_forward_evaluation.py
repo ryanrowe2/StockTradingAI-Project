@@ -21,7 +21,13 @@ if __package__:
         load_data,
         prepare_features,
     )
-    from .date_validation import parse_daily_dates
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
+    from .market_calendar import validate_exchange_open_dates
+    from .session_validation import validate_session_positions
     from .model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -36,7 +42,13 @@ else:
         load_data,
         prepare_features,
     )
-    from date_validation import parse_daily_dates
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
+    from market_calendar import validate_exchange_open_dates
+    from session_validation import validate_session_positions
     from model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -73,6 +85,7 @@ def paired_block_accuracy_intervals(
     block_sessions: int = 10,
     bootstrap_samples: int = 1000,
     seed: int = 42,
+    verified_datetime_dates: bool = False,
 ) -> dict[str, list[float]]:
     """Bootstrap *paired accuracy differences* over chronological market-date blocks.
 
@@ -103,17 +116,34 @@ def paired_block_accuracy_intervals(
     ):
         raise ValueError("Bootstrap probabilities must be finite values in [0, 1]")
     dates = parse_daily_dates(scored["Date"], context="Bootstrap dates")
+    require_verified_daily_date_source(
+        scored, verified_datetime_dates=verified_datetime_dates
+    )
     days = pd.DatetimeIndex(dates.unique()).sort_values()
+    if "Session_Number" in scored:
+        columns = ["Date", "Session_Number"]
+        if "Exchange" in scored:
+            columns.append("Exchange")
+        metadata = scored.loc[:, columns].drop_duplicates().copy()
+        if "Exchange" in metadata:
+            metadata["Name"] = metadata["Exchange"]
+        mark_verified_daily_dates(metadata)
+        validate_session_positions(metadata)
+    elif "Exchange" in scored:
+        labels = scored["Exchange"].astype(str).str.strip().str.upper()
+        for exchange, indices in scored.groupby(labels, sort=False).indices.items():
+            validate_exchange_open_dates(
+                pd.DatetimeIndex(dates.iloc[indices].unique()), str(exchange)
+            )
+    else:
+        validate_exchange_open_dates(days)
     block_id = days.get_indexer(dates) // block_sessions
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")
     expected = (scored["actual"] == scored["majority"]).to_numpy(dtype=int)
-    baseline = (scored["actual"] == (scored["baseline_prob"] >= 0.5)).to_numpy(
-        dtype=int
-    )
-    enhanced = (scored["actual"] == (scored["enhanced_prob"] >= 0.5)).to_numpy(
-        dtype=int
-    )
+    actual = scored["actual"].to_numpy(dtype=int)
+    baseline = (actual == (probabilities[:, 0] >= 0.5)).astype(int)
+    enhanced = (actual == (probabilities[:, 1] >= 0.5)).astype(int)
     blocks = (
         pd.DataFrame(
             {
@@ -254,7 +284,7 @@ def walk_forward_experiment(
                 }
             )
         )
-    scored = pd.concat(scored_folds, ignore_index=True)
+    scored = mark_verified_daily_dates(pd.concat(scored_folds, ignore_index=True))
     intervals = paired_block_accuracy_intervals(
         scored,
         block_sessions=block_sessions,

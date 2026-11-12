@@ -146,7 +146,10 @@ def _london_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex
 
 
 def exchange_open_mask(
-    dates: pd.DatetimeIndex, exchange: str | None = None
+    dates: pd.DatetimeIndex,
+    exchange: str | None = None,
+    *,
+    verified_session_ordinals: bool = False,
 ) -> np.ndarray:
     """Check session validity for known exchanges; unknown exchanges need ordinals.
 
@@ -168,17 +171,24 @@ def exchange_open_mask(
             sessions = _exchange_sessions(observed.min(), observed.max(), label)
             valid[modern] = observed.isin(sessions)
         return valid
-    # Do not pretend to know a custom market's holidays or its exact ordinals.
-    # Explicitly observed weekdays are possible sessions; callers requiring
-    # exact adjacency for an unknown exchange must provide Session_Number.
+    # Custom-market weekends require caller-verified ordinal metadata.
+    if verified_session_ordinals:
+        return ~pd.isna(dates)
     return ~pd.isna(dates) & (dates.dayofweek < 5)
 
 
 def validate_exchange_open_dates(
-    dates: pd.DatetimeIndex, exchange: str | None = None
+    dates: pd.DatetimeIndex,
+    exchange: str | None = None,
+    *,
+    verified_session_ordinals: bool = False,
 ) -> None:
-    """Reject invalid daily sessions for the declared exchange."""
-    impossible = dates[~exchange_open_mask(dates, exchange)]
+    """Reject closed sessions; custom weekends require verified ordinals."""
+    impossible = dates[
+        ~exchange_open_mask(
+            dates, exchange, verified_session_ordinals=verified_session_ordinals
+        )
+    ]
     if not impossible.empty:
         label = exchange or "NYSE (default U.S. equity calendar)"
         raise ValueError(
