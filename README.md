@@ -306,8 +306,14 @@ SHA-256-verified lockfile matching the interpreter version:
 dependencies to the exact wheel distributions used in CI. Run
 `python -m pip install --require-hashes -r requirements-repro-py311.txt`
 for Python 3.11 (substitute the matching file for 3.10 or 3.12).
-For other platforms, use the flexible `requirements.txt` and
-`requirements-dev.txt` with a separately resolved, platform-specific lock.
+For Python 3.12 on the GitHub Actions **Windows Server 2025 x86_64** and
+**macOS 15 ARM64** runners, use the independently verified native wheel
+manifests `requirements-repro-py312-windows.txt` and
+`requirements-repro-py312-macos.txt`, respectively, with
+`python -m pip install --require-hashes --only-binary=:all: -r <matching-file>`.
+Regenerate native locks with `python scripts/generate_portable_lock.py` on the
+matching runner. Other Python/platform combinations may use
+`requirements-dev.txt` while generating their own platform-specific lock.
 
 For tests, install the development requirements and run:
 
@@ -330,8 +336,9 @@ against those upstream object IDs (allowing only CRLF/LF normalization).
 Publisher identity and license evidence are recorded in
 [`data/raw/README.md`](data/raw/README.md). CI checks branch-aware coverage
 and risk-weighted module thresholds, as well as fixed per-fold experimental
-snapshots. Windows/macOS runs use flexible dependencies as portability smoke
-tests; Ubuntu 24.04 remains the hash-locked reproducibility reference.
+snapshots. Windows/macOS smoke jobs also install the corresponding native SHA-256
+wheel-locked dependency graph before running the complete regression suite.
+Ubuntu 24.04 remains the reference for the pinned published research metrics.
 
 The saved notebook tables and figures are **certified against the pinned
 Python 3.12 / Ubuntu 24.04 environment**. Python 3.10 and 3.11 are covered by
@@ -399,6 +406,8 @@ StockTradingAI-Project/
 ├── requirements-repro-py310.txt   # Hashed Python 3.10/Linux environment
 ├── requirements-repro-py311.txt   # Hashed Python 3.11/Linux environment
 ├── requirements-repro-py312.txt   # Hashed Python 3.12/Linux environment
+├── requirements-repro-py312-windows.txt # Hashed Python 3.12/Windows x86_64
+├── requirements-repro-py312-macos.txt   # Hashed Python 3.12/macOS ARM64
 ├── requirements-dev.txt
 └── LICENSE                        # MIT license for original software and docs
 ```
