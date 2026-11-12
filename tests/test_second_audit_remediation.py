@@ -12,14 +12,21 @@ from scripts.date_validation import (
 )
 from scripts.market_calendar import _scheduled_sessions
 from scripts.model_training import chronological_split
-from scripts.session_validation import adjacent_session_flags, validate_session_positions
+from scripts.session_validation import (
+    adjacent_session_flags,
+    validate_session_positions,
+)
 from scripts.walk_forward_evaluation import paired_block_accuracy_intervals
 
 
 def _sessions(count: int = 45) -> list[str]:
-    return _scheduled_sessions(pd.Timestamp("2024-01-02"), pd.Timestamp("2024-05-31"))[
-        :count
-    ].strftime("%Y-%m-%d").tolist()
+    return (
+        _scheduled_sessions(pd.Timestamp("2024-01-02"), pd.Timestamp("2024-05-31"))[
+            :count
+        ]
+        .strftime("%Y-%m-%d")
+        .tolist()
+    )
 
 
 def _scored(dates: list[str], *, exchange=None, ordinals=None) -> pd.DataFrame:

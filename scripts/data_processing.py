@@ -354,9 +354,11 @@ def prepare_features(
     )
     # Shift object-precision ordinals before dropping targets; a float64
     # intermediate would corrupt exact uint64 ordinals above 2**53.
-    source["Target_Session"] = source.groupby("Name", sort=False)[SESSION_COLUMN].transform(
-        lambda positions: positions.astype(object).shift(-1)
-    ).where(adjacent_target)
+    source["Target_Session"] = (
+        source.groupby("Name", sort=False)[SESSION_COLUMN]
+        .transform(lambda positions: positions.astype(object).shift(-1))
+        .where(adjacent_target)
+    )
     reference_price = source["Close"] if target == "close_to_close" else next_open
     source["Trend"] = (next_close > reference_price).astype("int64")
     if not features or any(feature not in MODEL_FEATURES for feature in features):

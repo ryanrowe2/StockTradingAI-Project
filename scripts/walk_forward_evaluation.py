@@ -177,7 +177,9 @@ def paired_block_accuracy_intervals(
     increments[0] = 1
     for group in custom_groups:
         if "Session_Number" not in group:
-            raise ValueError("Custom exchanges require verified Session_Number metadata")
+            raise ValueError(
+                "Custom exchanges require verified Session_Number metadata"
+            )
         positions = [int(v) for v in group["Session_Number"]]
         observed = pd.DatetimeIndex(group["Date"])
         for earlier, later, previous, current in zip(
