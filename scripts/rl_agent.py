@@ -17,7 +17,11 @@ import numpy as np
 import pandas as pd
 
 if __package__:
-    from .date_validation import parse_daily_dates
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from .session_validation import (
         adjacent_session_flags,
         session_positions,
@@ -25,7 +29,11 @@ if __package__:
     )
     from .ticker_validation import normalize_ticker_symbols
 else:
-    from date_validation import parse_daily_dates
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from session_validation import (
         adjacent_session_flags,
         session_positions,
@@ -45,6 +53,8 @@ class SimpleTradingEnv:
         transaction_cost: float = 0.001,
         state_columns: tuple[str, ...] | None = None,
         slippage_bps: float = 0.0,
+        *,
+        verified_datetime_dates: bool = False,
     ):
         if not {"Open", "Close"}.issubset(data.columns) or len(data) < 2:
             raise ValueError(
@@ -76,6 +86,9 @@ class SimpleTradingEnv:
             raise ValueError(
                 "slippage_bps must be finite basis points from 0 to less than 10000"
             )
+        require_verified_daily_date_source(
+            data, verified_datetime_dates=verified_datetime_dates
+        )
         self.data = data.copy()
         if "Name" in self.data:
             self.data["Name"] = normalized_symbols
@@ -83,6 +96,7 @@ class SimpleTradingEnv:
             self.data["Date"] = parse_daily_dates(
                 self.data["Date"], context="Trading dates"
             )
+            mark_verified_daily_dates(self.data)
             self.data = self.data.sort_values("Date", kind="stable")
         self.data = self.data.reset_index(drop=True)
         if "Date" in self.data and self.data["Date"].duplicated().any():
@@ -238,10 +252,15 @@ class SimpleTradingEnv:
         }
 
 
-def contiguous_trading_segments(data: pd.DataFrame) -> list[pd.DataFrame]:
+def contiguous_trading_segments(
+    data: pd.DataFrame, *, verified_datetime_dates: bool = False
+) -> list[pd.DataFrame]:
     """Create single-symbol episodes without crossing missing market sessions."""
     if data.empty:
         return []
+    require_verified_daily_date_source(
+        data, verified_datetime_dates=verified_datetime_dates
+    )
     ordered = data.copy()
     if "Name" in ordered:
         ordered["Name"] = normalize_ticker_symbols(
@@ -250,6 +269,7 @@ def contiguous_trading_segments(data: pd.DataFrame) -> list[pd.DataFrame]:
         )
     if "Date" in ordered:
         ordered["Date"] = parse_daily_dates(ordered["Date"], context="Trading dates")
+        mark_verified_daily_dates(ordered)
         ordered = ordered.sort_values("Date", kind="stable")
     validate_session_positions(ordered)
     # Retain source-wide exchange calendars before isolating individual stocks.

@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 
 if __package__:
-    from .date_validation import parse_daily_dates
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from .price_validation import valid_price_bars
     from .session_validation import (
         adjacent_session_flags,
@@ -15,7 +19,11 @@ if __package__:
     )
     from .ticker_validation import normalize_ticker_symbols
 else:
-    from date_validation import parse_daily_dates
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from price_validation import valid_price_bars
     from session_validation import (
         adjacent_session_flags,
@@ -99,7 +107,9 @@ def _one_symbol_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def add_technical_indicators(
+    df: pd.DataFrame, *, verified_datetime_dates: bool = False
+) -> pd.DataFrame:
     """Calculate indicators from each symbol's past and current observations only.
 
     Rows are sorted chronologically within each symbol. No rolling window,
@@ -107,6 +117,9 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     if df.empty:
         raise ValueError("A nonempty indicator DataFrame is required")
+    require_verified_daily_date_source(
+        df, verified_datetime_dates=verified_datetime_dates
+    )
     df = df.copy()
     if not valid_price_bars(df, require_volume="Volume" in df).all():
         raise ValueError(
@@ -119,6 +132,7 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
             df[column] = pd.to_numeric(df[column], errors="raise")
     if "Date" in df:
         df["Date"] = parse_daily_dates(df["Date"], context="Indicator dates")
+        mark_verified_daily_dates(df)
     if "Name" not in df.columns:
         if "Date" in df and df["Date"].duplicated().any():
             raise ValueError("Duplicate trading dates in indicator input")

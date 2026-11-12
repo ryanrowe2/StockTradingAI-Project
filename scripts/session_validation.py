@@ -8,16 +8,18 @@ import numpy as np
 import pandas as pd
 
 if __package__:
-    from .date_validation import parse_daily_dates
+    from .date_validation import mark_verified_daily_dates, parse_daily_dates
     from .market_calendar import (
         LAST_NYSE_SATURDAY_SESSION,
+        _KNOWN_EXCHANGES,
         inferred_equity_sessions,
         validate_exchange_open_dates,
     )
 else:
-    from date_validation import parse_daily_dates
+    from date_validation import mark_verified_daily_dates, parse_daily_dates
     from market_calendar import (
         LAST_NYSE_SATURDAY_SESSION,
+        _KNOWN_EXCHANGES,
         inferred_equity_sessions,
         validate_exchange_open_dates,
     )
@@ -122,6 +124,7 @@ def validate_session_positions(
         # calendar day can masquerade as separate trading sessions.
         frame = frame.copy()
         frame["Date"] = parse_daily_dates(frame["Date"], context="Trading dates")
+        mark_verified_daily_dates(frame)
         identity = ["Name", "Date"] if "Name" in frame else ["Date"]
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
@@ -191,17 +194,21 @@ def validate_session_positions(
                 raise ValueError(
                     "Session_Number must increase with the market dates per ticker"
                 )
-            if exchange_labels is not None and group["Exchange"].iloc[
-                0
-            ].strip().upper() in {"NYSE", "XNYS"}:
-                # The modern NYSE calendar is known: supplied ordinals may have
-                # any origin, but their differences must match real sessions.
-                # Otherwise an omitted Tuesday can be disguised as an adjacent
-                # Monday-to-Wednesday trading step.
+            exchange = (
+                str(group["Exchange"].iloc[0]).strip().upper()
+                if exchange_labels is not None
+                else "NYSE"
+            )
+            if exchange in _KNOWN_EXCHANGES:
+                # Declared ordinals can use any origin, but must preserve exact
+                # spacing of every actual exchange session. This also applies
+                # to unlabeled U.S. equities and to London/Toronto/Nasdaq.
                 modern = calendar.loc[calendar["Date"] >= pd.Timestamp("1971-01-01")]
                 if len(modern) > 1:
                     modern_dates = pd.DatetimeIndex(modern["Date"])
-                    scheduled = inferred_equity_sessions(modern_dates, nyse_only=True)
+                    scheduled = inferred_equity_sessions(
+                        modern_dates, exchange=exchange
+                    )
                     true_ordinals = scheduled.get_indexer(modern_dates).tolist()
                     supplied = modern[SESSION_COLUMN].tolist()
                     if any(
@@ -211,7 +218,8 @@ def validate_session_positions(
                         )
                     ):
                         raise ValueError(
-                            "Session_Number spacing must match scheduled NYSE trading sessions"
+                            "Session_Number spacing must match scheduled "
+                            f"{exchange} trading sessions"
                         )
 
     # When Date is absent, the caller's row order is the chronological order.

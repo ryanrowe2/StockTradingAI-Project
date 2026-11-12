@@ -9,11 +9,19 @@ from scipy.special import logsumexp
 from scipy.stats import multivariate_normal
 
 if __package__:
-    from .date_validation import parse_daily_dates
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from .session_validation import session_positions, validate_session_positions
     from .ticker_validation import normalize_ticker_symbols
 else:
-    from date_validation import parse_daily_dates
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from session_validation import session_positions, validate_session_positions
     from ticker_validation import normalize_ticker_symbols
 
@@ -58,8 +66,15 @@ def _gaussian_log_emissions(model: GaussianHMM, observations: np.ndarray) -> np.
 
 
 def _validated_indicators(
-    frame: pd.DataFrame, indicators: tuple[str, ...], *, keep_missing: bool = False
+    frame: pd.DataFrame,
+    indicators: tuple[str, ...],
+    *,
+    keep_missing: bool = False,
+    verified_datetime_dates: bool = False,
 ) -> pd.DataFrame:
+    require_verified_daily_date_source(
+        frame, verified_datetime_dates=verified_datetime_dates
+    )
     if not indicators or len(set(indicators)) != len(indicators):
         raise ValueError("HMM indicators must be a nonempty set of distinct columns")
     absent = set(indicators) - set(frame.columns)
@@ -80,6 +95,7 @@ def _validated_indicators(
         ordered["Name"] = normalized
     if "Date" in ordered:
         ordered["Date"] = parse_daily_dates(ordered["Date"], context="HMM dates")
+        mark_verified_daily_dates(ordered)
         ordered = ordered.sort_values("Date", kind="stable")
     if "Date" in ordered and ordered["Date"].duplicated().any():
         raise ValueError("Duplicate dates for a single ticker")
@@ -94,6 +110,8 @@ def infer_filtered_regimes(
     model: GaussianHMM,
     df: pd.DataFrame,
     indicators: tuple[str, ...] = DEFAULT_INDICATORS,
+    *,
+    verified_datetime_dates: bool = False,
 ) -> pd.DataFrame:
     """Assign each state's most likely value using only observations so far.
 
@@ -109,9 +127,16 @@ def infer_filtered_regimes(
     # Work with positional row identifiers: concatenated training/holdout
     # frames can have repeated index labels, which are unsafe for .loc writes.
     rows = df.reset_index(drop=True)
-    ordered = _validated_indicators(rows, indicators, keep_missing=True)
+    ordered = _validated_indicators(
+        rows,
+        indicators,
+        keep_missing=True,
+        verified_datetime_dates=verified_datetime_dates,
+    )
     positions = session_positions(ordered)
     output = rows.copy()
+    if "Date" in output:
+        mark_verified_daily_dates(output)
     if "Name" in output:
         output["Name"] = ordered["Name"]
     output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
@@ -167,6 +192,8 @@ def fit_hmm_on_indicators(
     indicators: tuple[str, ...] = DEFAULT_INDICATORS,
     n_components: int = 3,
     random_state: int = 42,
+    *,
+    verified_datetime_dates: bool = False,
 ) -> tuple[GaussianHMM, pd.DataFrame]:
     """Fit on caller-supplied training data and infer its filtered regimes.
 
@@ -174,7 +201,12 @@ def fit_hmm_on_indicators(
     using the fitted training-period model, never to this fitting function.
     """
     indicators = tuple(indicators)
-    clean = _validated_indicators(df, indicators, keep_missing=True)
+    clean = _validated_indicators(
+        df,
+        indicators,
+        keep_missing=True,
+        verified_datetime_dates=verified_datetime_dates,
+    )
     # Fitting cannot directly accept missing-emission rows. Instead, break
     # complete observations into independent contiguous segments; no fitted
     # transition then crosses a discarded market session.
@@ -206,4 +238,6 @@ def fit_hmm_on_indicators(
     # GaussianHMM sees a NumPy array, so record the feature identity ourselves.
     # Otherwise, inference can silently treat a reordered column as another one.
     model.stock_trading_indicator_names_ = indicators
-    return model, infer_filtered_regimes(model, df, indicators)
+    return model, infer_filtered_regimes(
+        model, df, indicators, verified_datetime_dates=verified_datetime_dates
+    )

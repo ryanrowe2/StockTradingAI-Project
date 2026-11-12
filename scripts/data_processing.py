@@ -17,7 +17,7 @@ import pandas as pd
 
 if __package__:
     from .technical_indicators import add_technical_indicators
-    from .date_validation import parse_daily_dates
+    from .date_validation import mark_verified_daily_dates, parse_daily_dates
     from .market_calendar import exchange_open_mask
     from .price_validation import valid_price_bars
     from .session_validation import (
@@ -29,7 +29,7 @@ if __package__:
     from .ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
-    from date_validation import parse_daily_dates
+    from date_validation import mark_verified_daily_dates, parse_daily_dates
     from market_calendar import exchange_open_mask
     from price_validation import valid_price_bars
     from session_validation import (
@@ -155,6 +155,7 @@ def _custom_source_session_positions(
     if reference.empty:
         raise ValueError("No usable market dates remain for session inference")
     reference["Date"] = parsed.loc[valid]
+    mark_verified_daily_dates(reference)
     reference["Name"] = reference["Name"].astype(str).str.strip().str.upper()
     # An unrelated pre-1971 record must not make a selected modern ticker
     # depend on an historical calendar that requires verified metadata.
@@ -221,6 +222,7 @@ def validate_bars(
         )
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
+    mark_verified_daily_dates(df)
     df["Name"] = normalize_ticker_symbols(
         df["Name"],
         context="Every observation must have a ticker symbol",

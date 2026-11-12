@@ -50,9 +50,8 @@ dates are rejected even when `Exchange` is omitted or session ordinals are
 supplied. An optional `Exchange` column groups stocks on the same market:
 `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S. calendar;
 `LSE` and `XLON` use the London Stock Exchange calendar, including Boxing Day.
-Other explicitly named exchanges retain the existing observed-weekday fallback;
-provide independently verified `Session_Number` metadata for exact session
-adjacency on those markets. A peer's fabricated closed-market observation
+Other explicitly named exchanges require independently verified
+`Session_Number` metadata; their sessions are not inferred from U.S. weekdays. A peer's fabricated closed-market observation
 cannot contaminate a selected stock's inferred calendar. When `Exchange` is
 omitted, U.S. equity market rules apply rather than accepting arbitrary
 observed holiday weekdays. Callers can supply verified `Session_Number`
@@ -347,3 +346,17 @@ Original project software and documentation are licensed under the
 under this MIT license; consult the source dataset's terms for their use.
 
 **Ryan Rowe** · B.S., Mathematics–Computer Science, University of California San Diego
+
+**Exchange and date-source safeguards.** NYSE/XNYS, NASDAQ/XNAS, LSE/XLON, and
+TSX/XTSE observations use their corresponding trading calendars; inferred and
+supplied `Session_Number` values must preserve actual session gaps. Unknown
+explicit exchange identifiers must provide independently verified
+`Session_Number` values, rather than inheriting fictional sessions from the
+U.S. calendar. Unlabeled equity records use the U.S. calendar. Direct
+`add_technical_indicators`, `SimpleTradingEnv`,
+`contiguous_trading_segments`, and HMM entry points now require an explicit
+`verified_datetime_dates=True` attestation when supplied already-coerced
+pandas timestamps. Results of `validate_bars` carry their verified-date marker
+through normal pandas frame operations; raw ISO date strings remain supported.
+Do not attest to converted month/year-only dates without inspecting the
+original source precision.
