@@ -409,6 +409,10 @@ The same checks run automatically through [GitHub Actions](../.github/workflows/
 python -m scripts.refresh_notebooks
 ```
 
+The saved notebook results are certified against the pinned **Python 3.12 /
+Ubuntu 24.04** environment. The 3.10 and 3.11 checks certify source code,
+regression tests, lint, and formatting, but not byte-for-byte notebook output.
+
 `python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them. The in-process runner captures stdout, stderr, explicit `display()` calls, final-expression results (including rich MIME representations), and Matplotlib PNGs in their execution order. It compares saved output order and text exactly, fully decodes saved PNGs, and detects both broad and localized changes to generated charts. Jupyter's `%matplotlib inline` directive is removed only when it is an actual standalone magic command, never when it appears inside a string. Python future-import compiler flags persist from one cell to the next.
 The `reproduce_notebook(path, check=True)` Python helper resolves relative data
 paths from the notebook's directory and restores the caller's working directory,
