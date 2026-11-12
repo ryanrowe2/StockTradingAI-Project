@@ -122,6 +122,9 @@ def session_positions(
             )
         return pd.Series(np.arange(len(frame), dtype=np.int64), index=frame.index)
     dates = pd.DatetimeIndex(parse_daily_dates(frame["Date"], context="Trading dates"))
+    # Apply the same canonical uniqueness and market-date checks as callers
+    # supplying explicit ordinals. Otherwise aliases can bypass these guards.
+    validate_session_positions(frame, verified_datetime_dates=verified_datetime_dates)
     if (dates.dayofweek >= 5).any():
         raise ValueError(
             "Trading dates must fall on weekdays; supply a verified market calendar"
@@ -142,7 +145,13 @@ def session_positions(
     # observed weekdays are shared within a declared exchange, or only within
     # each ticker when exchange membership is unspecified.
     positions = np.empty(len(frame), dtype=np.int64)
-    grouping = exchange_labels if exchange_labels is not None else frame["Name"]
+    grouping = (
+        exchange_labels
+        if exchange_labels is not None
+        else normalize_ticker_symbols(
+            frame["Name"], context="Invalid ticker identifier"
+        )
+    )
     for label, indices in frame.groupby(
         grouping, sort=False, dropna=False
     ).indices.items():
@@ -206,10 +215,24 @@ def validate_session_positions(
         if frame.duplicated(identity).any():
             raise ValueError("Duplicate ticker/date observations")
 
+    # An unknown historical schedule is a missing-attestation error, not
+    # evidence that a specific ordinary weekday was a market closure.
+    if (
+        "Date" in frame
+        and SESSION_COLUMN not in frame
+        and (pd.DatetimeIndex(frame["Date"]) < pd.Timestamp("1971-01-01")).any()
+    ):
+        raise ValueError(
+            "Trading dates before 1971 require verified Session_Number metadata"
+        )
+
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
         if exchanges is None:
-            validate_exchange_open_dates(checked_dates)
+            validate_exchange_open_dates(
+                checked_dates,
+                verified_session_ordinals=SESSION_COLUMN in frame,
+            )
         else:
             for exchange, indices in frame.groupby(
                 exchanges, sort=False

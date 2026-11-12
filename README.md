@@ -45,7 +45,11 @@ dates attached to valid ticker identifiers even when their prices are unusable,
 but excludes malformed dates and invalid ticker identifiers.
 Date-only U.S. equity data from 1971 onward use scheduled NYSE/Nasdaq sessions,
 including effective-dated holidays, 1972–1980 presidential Election Day
-closures, and exceptional full-day closures. Observations on closed U.S. market
+closures, and exceptional full-day closures. The historical NYSE validator
+also recognizes documented 1968 Wednesday paperwork-crisis closures and
+other known special closures in 1968–1969. Standalone NYSE date validation
+also requires explicit verified session ordinals for any pre-1971 observations;
+that attestation remains required at training and ingestion boundaries. Observations on closed U.S. market
 dates are rejected even when `Exchange` is omitted or session ordinals are
 supplied. An optional `Exchange` column groups stocks on the same market:
 `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S. calendar;
@@ -128,7 +132,9 @@ Two discrete Bayesian networks support a controlled feature-set comparison:
 | Baseline | Consecutive-session close-to-close return, intraday return, daily high-low range (normalized by opening price) |
 | Enhanced | Baseline features plus MACD normalized by closing price |
 
-Both use an explicit feature-to-target directed graph. Price-relative features allow observations from differently priced stocks to share meaningful bins. The training workflow estimates conditional probability tables with a **Bayesian Dirichlet equivalent uniform (BDeu) prior** and selects equivalent sample size using validation data.
+Both use an explicit feature-to-target directed graph. Price-relative features allow observations from differently priced stocks to share meaningful bins. The training workflow estimates conditional probability tables with a **Bayesian Dirichlet equivalent uniform (BDeu) prior** and selects equivalent sample size using validation data. Both direct network
+fitting and model selection validate binary training labels before conversion
+and reject invalid or empty BDeu candidate grids before fitting.
 
 Both feature sets use the same chronological partitions and comparable
 observations. Feature preparation requires only the enhanced model's columns;
