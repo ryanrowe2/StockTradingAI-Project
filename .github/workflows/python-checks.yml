@@ -46,3 +46,37 @@ jobs:
           python -m scripts.model_training --ticker AAPL --target next_open_to_close --output data/generated/aapl_executable_metrics.json
           python -m scripts.walk_forward_evaluation --ticker AAPL --folds 2 --bootstrap-samples 100 --output data/generated/aapl_walk_forward_metrics.json
           python -m scripts.refresh_notebooks --check
+      - name: Reproduce published full-market walk-forward reports
+        if: matrix.python-version == '3.12'
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+          from scripts.walk_forward_evaluation import walk_forward_experiment
+
+          expected = json.loads(Path("docs/expected_walk_forward.json").read_text())
+          for target in ("close_to_close", "next_open_to_close"):
+              result = walk_forward_experiment(target=target, folds=5, bootstrap_samples=1000)
+              observed = {
+                  "target": target,
+                  "majority_accuracy": result["majority_accuracy"],
+                  "baseline_accuracy": result["baseline"]["accuracy"],
+                  "enhanced_accuracy": result["enhanced"]["accuracy"],
+                  "baseline_interval": result["accuracy_lift_over_majority_95pct_block_intervals"]["baseline"],
+                  "enhanced_interval": result["accuracy_lift_over_majority_95pct_block_intervals"]["enhanced"],
+                  "holdout_observations": result["holdout_observations"],
+              }
+              assert set(observed) == set(expected[target])
+              for field, actual in observed.items():
+                  reference = expected[target][field]
+                  if isinstance(actual, list):
+                      assert len(actual) == len(reference)
+                      for value, benchmark in zip(actual, reference, strict=True):
+                          assert math.isclose(value, benchmark, rel_tol=0, abs_tol=1e-10), (target, field, actual, reference)
+                  elif isinstance(actual, float):
+                      assert math.isclose(actual, reference, rel_tol=0, abs_tol=1e-10), (target, field, actual, reference)
+                  else:
+                      assert actual == reference, (target, field, actual, reference)
+              print("FIVE_FOLD_REPORT=" + json.dumps(observed), flush=True)
+          PY

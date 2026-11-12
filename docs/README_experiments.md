@@ -252,9 +252,13 @@ experimental design is never selected using their outcomes.
 
 The report includes each fold's metrics and sample sizes, pooled out-of-sample
 metrics, and 95% paired bootstrap intervals for accuracy *differences* versus
-the training-majority benchmark. Bootstrap units are consecutive blocks of
-ten market dates, with all tickers on a date kept together; block resampling
-partially accounts for serial and cross-sectional dependence. These descriptive
+the training-majority benchmark. Bootstrap units are blocks of at most
+ten consecutive **actual market sessions**: a missing session starts a new
+block, and all tickers observed on the same date stay together. Block
+resampling partially accounts for serial and cross-sectional dependence.
+The full five-fold results for both targets are checked in CI against
+[`expected_walk_forward.json`](expected_walk_forward.json) using the pinned
+Python 3.12 environment. These descriptive
 intervals do not imply statistical independence across long market regimes or
 prove future trading profitability. Change the block length, fold count, or
 bootstrap sample count using `--block-sessions`, `--folds`, and
@@ -408,6 +412,10 @@ The same checks run automatically through [GitHub Actions](../.github/workflows/
 ```bash
 python -m scripts.refresh_notebooks
 ```
+
+The saved notebook results are certified against the pinned **Python 3.12 /
+Ubuntu 24.04** environment. The 3.10 and 3.11 checks certify source code,
+regression tests, lint, and formatting, but not byte-for-byte notebook output.
 
 `python -m scripts.refresh_notebooks --check` reruns the notebooks without modifying them. The in-process runner captures stdout, stderr, explicit `display()` calls, final-expression results (including rich MIME representations), and Matplotlib PNGs in their execution order. It compares saved output order and text exactly, fully decodes saved PNGs, and detects both broad and localized changes to generated charts. Jupyter's `%matplotlib inline` directive is removed only when it is an actual standalone magic command, never when it appears inside a string. Python future-import compiler flags persist from one cell to the next.
 The `reproduce_notebook(path, check=True)` Python helper resolves relative data

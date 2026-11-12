@@ -1,0 +1,32 @@
+{
+  "close_to_close": {
+    "target": "close_to_close",
+    "majority_accuracy": 0.5166803864650579,
+    "baseline_accuracy": 0.5195615441272042,
+    "enhanced_accuracy": 0.516875352021143,
+    "baseline_interval": [
+      -0.006017955081247606,
+      0.012176625632238577
+    ],
+    "enhanced_interval": [
+      -0.010042611616142116,
+      0.010324755804358396
+    ],
+    "holdout_observations": 46162
+  },
+  "next_open_to_close": {
+    "target": "next_open_to_close",
+    "majority_accuracy": 0.5139941943589966,
+    "baseline_accuracy": 0.5167453749837528,
+    "enhanced_accuracy": 0.5130193665785712,
+    "baseline_interval": [
+      -0.00526542143338074,
+      0.011345745944223962
+    ],
+    "enhanced_interval": [
+      -0.009924278020219552,
+      0.007830070567738788
+    ],
+    "holdout_observations": 46162
+  }
+}

@@ -187,8 +187,8 @@ additional validation should be interpreted as a guaranteed performance gain.
 
 | Five-fold walk-forward target | Majority accuracy | Baseline BN | Enhanced BN | Baseline lift, 95% date-block interval |
 | --- | ---: | ---: | ---: | ---: |
-| Close-to-close | 51.67% | 51.96% | 51.69% | −0.55 to +1.11 percentage points |
-| Next-open-to-close | 51.40% | 51.68% | 51.30% | −0.48 to +1.03 percentage points |
+| Close-to-close | 51.67% | 51.96% | 51.69% | −0.60 to +1.22 percentage points |
+| Next-open-to-close | 51.40% | 51.67% | 51.30% | −0.53 to +1.13 percentage points |
 
 Both baseline accuracy lifts are small and their intervals include zero. The
 bootstrap validates binary labels, strictly daily dates, and finite probability
@@ -196,7 +196,10 @@ values in [0, 1], and requires at least two distinct date blocks before
 reporting intervals. Fold feasibility is checked before model fitting. This
 provides additional historical evidence without establishing a reproducible
 advantage over the naive classifier. The full fold-by-fold scores and bootstrap
-configuration are reproduced by the walk-forward command below.
+configuration are reproduced by the walk-forward command below. The
+five-fold metrics and gap-aware bootstrap intervals are pinned in
+[`docs/expected_walk_forward.json`](docs/expected_walk_forward.json) and
+checked against a Python 3.12 CI reproduction of both target definitions.
 
 ## Reproduce the experiments
 
@@ -283,6 +286,11 @@ python -m pip install -r requirements-dev.txt
 python -m pytest tests -q
 python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
 ```
+
+The saved notebook tables and figures are **certified against the pinned
+Python 3.12 / Ubuntu 24.04 environment**. Python 3.10 and 3.11 are covered by
+the regression, lint and formatting matrix, but are not certified for
+byte-for-byte reproduction of those saved notebook outputs.
 
 ### Interactive notebooks
 
