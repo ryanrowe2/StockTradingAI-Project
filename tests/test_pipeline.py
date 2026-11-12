@@ -3004,7 +3004,7 @@ def test_walk_forward_rejects_too_few_bootstrap_dates_before_training(monkeypatc
         "train_and_select",
         lambda *args, **kwargs: pytest.fail("Model training began too soon"),
     )
-    with pytest.raises(ValueError, match="too few test dates"):
+    with pytest.raises(ValueError, match="too few independent trading-session blocks"):
         evaluate("synthetic.csv", folds=1, bootstrap_samples=100)
 
 
