@@ -22,7 +22,9 @@ def _synthetic_bundle(root):
     rows = []
     for number in range(31):
         ticker = f"S{number:02d}"
-        row = dict(zip(fields, ["2017-01-03", ticker, "10", "11", "9", "10", "100"]))
+        row = dict(
+            zip(fields, ["2017-01-03", ticker, "10", "11", "9", "10", "100"], strict=True)
+        )
         rows.append(row)
         path = root / f"{ticker}_2006-01-01_to_2018-01-01.csv"
         with path.open("w", newline="", encoding="utf-8") as stream:
