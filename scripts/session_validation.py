@@ -276,6 +276,8 @@ def validate_session_positions(
     if require_consecutive:
         if "Name" in frame:
             groups = (group for _, group in frame.groupby("Name", sort=False))
+        elif exchanges is not None:
+            groups = (group for _, group in frame.groupby(exchanges, sort=False))
         else:
             groups = (frame,)
         for group in groups:
