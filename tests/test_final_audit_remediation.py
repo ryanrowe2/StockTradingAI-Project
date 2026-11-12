@@ -222,10 +222,7 @@ def test_bootstrap_splits_blocks_at_missing_sessions():
 
 def test_bootstrap_valid_london_dates_not_rejected_as_us_holidays():
     # London was open on Martin Luther King Jr Day, 2024-01-15.
-    dates = [
-        d.strftime("%Y-%m-%d")
-        for d in pd.bdate_range("2024-01-08", periods=32)
-    ]
+    dates = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2024-01-08", periods=32)]
     dates = [d for d in dates if d not in ("2024-02-09",)]
     scored = _scores(dates[:30])
     scored["Exchange"] = "LSE"
