@@ -336,7 +336,9 @@ def train_and_select(
     try:
         sample_sizes = tuple(sample_sizes)
     except TypeError as exc:
-        raise ValueError("sample_sizes must be nonempty positive finite priors") from exc
+        raise ValueError(
+            "sample_sizes must be nonempty positive finite priors"
+        ) from exc
     if not sample_sizes or any(
         not isinstance(size, Real)
         or isinstance(size, (bool, np.bool_))

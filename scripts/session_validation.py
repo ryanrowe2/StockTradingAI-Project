@@ -124,9 +124,7 @@ def session_positions(
     dates = pd.DatetimeIndex(parse_daily_dates(frame["Date"], context="Trading dates"))
     # Apply the same canonical uniqueness and market-date checks as callers
     # supplying explicit ordinals. Otherwise aliases can bypass these guards.
-    validate_session_positions(
-        frame, verified_datetime_dates=verified_datetime_dates
-    )
+    validate_session_positions(frame, verified_datetime_dates=verified_datetime_dates)
     if (dates.dayofweek >= 5).any():
         raise ValueError(
             "Trading dates must fall on weekdays; supply a verified market calendar"
@@ -150,7 +148,9 @@ def session_positions(
     grouping = (
         exchange_labels
         if exchange_labels is not None
-        else normalize_ticker_symbols(frame["Name"], context="Invalid ticker identifier")
+        else normalize_ticker_symbols(
+            frame["Name"], context="Invalid ticker identifier"
+        )
     )
     for label, indices in frame.groupby(
         grouping, sort=False, dropna=False
