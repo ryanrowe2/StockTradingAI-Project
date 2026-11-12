@@ -137,6 +137,10 @@ def test_invalid_seed_rejected_before_loading_or_fitting(monkeypatch, seed):
 
 def test_valid_seed_reproduces_identical_bootstrap_results():
     scored = _london_scores()
-    one = paired_block_accuracy_intervals(scored, seed=17, bootstrap_samples=100)
-    two = paired_block_accuracy_intervals(scored, seed=17, bootstrap_samples=100)
+    one = paired_block_accuracy_intervals(
+        scored, seed=17, bootstrap_samples=100, allow_unidentified_rows=True
+    )
+    two = paired_block_accuracy_intervals(
+        scored, seed=17, bootstrap_samples=100, allow_unidentified_rows=True
+    )
     assert one == two
