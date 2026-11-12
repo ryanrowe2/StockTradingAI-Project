@@ -84,6 +84,13 @@ _BUNDLED_SYMBOLS = (
     "WMT",
     "XOM",
 )
+# Nasdaq-listed members of the fixed third-party sample.
+# Unknown symbols retain default NYSE validation.
+_BUNDLED_NASDAQ_SYMBOLS = frozenset(
+    {"AABA", "AAPL", "AMZN", "CSCO", "GOOGL", "INTC", "MSFT"}
+)
+
+
 _BUNDLED_RAW_NAMES = frozenset(
     {
         DEFAULT_RAW_DATA.name,
@@ -110,10 +117,16 @@ def _cached_bundled_session_calendar(
     explicit = raw_dates.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").fillna(False)
     dates = pd.to_datetime(raw_dates.where(explicit), format="mixed", errors="coerce")
     dates = dates.loc[dates.notna() & dates.dt.dayofweek.lt(5)]
-    candidates = pd.DatetimeIndex(dates.unique()).sort_values()
-    # Bundled files contain NYSE-listed equities. An unrelated fabricated
-    # holiday record is not evidence that the exchange held a session.
-    return candidates[exchange_open_mask(candidates, "NYSE")]
+    names = source.loc[dates.index, "Name"].astype("string").str.strip().str.upper()
+    observed = pd.DatetimeIndex(dates)
+    # The bundled universe spans two exchanges. Verify the source ticker's
+    # own market before letting its date contribute a reference session.
+    nasdaq = names.isin(_BUNDLED_NASDAQ_SYMBOLS).to_numpy()
+    valid = (
+        (~nasdaq & exchange_open_mask(observed, "NYSE"))
+        | (nasdaq & exchange_open_mask(observed, "NASDAQ"))
+    )
+    return pd.DatetimeIndex(dates.loc[valid].unique()).sort_values()
 
 
 def _bundled_session_calendar() -> pd.DatetimeIndex:
@@ -162,7 +175,7 @@ def _custom_source_session_positions(
     # before recording that attestation, otherwise " aapl " and "AAPL" can
     # disagree with their own verified row identity during selected loads.
     reference["Name"] = reference["Name"].astype(str).str.strip().str.upper()
-    mark_verified_daily_dates(reference)
+    mark_verified_daily_dates(reference, columns=("Date",))
     # An unrelated pre-1971 record must not make a selected modern ticker
     # depend on an historical calendar that requires verified metadata.
     if parsed.loc[selected_mask].min() >= pd.Timestamp("1971-01-01"):
@@ -238,12 +251,12 @@ def validate_bars(
         )
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
-    mark_verified_daily_dates(df)
+    mark_verified_daily_dates(df, columns=("Date",))
     df["Name"] = normalize_ticker_symbols(
         df["Name"],
         context="Every observation must have a ticker symbol",
     )
-    mark_verified_daily_dates(df)
+    mark_verified_daily_dates(df, columns=("Date",))
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
     input_tickers = set(df["Name"])
@@ -267,7 +280,8 @@ def validate_bars(
             f"{', '.join(missing_tickers)}"
         )
     return mark_verified_daily_dates(
-        df.sort_values(["Name", "Date"]).reset_index(drop=True)
+        df.sort_values(["Name", "Date"]).reset_index(drop=True),
+        columns=("Date",),
     )
 
 
@@ -332,10 +346,22 @@ def load_data(
         # Both the complete source and every bundled per-symbol CSV must use
         # exactly the same reference calendar, even on dates absent for a symbol.
         dates = parse_daily_dates(source["Date"], context="Every Date")
-        positions = _bundled_session_calendar().get_indexer(dates)
-        if (positions < 0).any():
-            raise ValueError("Bundled observations contain non-market dates")
-        source[SESSION_COLUMN] = positions
+        calendar = _bundled_session_calendar()
+        if not exchange_open_mask(calendar, "NYSE").all():
+            # In older bundled sources, Nasdaq-only sessions require
+            # exchange-specific ordinals instead of a fictional NYSE gap.
+            # The published 2006-2017 data retain their original shared
+            # source-observed ordinal positions and output schema.
+            symbols = source["Name"].astype("string").str.strip().str.upper()
+            source["Exchange"] = np.where(
+                symbols.isin(_BUNDLED_NASDAQ_SYMBOLS), "NASDAQ", "NYSE"
+            )
+            source[SESSION_COLUMN] = session_positions(source)
+        else:
+            positions = calendar.get_indexer(dates)
+            if (positions < 0).any():
+                raise ValueError("Bundled observations contain non-market dates")
+            source[SESSION_COLUMN] = positions
     return validate_bars(source)
 
 
