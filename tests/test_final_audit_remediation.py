@@ -6,9 +6,14 @@ import pandas as pd
 import pytest
 
 from scripts.date_validation import mark_verified_daily_dates
+from scripts.data_processing import validate_bars, prepare_features
 from scripts.market_calendar import _scheduled_sessions
 from scripts.model_training import chronological_split
-from scripts.session_validation import session_positions, validate_session_positions
+from scripts.session_validation import (
+    adjacent_session_flags,
+    session_positions,
+    validate_session_positions,
+)
 from scripts.walk_forward_evaluation import paired_block_accuracy_intervals
 
 
@@ -156,3 +161,109 @@ def test_explicitly_attested_split_and_bootstrap_dates():
     assert "baseline" in paired_block_accuracy_intervals(
         scored, bootstrap_samples=100, block_sessions=5
     )
+
+
+def test_split_rejects_two_session_target_horizon():
+    dates = _daily_dates()
+    frame = _split_frame(dates)
+    frame["Target_Date"] = dates[2:] + [dates[-1]]
+    with pytest.raises(ValueError, match="next trading session"):
+        chronological_split(frame)
+
+
+def test_mutated_verified_target_column_cannot_inherit_original_attestation():
+    dates = _daily_dates(40)
+    frame = _split_frame(dates)
+    frame["Date"] = pd.to_datetime(frame["Date"])
+    frame["Target_Date"] = pd.to_datetime(frame["Target_Date"])
+    mark_verified_daily_dates(frame)
+    frame["Target_Date"] = pd.date_range("2019-01-01", periods=len(frame), freq="MS")
+    with pytest.raises(ValueError, match="verification is stale"):
+        chronological_split(frame)
+
+
+def test_unknown_weekday_exchange_requires_verified_ordinals():
+    frame = pd.DataFrame(
+        {"Exchange": ["XTEST", "XTEST"], "Date": ["2024-01-08", "2024-01-09"]}
+    )
+    with pytest.raises(ValueError, match="requires verified Session_Number"):
+        validate_session_positions(frame)
+
+
+@pytest.mark.parametrize("exchange", ["", " ", None])
+def test_bootstrap_rejects_invalid_exchange_identifiers(exchange):
+    scored = _scores(_daily_dates(32))
+    scored["Exchange"] = exchange
+    with pytest.raises(ValueError, match="Exchange"):
+        paired_block_accuracy_intervals(scored, bootstrap_samples=100)
+
+
+def test_adjacent_session_helper_rejects_fractional_values():
+    with pytest.raises(ValueError, match="nonnegative integers"):
+        adjacent_session_flags(pd.Series([1.2, 2.2, 3.8]))
+
+
+@pytest.mark.parametrize("bad", [True, -1, float("nan"), "1"])
+def test_adjacent_session_helper_rejects_other_bad_values(bad):
+    with pytest.raises(ValueError, match="nonnegative integers"):
+        adjacent_session_flags(pd.Series([0, bad], dtype=object))
+
+
+def test_bootstrap_splits_blocks_at_missing_sessions():
+    dates = _daily_dates(40)[::2]
+    scored = _scores(dates)
+    # Twenty observations and a 30-observation maximum would create only
+    # one block with the old observed-date-only grouping algorithm.
+    intervals = paired_block_accuracy_intervals(
+        scored, block_sessions=30, bootstrap_samples=100
+    )
+    assert set(intervals) == {"baseline", "enhanced"}
+
+
+def test_bootstrap_valid_london_dates_not_rejected_as_us_holidays():
+    # London was open on Martin Luther King Jr Day, 2024-01-15.
+    dates = [
+        d.strftime("%Y-%m-%d")
+        for d in pd.bdate_range("2024-01-08", periods=32)
+    ]
+    dates = [d for d in dates if d not in ("2024-02-09",)]
+    scored = _scores(dates[:30])
+    scored["Exchange"] = "LSE"
+    assert "baseline" in paired_block_accuracy_intervals(
+        scored, bootstrap_samples=100, block_sessions=5
+    )
+
+
+def test_bootstrap_custom_market_sunday_ordinals():
+    dates = pd.date_range("2024-01-07", periods=32, freq="D")
+    dates = [d.strftime("%Y-%m-%d") for d in dates if d.dayofweek != 5]
+    scored = _scores(dates[:26])
+    scored["Exchange"] = "XTAE"
+    scored["Session_Number"] = list(range(len(scored)))
+    assert "enhanced" in paired_block_accuracy_intervals(
+        scored, bootstrap_samples=100, block_sessions=5
+    )
+
+
+def test_prepared_custom_targets_keep_exact_large_integer_ordinals():
+    dates = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2024-01-02", periods=120)]
+    count = len(dates)
+    frame = pd.DataFrame(
+        {
+            "Name": ["CUSTOM"] * count,
+            "Exchange": ["XTEST"] * count,
+            "Date": dates,
+            "Session_Number": pd.Series(
+                [2**63 + index for index in range(count)], dtype="uint64"
+            ),
+            "Open": [100.0 + 0.01 * index for index in range(count)],
+            "Close": [100.1 + 0.01 * index for index in range(count)],
+            "High": [102.0 + 0.01 * index for index in range(count)],
+            "Low": [99.0 + 0.01 * index for index in range(count)],
+            "Volume": [1000] * count,
+        }
+    )
+    prepared = prepare_features(validate_bars(frame), verified_datetime_dates=True)
+    expected = 2**63 + 34
+    assert expected in prepared["Target_Session_Number"].tolist()
+    assert len(chronological_split(prepared).test) > 0
