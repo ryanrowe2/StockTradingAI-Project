@@ -208,9 +208,7 @@ class QuantileBinner:
     def fit(self, df: pd.DataFrame, features: tuple[str, ...]) -> "QuantileBinner":
         new_edges = {}
         for feature in features:
-            values = real_float_array(
-                df[feature], context=f"Feature {feature}"
-            )
+            values = real_float_array(df[feature], context=f"Feature {feature}")
             if not len(values) or not np.isfinite(values).all():
                 raise ValueError(f"Feature {feature} contains missing/nonfinite values")
             quantiles = np.linspace(0, 1, self.num_bins + 1)[1:-1]
@@ -232,9 +230,7 @@ class QuantileBinner:
         for feature in features:
             if feature not in self.edges:
                 raise RuntimeError(f"Binner not fitted for {feature}")
-            values = real_float_array(
-                df[feature], context=f"Feature {feature}"
-            )
+            values = real_float_array(df[feature], context=f"Feature {feature}")
             if not np.isfinite(values).all():
                 raise ValueError(f"Feature {feature} contains missing/nonfinite values")
             result[feature] = np.searchsorted(self.edges[feature], values, side="right")

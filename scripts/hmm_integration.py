@@ -103,9 +103,7 @@ def _validated_indicators(
         raise ValueError("Duplicate dates for a single ticker")
     validate_session_positions(ordered)
     clean = ordered.dropna(subset=list(indicators)).copy()
-    real_float_array(
-        clean[list(indicators)], context="Indicator values"
-    )
+    real_float_array(clean[list(indicators)], context="Indicator values")
     return ordered if keep_missing else clean
 
 

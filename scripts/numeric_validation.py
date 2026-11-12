@@ -10,7 +10,9 @@ from __future__ import annotations
 import numpy as np
 
 
-def real_float_array(values, *, context: str, allow_missing: bool = False) -> np.ndarray:
+def real_float_array(
+    values, *, context: str, allow_missing: bool = False
+) -> np.ndarray:
     """Convert to float64 without ever discarding complex information."""
     original = np.asarray(values)
     if np.iscomplexobj(original) or (

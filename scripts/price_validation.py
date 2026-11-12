@@ -26,9 +26,7 @@ def valid_price_bars(frame: pd.DataFrame, *, require_volume: bool = False) -> pd
         raise ValueError(f"Missing required price columns: {sorted(missing)}")
     # Reject complex (including 10+0j) before NumPy can drop imaginary
     # components, while preserving real numeric-string support.
-    numeric = frame[list(required)].apply(
-        lambda column: column.map(real_float_or_nan)
-    )
+    numeric = frame[list(required)].apply(lambda column: column.map(real_float_or_nan))
     finite = pd.Series(
         np.isfinite(numeric.to_numpy(dtype=float)).all(axis=1), index=frame.index
     )

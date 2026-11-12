@@ -91,9 +91,7 @@ def test_complex_feature_bins_rejected_on_fit_and_transform():
     source = pd.DataFrame({"X": [1 + 3j, 2 + 0j, 3 + 1j]})
     with pytest.raises(ValueError, match="complex"):
         QuantileBinner().fit(source, ("X",))
-    binner = QuantileBinner().fit(
-        pd.DataFrame({"X": [1.0, 2.0, 3.0]}), ("X",)
-    )
+    binner = QuantileBinner().fit(pd.DataFrame({"X": [1.0, 2.0, 3.0]}), ("X",))
     with pytest.raises(ValueError, match="complex"):
         binner.transform(source, ("X",))
 
@@ -114,9 +112,13 @@ def test_complex_hmm_emissions_rejected_before_fitting():
 
 
 def test_london_aliases_are_one_market_without_false_session_gaps():
-    dates = _exchange_sessions(
-        pd.Timestamp("2024-01-02"), pd.Timestamp("2024-03-04"), "LSE"
-    )[:20].strftime("%Y-%m-%d").tolist()
+    dates = (
+        _exchange_sessions(
+            pd.Timestamp("2024-01-02"), pd.Timestamp("2024-03-04"), "LSE"
+        )[:20]
+        .strftime("%Y-%m-%d")
+        .tolist()
+    )
     frame = _scores(dates)
     frame["Exchange"] = ["LSE", "XLON"] * 10
     block_ids = _market_date_block_ids(frame, block_sessions=10)
@@ -156,9 +158,7 @@ def test_exchange_aware_undated_inputs_require_source_ordinals():
 
 
 def test_datedless_exchange_ordinals_remain_valid():
-    frame = pd.DataFrame(
-        {"Exchange": ["XTAE", "XTAE"], "Session_Number": [200, 201]}
-    )
+    frame = pd.DataFrame({"Exchange": ["XTAE", "XTAE"], "Session_Number": [200, 201]})
     validate_session_positions(frame, require_consecutive=True)
     assert session_positions(frame).tolist() == [200, 201]
 
@@ -174,18 +174,12 @@ def test_public_calendar_rejects_intraday_observations(exchange):
         observed, exchange, verified_session_ordinals=True
     ).any()
     with pytest.raises(ValueError, match="closed-market date"):
-        validate_exchange_open_dates(
-            observed, exchange, verified_session_ordinals=True
-        )
+        validate_exchange_open_dates(observed, exchange, verified_session_ordinals=True)
 
 
 def test_nyse_calendar_rejects_timezone_aware_and_intraday_dates():
-    assert not nyse_open_mask(
-        pd.DatetimeIndex(["2024-01-09 13:30:00"])
-    ).any()
-    assert not nyse_open_mask(
-        pd.DatetimeIndex(["2024-01-09"], tz="UTC")
-    ).any()
+    assert not nyse_open_mask(pd.DatetimeIndex(["2024-01-09 13:30:00"])).any()
+    assert not nyse_open_mask(pd.DatetimeIndex(["2024-01-09"], tz="UTC")).any()
 
 
 def test_walk_forward_rejects_bootstrap_workload_before_model_fitting(monkeypatch):
