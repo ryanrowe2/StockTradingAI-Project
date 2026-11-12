@@ -17,9 +17,15 @@ environment with `python -m pip install jupyterlab`, then launch `jupyter lab`
 from the repository root. JupyterLab is not required for scripted reproduction.
 
 To reproduce the exact dependency versions used for the published numerical
-results on Python 3.12/Linux, install `requirements-repro-py312.txt` instead.
-That file includes pinned transitive dependencies; the normal requirements
-files retain broader version compatibility.
+results on Python 3.12/Ubuntu 24.04, install
+`requirements-repro-py312.txt` using `python -m pip install --require-hashes -r requirements-repro-py312.txt`.
+For Windows Server 2025 x86_64 and macOS 15 ARM64 on Python 3.12, use
+`requirements-repro-py312-windows.txt` or
+`requirements-repro-py312-macos.txt`, respectively, with
+`python -m pip install --require-hashes --only-binary=:all: -r <matching-file>`.
+The native lockfiles were generated on their respective operating systems and
+validated by independent clean-environment installations and regression tests.
+The normal requirements files retain broader version compatibility.
 
 The combined historical source is `data/raw/all_stocks_2006-01-01_to_2018-01-01.csv`, containing daily OHLCV observations and ticker identifiers.
 
