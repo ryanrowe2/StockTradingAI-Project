@@ -284,6 +284,11 @@ python -m pytest tests -q
 python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
 ```
 
+The saved notebook tables and figures are **certified against the pinned
+Python 3.12 / Ubuntu 24.04 environment**. Python 3.10 and 3.11 are covered by
+the regression, lint and formatting matrix, but are not certified for
+byte-for-byte reproduction of those saved notebook outputs.
+
 ### Interactive notebooks
 
 | Notebook | Purpose |
