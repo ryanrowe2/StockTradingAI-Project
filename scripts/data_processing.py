@@ -110,7 +110,10 @@ def _cached_bundled_session_calendar(
     explicit = raw_dates.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}").fillna(False)
     dates = pd.to_datetime(raw_dates.where(explicit), format="mixed", errors="coerce")
     dates = dates.loc[dates.notna() & dates.dt.dayofweek.lt(5)]
-    return pd.DatetimeIndex(dates.unique()).sort_values()
+    candidates = pd.DatetimeIndex(dates.unique()).sort_values()
+    # Bundled files contain NYSE-listed equities. An unrelated fabricated
+    # holiday record is not evidence that the exchange held a session.
+    return candidates[exchange_open_mask(candidates, "NYSE")]
 
 
 def _bundled_session_calendar() -> pd.DatetimeIndex:

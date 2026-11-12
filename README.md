@@ -42,7 +42,9 @@ are shared across the Bayesian and AAPL trading experiments, so their partitions
 correspond to the same historical market periods. All bundled ticker CSVs use
 the observed-session calendar of the complete 31-stock source. It retains
 dates attached to valid ticker identifiers even when their prices are unusable,
-but excludes malformed dates and invalid ticker identifiers.
+but excludes malformed dates, invalid ticker identifiers, and records
+on known closed-market dates. The peer's fabricated holiday does not create
+an extra source session for a different selected ticker.
 Date-only U.S. equity data from 1971 onward use scheduled NYSE/Nasdaq sessions,
 including effective-dated holidays, 1972–1980 presidential Election Day
 closures, and exceptional full-day closures. The historical NYSE validator
@@ -52,13 +54,13 @@ also requires explicit verified session ordinals for any pre-1971 observations;
 that attestation remains required at training and ingestion boundaries. Observations on closed U.S. market
 dates are rejected even when `Exchange` is omitted or session ordinals are
 supplied. An optional `Exchange` column groups stocks on the same market:
-`NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S. calendar;
+`NYSE`/`XNYS` use the NYSE calendar; `NASDAQ`/`XNAS` use the U.S. calendar with independently verified Nasdaq differences. Nasdaq dates before its February 8, 1971 launch are rejected, and its shortened September 27, 1985 session is retained even though NYSE was closed;
 `LSE` and `XLON` use the London Stock Exchange calendar, including Boxing Day.
 Other explicitly named exchanges require independently verified
 `Session_Number` metadata, even for weekdays; standalone calendar APIs also reject unverified unknown exchanges and blank identifiers.
 Aliases (`NYSE`/`XNYS`, `NASDAQ`/`XNAS`, `LSE`/`XLON`,
 `TSX`/`XTSE`) are canonicalized for duplicate detection and bootstrap
-market-session gaps. The bootstrap consolidates equivalent market/date records after alias normalization and rejects conflicting session ordinals. Their spelling never creates artificial missing sessions.
+market-session gaps. The bootstrap consolidates equivalent market/date records after alias normalization, rejects conflicting session ordinals, and rejects duplicate scored ticker/date identities when tickers are provided. Their spelling never creates artificial missing sessions.
 A peer's fabricated closed-market observation cannot contaminate a selected
 stock's inferred calendar. When `Exchange` is
 omitted, U.S. equity market rules apply rather than accepting arbitrary
