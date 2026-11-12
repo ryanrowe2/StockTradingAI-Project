@@ -17,7 +17,11 @@ import pandas as pd
 
 if __package__:
     from .technical_indicators import add_technical_indicators
-    from .date_validation import mark_verified_daily_dates, parse_daily_dates
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from .market_calendar import exchange_open_mask
     from .price_validation import valid_price_bars
     from .session_validation import (
@@ -29,7 +33,11 @@ if __package__:
     from .ticker_validation import normalize_ticker_symbols, valid_ticker_symbols
 else:
     from technical_indicators import add_technical_indicators
-    from date_validation import mark_verified_daily_dates, parse_daily_dates
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from market_calendar import exchange_open_mask
     from price_validation import valid_price_bars
     from session_validation import (
@@ -249,14 +257,22 @@ def validate_bars(
             "ISO daily dates, use validate_raw_bar_records on raw NumPy dates, or "
             "set verified_datetime_dates=True after checking the source precision"
         )
+    # If a Target_Date survives input processing, its provenance must already
+    # be valid before normalizing Date/Name changes the row-identity hashes.
+    # Only then may those unchanged target values be rebound to canonical
+    # row identities. This refuses tampered targets instead of laundering them.
+    attested_columns = ("Date",)
+    if "Target_Date" in df:
+        require_verified_daily_date_source(df, column="Target_Date")
+        attested_columns = ("Date", "Target_Date")
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")
-    mark_verified_daily_dates(df, columns=("Date",))
+    mark_verified_daily_dates(df, columns=attested_columns)
     df["Name"] = normalize_ticker_symbols(
         df["Name"],
         context="Every observation must have a ticker symbol",
     )
-    mark_verified_daily_dates(df, columns=("Date",))
+    mark_verified_daily_dates(df, columns=attested_columns)
     if df.duplicated(["Name", "Date"]).any():
         raise ValueError("Duplicate ticker/date observations")
     input_tickers = set(df["Name"])
@@ -281,7 +297,7 @@ def validate_bars(
         )
     return mark_verified_daily_dates(
         df.sort_values(["Name", "Date"]).reset_index(drop=True),
-        columns=("Date",),
+        columns=attested_columns,
     )
 
 
