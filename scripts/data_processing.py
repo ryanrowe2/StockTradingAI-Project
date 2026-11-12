@@ -349,6 +349,11 @@ def prepare_features(
     source["Target_Date"] = (
         source.groupby("Name", sort=False)["Date"].shift(-1).where(adjacent_target)
     )
+    source["Target_Session"] = (
+        source.groupby("Name", sort=False)[SESSION_COLUMN]
+        .shift(-1)
+        .where(adjacent_target)
+    )
     reference_price = source["Close"] if target == "close_to_close" else next_open
     source["Trend"] = (next_close > reference_price).astype("int64")
     if not features or any(feature not in MODEL_FEATURES for feature in features):
@@ -356,6 +361,13 @@ def prepare_features(
     required = list(features) + ["Target_Date"]
     source = source.replace([np.inf, -np.inf], np.nan)
     prepared = source.dropna(subset=required).reset_index(drop=True)
+    # The target ordinal is exact source metadata, not a float-derived label.
+    # Keep the integer dtype (including uint64 source positions) end-to-end.
+    if prepared["Target_Session"].isna().any():
+        raise ValueError("Prepared target sessions must be present")
+    prepared["Target_Session"] = prepared["Target_Session"].astype(
+        source[SESSION_COLUMN].dtype
+    )
     if prepared.empty:
         raise ValueError(
             "No usable feature observations remain after indicator warm-up; "
