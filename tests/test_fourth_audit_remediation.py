@@ -134,3 +134,51 @@ def test_reasonable_bootstrap_still_produces_finite_intervals():
     frame = _scores(_nyse_dates(30))
     result = paired_block_accuracy_intervals(frame, block_sessions=5, bootstrap_samples=100)
     assert all(np.isfinite(values).all() for values in result.values())
+
+
+def test_pooled_walk_forward_bootstrap_accepts_single_block_per_fold(monkeypatch):
+    import scripts.walk_forward_evaluation as evaluation
+    from scripts.data_processing import validate_bars
+
+    dates = (
+        _scheduled_sessions(pd.Timestamp("2024-01-02"), pd.Timestamp("2024-12-31"))[
+            :125
+        ]
+        .strftime("%Y-%m-%d")
+        .tolist()
+    )
+    index = np.arange(len(dates))
+    close = 100.0 + index * 0.07 + 2 * np.sin(index / 5)
+    bars = validate_bars(
+        pd.DataFrame(
+            {
+                "Date": dates,
+                "Name": ["AAPL"] * len(dates),
+                "Open": close - 0.2,
+                "High": close + 1.0,
+                "Low": close - 1.0,
+                "Close": close,
+                "Volume": [1000] * len(dates),
+            }
+        )
+    )
+
+    def stub_training(split, features, num_bins, *, include_predictions=False):
+        actual = split.test["Trend"].to_numpy(dtype=int)
+        probability = np.full(len(actual), 0.5, dtype=float)
+        from scripts.model_training import classification_metrics
+
+        return {
+            "test": classification_metrics(split.test["Trend"], probability),
+            "test_probabilities": probability,
+            "equivalent_sample_size": 5,
+        }
+
+    monkeypatch.setattr(evaluation, "load_data", lambda *args, **kwargs: bars)
+    monkeypatch.setattr(evaluation, "train_and_select", stub_training)
+    report = evaluation.walk_forward_experiment(
+        "synthetic.csv", folds=2, block_sessions=10, bootstrap_samples=100
+    )
+    assert len(report["folds"]) == 2
+    assert max(fold["observations"]["test"] for fold in report["folds"]) <= 10
+    assert report["holdout_observations"] > 10
