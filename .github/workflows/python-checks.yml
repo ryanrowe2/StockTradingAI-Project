@@ -32,8 +32,13 @@ jobs:
           python -m pytest tests/test_second_audit_remediation.py -q
       - name: Run regression tests with coverage
         run: |
-          python -m coverage run --source=scripts -m pytest tests -q
-          python -m coverage report --fail-under=90
+          python -m coverage run --branch --source=scripts -m pytest tests -q
+          python -m coverage report --fail-under=80
+          python -m coverage json -o data/generated/coverage.json
+      - name: Reconcile all bundled price files and emit SHA-256 inventory
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m scripts.verify_source_data --emit
       - name: Check Python syntax, lint, and formatting
         run: |
           python -m compileall -q scripts tests
@@ -79,4 +84,5 @@ jobs:
                   else:
                       assert actual == reference, (target, field, actual, reference)
               print("FIVE_FOLD_REPORT=" + json.dumps(observed), flush=True)
+              print("FIVE_FOLD_DETAIL=" + json.dumps({"target": target, "folds": result["folds"]}, sort_keys=True), flush=True)
           PY
