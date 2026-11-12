@@ -19,6 +19,7 @@ else:
     from date_validation import mark_verified_daily_dates, parse_daily_dates
     from market_calendar import (
         LAST_NYSE_SATURDAY_SESSION,
+        _KNOWN_EXCHANGES,
         inferred_equity_sessions,
         validate_exchange_open_dates,
     )

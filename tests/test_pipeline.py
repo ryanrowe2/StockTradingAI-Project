@@ -30,12 +30,12 @@ from data_processing import (  # noqa: E402
     validate_bars,
     validate_raw_bar_records,
 )
-from date_validation import parse_daily_dates  # noqa: E402
+from date_validation import mark_verified_daily_dates, parse_daily_dates  # noqa: E402
 from hmm_integration import (  # noqa: E402
     _gaussian_log_emissions,
-    _validated_indicators,
-    fit_hmm_on_indicators,
-    infer_filtered_regimes,
+    _validated_indicators as _validated_indicators_impl,
+    fit_hmm_on_indicators as _fit_hmm_on_indicators,
+    infer_filtered_regimes as _infer_filtered_regimes,
 )
 from model_training import (  # noqa: E402
     BASELINE_FEATURES,
@@ -51,17 +51,55 @@ from market_calendar import (  # noqa: E402
     nyse_open_mask,
     validate_nyse_open_dates,
 )  # noqa: E402
-from rl_agent import QLearningAgent, SimpleTradingEnv, contiguous_trading_segments  # noqa: E402
+from rl_agent import (  # noqa: E402
+    QLearningAgent,
+    SimpleTradingEnv as _SimpleTradingEnv,
+    contiguous_trading_segments as _contiguous_trading_segments,
+)
 from session_validation import (  # noqa: E402
     adjacent_session_flags,
     session_positions,
     validate_session_positions,
 )
-from technical_indicators import add_technical_indicators  # noqa: E402
+from technical_indicators import add_technical_indicators as _add_technical_indicators  # noqa: E402
 from walk_forward_evaluation import (  # noqa: E402
     paired_block_accuracy_intervals,
     walk_forward_experiment,
 )
+
+
+# Every pandas datetime fixture in this test module is constructed from known
+# day-precise dates or from the validated source. Preserve those explicit
+# attestations when exercising the now-strict independent public entry points.
+def add_technical_indicators(*args, **kwargs):
+    kwargs.setdefault("verified_datetime_dates", True)
+    return _add_technical_indicators(*args, **kwargs)
+
+
+class SimpleTradingEnv(_SimpleTradingEnv):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("verified_datetime_dates", True)
+        super().__init__(*args, **kwargs)
+
+
+def contiguous_trading_segments(*args, **kwargs):
+    kwargs.setdefault("verified_datetime_dates", True)
+    return _contiguous_trading_segments(*args, **kwargs)
+
+
+def _validated_indicators(*args, **kwargs):
+    kwargs.setdefault("verified_datetime_dates", True)
+    return _validated_indicators_impl(*args, **kwargs)
+
+
+def fit_hmm_on_indicators(*args, **kwargs):
+    kwargs.setdefault("verified_datetime_dates", True)
+    return _fit_hmm_on_indicators(*args, **kwargs)
+
+
+def infer_filtered_regimes(*args, **kwargs):
+    kwargs.setdefault("verified_datetime_dates", True)
+    return _infer_filtered_regimes(*args, **kwargs)
 
 
 def prepare_features(*args, **kwargs):
@@ -99,6 +137,7 @@ def synthetic_bars(days: int = 130) -> pd.DataFrame:
         pd.concat(frames, ignore_index=True)
         .sample(frac=1, random_state=7)
         .reset_index(drop=True)
+        .pipe(mark_verified_daily_dates)
     )
 
 
@@ -2599,7 +2638,7 @@ def test_mixed_exchange_holiday_does_not_contaminate_nyse_ticker(tmp_path: Path)
     source = pd.DataFrame(
         {
             "Name": ["AAA", "AAA", "BBB", "BBB", "BBB"],
-            "Exchange": ["NYSE"] * 2 + ["XTEST"] * 3,
+            "Exchange": ["NYSE"] * 2 + ["LSE"] * 3,
             "Date": [
                 "2025-01-17",
                 "2025-01-21",
@@ -2992,7 +3031,7 @@ def test_declared_nyse_rejects_bar_during_known_closed_market(exchange, with_met
         validate_bars(bars)
     # Observed dates outside the reference NYSE calendar remain available to
     # other explicitly identified exchanges.
-    other_exchange = bars.assign(Exchange="XOTHER")
+    other_exchange = bars.assign(Exchange="XOTHER", Session_Number=[0, 1, 2])
     assert len(validate_bars(other_exchange)) == 3
 
 
@@ -3006,7 +3045,7 @@ def _extra_same_exchange_market_date() -> pd.DataFrame:
             rows.append(
                 {
                     "Name": symbol,
-                    "Exchange": "XTEST",
+                    "Exchange": "LSE",
                     "Date": day,
                     "Open": price,
                     "High": price + 2,
