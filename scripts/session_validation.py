@@ -218,7 +218,10 @@ def validate_session_positions(
     if "Date" in frame:
         checked_dates = pd.DatetimeIndex(frame["Date"])
         if exchanges is None:
-            validate_exchange_open_dates(checked_dates)
+            validate_exchange_open_dates(
+                checked_dates,
+                verified_session_ordinals=SESSION_COLUMN in frame,
+            )
         else:
             for exchange, indices in frame.groupby(
                 exchanges, sort=False

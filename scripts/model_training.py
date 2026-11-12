@@ -103,7 +103,12 @@ def chronological_split(
                 verified_session_ordinals="Session_Number" in df,
             )
     else:
-        validate_exchange_open_dates(pd.DatetimeIndex(target_date))
+        validate_exchange_open_dates(
+            pd.DatetimeIndex(target_date),
+            verified_session_ordinals=(
+                "Session_Number" in df and "Target_Session" in df
+            ),
+        )
 
     # Validate the supervised horizon itself, not only chronological ordering.
     # Custom/historical markets have no independently inferrable schedule; they
