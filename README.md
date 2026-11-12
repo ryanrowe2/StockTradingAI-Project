@@ -40,11 +40,13 @@ identifiers are normalized consistently, including for direct indicator calls;
 literal symbols such as `NA` are preserved during CSV loading. Date boundaries
 are shared across the Bayesian and AAPL trading experiments, so their partitions
 correspond to the same historical market periods. All bundled ticker CSVs use
-the observed-session calendar of the complete 31-stock source. It retains
-dates attached to valid ticker identifiers even when their prices are unusable,
-but excludes malformed dates, invalid ticker identifiers, and records
-on known closed-market dates. The peer's fabricated holiday does not create
-an extra source session for a different selected ticker.
+the observed-session calendar of the complete 31-stock source in the
+published 2006–2017 period. The fixed sample contains both NYSE- and
+Nasdaq-listed stocks. Older Nasdaq-only sessions instead use verified
+exchange-specific ordinals, so a legitimate Nasdaq session never becomes
+a fabricated missing NYSE session.
+The reference calendar retains valid ticker dates even when prices are
+unusable, but rejects dates closed on each observation's actual exchange.
 Date-only U.S. equity data from 1971 onward use scheduled NYSE/Nasdaq sessions,
 including effective-dated holidays, 1972–1980 presidential Election Day
 closures, and exceptional full-day closures. The historical NYSE validator
