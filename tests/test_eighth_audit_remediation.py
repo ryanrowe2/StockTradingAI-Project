@@ -100,15 +100,14 @@ def test_historical_regular_holidays_respect_pre_1971_rules():
     # (with independent verified historical source-session metadata).
     candidate = pd.DatetimeIndex(["1966-02-21", "1966-02-22"])
     assert nyse_open_mask(candidate, verified_session_ordinals=True).tolist() == [
-        True, False
+        True,
+        False,
     ]
     assert not nyse_open_mask(candidate).any()
 
 
 def test_gap_policy_for_observation_windows_and_adjacent_returns():
-    sessions = inferred_equity_sessions(
-        pd.DatetimeIndex(["2024-01-02", "2024-03-28"])
-    )
+    sessions = inferred_equity_sessions(pd.DatetimeIndex(["2024-01-02", "2024-03-28"]))
     dates = sessions.delete(23)
     prices = pd.Series(np.linspace(100.0, 150.0, len(dates)))
     frame = pd.DataFrame(
@@ -129,11 +128,7 @@ def test_gap_policy_for_observation_windows_and_adjacent_returns():
     # Longer-horizon observation indicators intentionally carry only past
     # valid prices across a missing session; they are not 20 contiguous days.
     expected_ma = indicators["Close"].rolling(20, min_periods=20).mean()
-    pd.testing.assert_series_equal(
-        indicators["MA_20"], expected_ma, check_names=False
-    )
+    pd.testing.assert_series_equal(indicators["MA_20"], expected_ma, check_names=False)
     expected_macd, _ = compute_macd(indicators)
-    pd.testing.assert_series_equal(
-        indicators["MACD"], expected_macd, check_names=False
-    )
+    pd.testing.assert_series_equal(indicators["MACD"], expected_macd, check_names=False)
     assert pd.notna(indicators["MA_20"].iloc[missing_boundary])

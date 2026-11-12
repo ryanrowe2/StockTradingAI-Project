@@ -38,25 +38,27 @@ _HISTORICAL_ELECTION_DAYS = pd.DatetimeIndex(
         for year in range(1952, 1969)
     ]
 )
-_HISTORICAL_NYSE_CLOSURES = pd.DatetimeIndex(
-    [
-        "1954-12-24",
-        "1956-12-24",
-        "1958-12-26",
-        "1961-05-29",
-        "1963-11-25",
-        "1965-12-24",
-        "1968-02-12",
-        "1968-04-09",
-        "1968-07-05",
-        "1968-11-05",
-        "1969-02-10",
-        "1969-03-31",
-        "1969-07-21",
-    ]
-).union(
-    _HISTORICAL_ELECTION_DAYS
-).union(pd.date_range("1968-06-12", "1968-12-31", freq="W-WED"))
+_HISTORICAL_NYSE_CLOSURES = (
+    pd.DatetimeIndex(
+        [
+            "1954-12-24",
+            "1956-12-24",
+            "1958-12-26",
+            "1961-05-29",
+            "1963-11-25",
+            "1965-12-24",
+            "1968-02-12",
+            "1968-04-09",
+            "1968-07-05",
+            "1968-11-05",
+            "1969-02-10",
+            "1969-03-31",
+            "1969-07-21",
+        ]
+    )
+    .union(_HISTORICAL_ELECTION_DAYS)
+    .union(pd.date_range("1968-06-12", "1968-12-31", freq="W-WED"))
+)
 
 
 class _NYSEHolidays(AbstractHolidayCalendar):
@@ -86,7 +88,6 @@ class _NYSEHolidays(AbstractHolidayCalendar):
         Holiday("Thanksgiving", month=11, day=1, offset=DateOffset(weekday=TH(4))),
         Holiday("Christmas Day", month=12, day=25, observance=nearest_workday),
     ]
-
 
 
 class _HistoricalNYSEHolidays(AbstractHolidayCalendar):
@@ -191,9 +192,7 @@ def nyse_open_mask(
     )
     historical = dates[~modern]
     if len(historical):
-        known_regular = _historical_regular_holidays(
-            historical.min(), historical.max()
-        )
+        known_regular = _historical_regular_holidays(historical.min(), historical.max())
         valid[~modern] &= ~historical.isin(known_regular)
     if modern.any():
         observed = dates[modern]
