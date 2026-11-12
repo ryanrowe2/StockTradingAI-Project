@@ -30,8 +30,12 @@ def normalized(name: str) -> str:
 
 def run(*args: str) -> str:
     process = subprocess.run(
-        args, cwd=ROOT, text=True, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, check=False,
+        args,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
     )
     if process.returncode:
         raise RuntimeError(f"Command failed: {args!r}\n{process.stdout[-6000:]}")
@@ -39,7 +43,9 @@ def run(*args: str) -> str:
 
 
 def python_in(venv: Path) -> str:
-    return str(venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python"))
+    return str(
+        venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    )
 
 
 def freeze_exact(python: str) -> list[tuple[str, str]]:
@@ -67,7 +73,9 @@ def lock_from_wheels(pins: list[tuple[str, str]], wheels: Path) -> str:
         actual[name] = wheel
     expected = {name for name, _ in pins}
     if expected != set(actual):
-        raise ValueError(f"Wheel set mismatch: missing={expected - set(actual)}, extra={set(actual) - expected}")
+        raise ValueError(
+            f"Wheel set mismatch: missing={expected - set(actual)}, extra={set(actual) - expected}"
+        )
     lines = [
         "# Generated from a fresh Python 3.12 native platform environment.",
         "# Fully pinned versions and the SHA256 of each selected wheel.",
@@ -93,17 +101,35 @@ def main() -> None:
         seed = temp / "seed"
         run(sys.executable, "-m", "venv", str(seed))
         python = python_in(seed)
-        run(python, "-m", "pip", "install", "--disable-pip-version-check", "-r", str(ROOT / "requirements-dev.txt"))
+        run(
+            python,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-r",
+            str(ROOT / "requirements-dev.txt"),
+        )
         run(python, "-m", "pip", "check")
         pins = freeze_exact(python)
         pins_file = temp / "pins.txt"
-        pins_file.write_text("".join(f"{name}=={version}\n" for name, version in pins), encoding="utf-8")
+        pins_file.write_text(
+            "".join(f"{name}=={version}\n" for name, version in pins), encoding="utf-8"
+        )
         wheels = temp / "wheels"
         wheels.mkdir()
         run(
-            python, "-m", "pip", "download", "--disable-pip-version-check",
-            "--no-deps", "--only-binary=:all:", "--dest", str(wheels),
-            "-r", str(pins_file),
+            python,
+            "-m",
+            "pip",
+            "download",
+            "--disable-pip-version-check",
+            "--no-deps",
+            "--only-binary=:all:",
+            "--dest",
+            str(wheels),
+            "-r",
+            str(pins_file),
         )
         content = lock_from_wheels(pins, wheels)
         output = ROOT / f"requirements-repro-py312-{platform}.txt"
@@ -115,7 +141,16 @@ def main() -> None:
         verification = temp / "verification"
         run(sys.executable, "-m", "venv", str(verification))
         verified_python = python_in(verification)
-        run(verified_python, "-m", "pip", "install", "--require-hashes", "--only-binary=:all:", "-r", str(output))
+        run(
+            verified_python,
+            "-m",
+            "pip",
+            "install",
+            "--require-hashes",
+            "--only-binary=:all:",
+            "-r",
+            str(output),
+        )
         run(verified_python, "-m", "pip", "check")
         run(verified_python, "-m", "pytest", "tests", "-q")
         print(f"PORTABLE_LOCK_VERIFIED:{platform}:{len(pins)}", flush=True)

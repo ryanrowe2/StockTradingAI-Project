@@ -16,8 +16,7 @@ import urllib.request
 
 PRODUCTION = "Milestone3"
 SUPERSEDED = {
-    "fix/audit-20261111-session-bootstrap-integrity":
-    "fc7d0c80c0145f73e70ee6a563896ceaff5c50de",
+    "fix/audit-20261111-session-bootstrap-integrity": "fc7d0c80c0145f73e70ee6a563896ceaff5c50de",
 }
 
 
@@ -72,7 +71,10 @@ def eligible(branch: dict, merged: dict[str, str]) -> str | None:
         + "..."
         + urllib.parse.quote(PRODUCTION, safe="")
     )
-    if compare.get("behind_by") == 0 and compare.get("status") in {"ahead", "identical"}:
+    if compare.get("behind_by") == 0 and compare.get("status") in {
+        "ahead",
+        "identical",
+    }:
         return "branch history already contained in Milestone3"
     return None
 
@@ -106,12 +108,16 @@ def main() -> None:
         verb = "DELETE" if args.execute else "WOULD DELETE"
         print(f"{verb}: {name} — {reason}", flush=True)
         if args.execute:
-            request("git/refs/heads/" + urllib.parse.quote(name, safe=""), method="DELETE")
+            request(
+                "git/refs/heads/" + urllib.parse.quote(name, safe=""), method="DELETE"
+            )
             deleted.append(name)
     if args.execute:
         remaining = {item["name"] for item in full_collection("branches")}
         if set(deleted) & remaining:
-            raise RuntimeError(f"Deleted branches still exist: {set(deleted) & remaining}")
+            raise RuntimeError(
+                f"Deleted branches still exist: {set(deleted) & remaining}"
+            )
     print(f"Deleted: {len(deleted)}; preserved: {len(preserved)}", flush=True)
     print("Preserved: " + ", ".join(preserved), flush=True)
 

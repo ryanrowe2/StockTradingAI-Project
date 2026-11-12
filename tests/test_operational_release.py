@@ -50,21 +50,36 @@ def test_historical_and_production_branches_are_never_pruned(name) -> None:
 
 def test_unrelated_branch_and_protected_fix_are_preserved() -> None:
     assert cleanup.eligible(branch("feature/research"), {}) is None
-    assert cleanup.eligible(branch("fix/example", protected=True), {"fix/example": "a" * 40}) is None
+    assert (
+        cleanup.eligible(
+            branch("fix/example", protected=True), {"fix/example": "a" * 40}
+        )
+        is None
+    )
 
 
 def test_exact_merged_pull_request_head_is_eligible() -> None:
-    assert cleanup.eligible(branch("fix/example"), {"fix/example": "a" * 40}) == "matching merged pull request"
+    assert (
+        cleanup.eligible(branch("fix/example"), {"fix/example": "a" * 40})
+        == "matching merged pull request"
+    )
 
 
 def test_moved_or_divergent_pr_head_is_preserved(monkeypatch) -> None:
-    monkeypatch.setattr(cleanup, "request", lambda path: {"behind_by": 3, "status": "diverged"})
+    monkeypatch.setattr(
+        cleanup, "request", lambda path: {"behind_by": 3, "status": "diverged"}
+    )
     assert cleanup.eligible(branch("fix/example"), {"fix/example": "b" * 40}) is None
 
 
 def test_true_ancestor_temporary_branch_can_be_cleaned(monkeypatch) -> None:
-    monkeypatch.setattr(cleanup, "request", lambda path: {"behind_by": 0, "status": "ahead"})
-    assert cleanup.eligible(branch("fix/old-merged"), {}) == "branch history already contained in Milestone3"
+    monkeypatch.setattr(
+        cleanup, "request", lambda path: {"behind_by": 0, "status": "ahead"}
+    )
+    assert (
+        cleanup.eligible(branch("fix/old-merged"), {})
+        == "branch history already contained in Milestone3"
+    )
 
 
 def test_superseded_pr_only_matches_verified_head() -> None:
