@@ -38,7 +38,7 @@ jobs:
       - name: Reconcile all bundled price files and emit SHA-256 inventory
         if: matrix.python-version == '3.12'
         run: |
-          python -m scripts.verify_source_data --emit
+          python -m scripts.verify_source_data
       - name: Check Python syntax, lint, and formatting
         run: |
           python -m compileall -q scripts tests
