@@ -85,18 +85,18 @@ from 1972 to 1980 and exceptional full-day closures, rather than counting
 holidays as trading sessions. The MLK holiday rule begins in 1998. Dates before
 1971 require independently verified `Session_Number` metadata: the older NYSE
 holiday schedule, including the 1968 Wednesday closures, cannot be accurately
-inferred using the modern weekday calendar. An optional `Exchange` column
-allows the same exchange's observed sessions to reveal gaps in other stocks on
-that exchange, while preventing foreign-exchange dates from contaminating NYSE
-history. The aliases `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S.
+inferred using the modern weekday calendar. An optional `Exchange` column groups stocks by their declared market;
+recognized exchange schedules reveal missing trading sessions while preventing
+foreign-exchange dates from contaminating NYSE history. The aliases `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S.
 calendar, including when `Exchange` is omitted. The aliases `LSE` and `XLON`
-use the London Stock Exchange session calendar (including Boxing Day).
+use the London Stock Exchange session calendar, while `TSX` and `XTSE`
+use Toronto's calendar (including Boxing Day closures).
 Observed dates outside any recognized market's actual calendar are rejected,
 with or without supplied ordinals. Unrecognized explicit exchange labels require verified `Session_Number`
 metadata; automatic inference is disabled for those markets.
-From 1971 onward, supplied NYSE ordinals must also advance by the exact number
-of scheduled market sessions between observations, preventing missing trading
-days from being concealed by compressed consecutive session numbers.
+From 1971 onward, supplied ordinals for every recognized exchange must
+advance by the exact number of scheduled sessions between observations,
+preventing missing trading days from being concealed by compressed positions.
 For custom CSV ticker selection, impossible closed-market observations on a
 recognized exchange belonging only to unselected peers are ignored as calendar
 evidence; valid same-exchange dates still reveal missing sessions in the selected
@@ -121,8 +121,8 @@ In the included 93,612-row source, 93,435 bars pass OHLCV validation;
 177 incomplete or inconsistent records are excluded without imputation.
 Before exclusion, validation assigns `Session_Number` from the bundled
 observed-session calendar or the recognized exchange's scheduled calendar.
-Unknown explicit exchanges retain observed weekday information, and callers
-must supply verified ordinals for reliable exact adjacency. Source-wide
+Unknown explicit exchanges cannot infer sessions and must supply independently
+verified ordinals to establish adjacency. Source-wide
 valid dates anchor ordinals before ticker selection, so the same custom stock
 has identical session numbers in full and selected CSV loads. Positions survive
 price exclusion and subsetting, allowing indicators, HMM boundaries, and the
@@ -429,11 +429,13 @@ TSX/XTSE observations use their corresponding trading calendars; inferred and
 supplied `Session_Number` values must preserve actual session gaps. Unknown
 explicit exchange identifiers must provide independently verified
 `Session_Number` values, rather than inheriting fictional sessions from the
-U.S. calendar. Unlabeled equity records use the U.S. calendar. Direct
+U.S. calendar. Unlabeled equity records use the U.S. calendar. Direct `session_positions`, `validate_session_positions`,
 `add_technical_indicators`, `SimpleTradingEnv`,
-`contiguous_trading_segments`, and HMM entry points now require an explicit
+`contiguous_trading_segments`, and HMM entry points require an explicit
 `verified_datetime_dates=True` attestation when supplied already-coerced
-pandas timestamps. Results of `validate_bars` carry their verified-date marker
+pandas timestamps without an existing verified-date marker.
+Explicit calendar bounds must encompass all observed dates: out-of-range
+bounds raise a validation error instead of producing negative positions. Results of `validate_bars` carry their verified-date marker
 through normal pandas frame operations; raw ISO date strings remain supported.
 Do not attest to converted month/year-only dates without inspecting the
 original source precision.

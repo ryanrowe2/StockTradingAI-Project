@@ -3205,11 +3205,14 @@ def test_direct_session_utilities_reject_intraday_trading_dates():
         }
     )
     with pytest.raises(ValueError, match="parseable ISO calendar dates"):
-        session_positions(intraday)
+        session_positions(intraday, verified_datetime_dates=True)
     with pytest.raises(ValueError, match="parseable ISO calendar dates"):
-        validate_session_positions(intraday)
+        validate_session_positions(intraday, verified_datetime_dates=True)
     with pytest.raises(ValueError, match="parseable ISO calendar dates"):
-        validate_session_positions(intraday.assign(Session_Number=[1, 2]))
+        validate_session_positions(
+            intraday.assign(Session_Number=[1, 2]),
+            verified_datetime_dates=True,
+        )
 
 
 def test_direct_session_validation_identifies_equivalent_iso_dates():

@@ -8,18 +8,28 @@ import numpy as np
 import pandas as pd
 
 if __package__:
-    from .date_validation import mark_verified_daily_dates, parse_daily_dates
+    from .date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from .market_calendar import (
         LAST_NYSE_SATURDAY_SESSION,
         _KNOWN_EXCHANGES,
+        _calendar_bounds,
         inferred_equity_sessions,
         validate_exchange_open_dates,
     )
 else:
-    from date_validation import mark_verified_daily_dates, parse_daily_dates
+    from date_validation import (
+        mark_verified_daily_dates,
+        parse_daily_dates,
+        require_verified_daily_date_source,
+    )
     from market_calendar import (
         LAST_NYSE_SATURDAY_SESSION,
         _KNOWN_EXCHANGES,
+        _calendar_bounds,
         inferred_equity_sessions,
         validate_exchange_open_dates,
     )
@@ -63,15 +73,18 @@ def session_positions(
     *,
     calendar_start: pd.Timestamp | None = None,
     calendar_end: pd.Timestamp | None = None,
+    verified_datetime_dates: bool = False,
 ) -> pd.Series:
     """Return supplied ordinals or exchange-aware inferred equity positions.
 
-    In date-only U.S. equity inputs, genuine NYSE holidays do not create gaps.
-    Missing regular exchange weekdays still do. Dates explicitly observed for
-    each ticker are included to support other weekday-trading exchanges without
-    contaminating another ticker's calendar. Exact exchange-specific adjacency
-    may be supplied as ``Session_Number``.
+    Known exchanges use authoritative schedules; unknown exchanges must supply
+    verified Session_Number positions. Already-coerced pandas dates require
+    explicit source-precision attestation. The requested calendar must include
+    every observed trading date.
     """
+    require_verified_daily_date_source(
+        frame, verified_datetime_dates=verified_datetime_dates
+    )
     if SESSION_COLUMN in frame:
         return frame[SESSION_COLUMN]
     if "Date" not in frame:
@@ -84,11 +97,15 @@ def session_positions(
     if dates.empty:
         return pd.Series(dtype=np.int64, index=frame.index)
     exchange_labels = _normalized_exchange_labels(frame)
-    start = dates.min() if calendar_start is None else calendar_start
-    end = dates.max() if calendar_end is None else calendar_end
+    start, end = _calendar_bounds(dates, calendar_start, calendar_end)
     if "Name" not in frame and exchange_labels is None:
         sessions = inferred_equity_sessions(dates, start=start, end=end)
-        return pd.Series(sessions.get_indexer(dates), index=frame.index, dtype=np.int64)
+        indices = sessions.get_indexer(dates)
+        if (indices < 0).any():
+            raise ValueError(
+                "Observed trading dates are absent from the requested calendar"
+            )
+        return pd.Series(indices, index=frame.index, dtype=np.int64)
     # Use a source-wide date range for comparable NYSE ordinals. Additional
     # observed weekdays are shared within a declared exchange, or only within
     # each ticker when exchange membership is unspecified.
@@ -104,20 +121,30 @@ def session_positions(
             end=end,
             exchange=str(label) if exchange_labels is not None else None,
         )
-        positions[indices] = sessions.get_indexer(symbol_dates)
+        inferred = sessions.get_indexer(symbol_dates)
+        if (inferred < 0).any():
+            raise ValueError(
+                "Observed trading dates are absent from the requested calendar"
+            )
+        positions[indices] = inferred
     return pd.Series(positions, index=frame.index, dtype=np.int64)
 
 
 def validate_session_positions(
-    frame: pd.DataFrame, *, require_consecutive: bool = False
+    frame: pd.DataFrame,
+    *,
+    require_consecutive: bool = False,
+    verified_datetime_dates: bool = False,
 ) -> None:
     """Validate source-market ordinals without unsigned-integer subtraction.
 
-    Within each ticker, a date identifies one market session and an ordinal
-    identifies one date. Different exchanges may assign different ordinals to
-    the same date. Subsets may omit sessions unless ``require_consecutive`` is
-    requested.
+    Dates already converted to pandas timestamps require source-precision
+    attestation. Each ticker's dates and ordinals must identify valid sessions;
+    subsets may omit sessions unless ``require_consecutive`` is requested.
     """
+    require_verified_daily_date_source(
+        frame, verified_datetime_dates=verified_datetime_dates
+    )
     if "Date" in frame:
         # Check the daily identity before duplicate or ordinal comparisons.
         # Otherwise, two times (or differently formatted strings) on the same

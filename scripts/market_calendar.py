@@ -1,8 +1,8 @@
-"""Exchange-aware daily session positions for date-only U.S. equity inputs.
+"""Exchange-aware daily market-session validation and inference.
 
-NYSE regular holidays and exceptional full-day closures are omitted from the
-reference calendar. Observed weekdays are included as well, since a custom
-source may describe another exchange with a different holiday schedule.
+U.S., London, and Toronto equity dates use their respective market calendars.
+Unknown exchanges must provide independently verified session numbers rather
+than inheriting U.S. holidays or inventing additional trading sessions.
 """
 
 from __future__ import annotations
@@ -186,6 +186,33 @@ def validate_exchange_open_dates(
         )
 
 
+def _calendar_bounds(
+    dates: pd.DatetimeIndex,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Ensure a requested session calendar covers every observed trading date."""
+    try:
+        first = dates.min() if start is None else pd.Timestamp(start)
+        last = dates.max() if end is None else pd.Timestamp(end)
+        invalid = (
+            pd.isna(first)
+            or pd.isna(last)
+            or first > last
+            or first > dates.min()
+            or last < dates.max()
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "Calendar bounds must be valid and include every observed trading date"
+        ) from exc
+    if invalid:
+        raise ValueError(
+            "Calendar bounds must be valid and include every observed trading date"
+        )
+    return first, last
+
+
 def inferred_equity_sessions(
     dates: pd.DatetimeIndex,
     *,
@@ -194,20 +221,18 @@ def inferred_equity_sessions(
     nyse_only: bool = False,
     exchange: str | None = None,
 ) -> pd.DatetimeIndex:
-    """Infer sessions for known exchanges, or a conservative custom-market fallback.
+    """Infer authoritative sessions for known exchanges.
 
-    Inferred dates must themselves be valid sessions. U.S. stocks without an
-    Exchange label use the NYSE/Nasdaq regular-market schedule; declared LSE
-    stocks use the London Stock Exchange schedule. For unknown exchanges,
-    no sessions are inferred for unknown exchanges: their callers must supply
-    independently verified Session_Number metadata.
+    Unlabeled equities use the U.S. market schedule. London and Toronto labels
+    use their respective schedules. Unknown exchanges require independently
+    verified Session_Number metadata instead of inferred trading days.
+    Calendar bounds must include all observed dates.
     """
     if dates.empty:
         return pd.DatetimeIndex([])
     if pd.isna(dates).any() or (dates.dayofweek >= 5).any():
         raise ValueError("Trading dates must be nonmissing weekday market sessions")
-    first = dates.min() if start is None else start
-    last = dates.max() if end is None else end
+    first, last = _calendar_bounds(dates, start, end)
     if first < pd.Timestamp("1971-01-01"):
         raise ValueError(
             "NYSE dates before 1971 require verified Session_Number metadata"
