@@ -90,7 +90,9 @@ recognized exchange schedules reveal missing trading sessions while preventing
 foreign-exchange dates from contaminating NYSE history. The aliases `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S.
 calendar, including when `Exchange` is omitted. The aliases `LSE` and `XLON`
 use the London Stock Exchange session calendar, while `TSX` and `XTSE`
-use Toronto's calendar (including Boxing Day closures).
+use Toronto's calendar (including Boxing Day closures). Exchange aliases and
+ticker case/spacing are canonicalized before identifying duplicate records;
+aliases for the same market share the same bootstrap session timeline.
 Observed dates outside any recognized market's actual calendar are rejected,
 with or without supplied ordinals. Unrecognized explicit exchange labels require verified `Session_Number`
 metadata; automatic inference is disabled for those markets.
@@ -136,6 +138,11 @@ prices, normalize accepted numeric strings, and check supplied session positions
 Volume remains optional for that standalone API but is checked for finite
 nonnegative values when supplied. Boolean OHLCV values are rejected instead
 of being silently converted to numeric ones or zeros.
+
+Stock prices, HMM indicators, model features, and classification probabilities
+must be real-valued; complex values (including zero-imaginary-part complex
+numbers) are rejected before float conversion can discard the imaginary part.
+Numeric strings representing ordinary real-valued prices remain supported.
 
 The pipeline computes indicators on each ticker's chronological series independently:
 
@@ -268,6 +275,8 @@ date blocks. Intraday timestamps and timezone-bearing dates are rejected;
 each observation must represent one daily market date. Fold feasibility is
 checked before fitting any Bayesian model, so a short holdout or oversized
 block setting fails explicitly instead of presenting a degenerate 95% interval.
+The same preflight rejects estimated resampling work exceeding the configured
+random-block draw budget before any model fitting begins.
 
 ## 3. Gaussian HMM regime experiment
 

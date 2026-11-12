@@ -52,6 +52,9 @@ supplied. An optional `Exchange` column groups stocks on the same market:
 `LSE` and `XLON` use the London Stock Exchange calendar, including Boxing Day.
 Other explicitly named exchanges require independently verified
 `Session_Number` metadata; their sessions are not inferred from U.S. weekdays.
+Aliases (`NYSE`/`XNYS`, `NASDAQ`/`XNAS`, `LSE`/`XLON`,
+`TSX`/`XTSE`) are canonicalized for duplicate detection and bootstrap
+market-session gaps. Their spelling never creates artificial missing sessions.
 A peer's fabricated closed-market observation cannot contaminate a selected
 stock's inferred calendar. When `Exchange` is
 omitted, U.S. equity market rules apply rather than accepting arbitrary
@@ -64,7 +67,9 @@ the same spacing as actual scheduled market sessions, so an omitted Tuesday
 cannot be disguised as the next session after Monday. Verified session ordinals
 also support historical NYSE Saturday trading through
 its last Saturday session on May 24, 1952; later weekends are rejected.
-Direct session utilities require daily dates. The standalone
+Direct exchange-aware session utilities require daily dates **or supplied
+verified session ordinals**; when no `Exchange` is present, undated synthetic
+examples retain the existing sequential demonstration behavior. The standalone
 `session_positions()` and `validate_session_positions()` helpers reject
 previously coerced pandas datetime columns unless the caller verifies original
 day-level precision and passes `verified_datetime_dates=True`, or supplies a
@@ -191,9 +196,10 @@ additional validation should be interpreted as a guaranteed performance gain.
 | Next-open-to-close | 51.40% | 51.67% | 51.30% | −0.53 to +1.13 percentage points |
 
 Both baseline accuracy lifts are small and their intervals include zero. The
-bootstrap validates binary labels, strictly daily dates, and finite probability
-values in [0, 1], and requires at least two distinct date blocks before
-reporting intervals. Fold feasibility is checked before model fitting. This
+bootstrap validates binary labels, strictly daily dates, and finite **real**
+probability values in [0, 1], and requires at least two distinct date blocks before
+reporting intervals. Estimated bootstrap work (samples × date blocks) is
+bounded during preflight, before model fitting. This
 provides additional historical evidence without establishing a reproducible
 advantage over the naive classifier. The full fold-by-fold scores and bootstrap
 configuration are reproduced by the walk-forward command below. The

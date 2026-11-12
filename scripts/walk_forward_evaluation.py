@@ -34,6 +34,7 @@ if __package__:
         _normalized_exchange_labels,
         validate_session_positions,
     )
+    from .numeric_validation import real_float_array
     from .model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -61,6 +62,7 @@ else:
         _normalized_exchange_labels,
         validate_session_positions,
     )
+    from numeric_validation import real_float_array
     from model_training import (
         BASELINE_FEATURES,
         ENHANCED_FEATURES,
@@ -97,6 +99,18 @@ def _validate_bootstrap_configuration(
             "block_sessions must be positive and bootstrap_samples must be "
             f"between 100 and {MAX_BOOTSTRAP_SAMPLES:,}"
         )
+
+
+def _validate_bootstrap_workload(block_count: int, bootstrap_samples: int) -> None:
+    """Reject expensive resampling before model fitting or random allocation."""
+    total = block_count * bootstrap_samples
+    if total > MAX_BOOTSTRAP_DRAW_CELLS:
+        raise ValueError(
+            "Bootstrap workload exceeds the allowed random-block selection budget "
+            f"({total:,} > {MAX_BOOTSTRAP_DRAW_CELLS:,})"
+        )
+    if block_count > MAX_BOOTSTRAP_BATCH_CELLS:
+        raise ValueError("Too many independent blocks for bounded bootstrap batches")
 
 
 def _market_date_block_ids(
@@ -228,8 +242,19 @@ def paired_block_accuracy_intervals(
     ):
         raise ValueError("Bootstrap actual and majority labels must be binary (0 or 1)")
     try:
-        probabilities = scored[["baseline_prob", "enhanced_prob"]].to_numpy(dtype=float)
+        probabilities = real_float_array(
+            scored[["baseline_prob", "enhanced_prob"]],
+            context="Bootstrap probabilities",
+        )
     except (TypeError, ValueError) as exc:
+        if "complex" in str(exc):
+            raise ValueError(
+                "Bootstrap probabilities cannot contain complex values"
+            ) from exc
+        if "finite" in str(exc):
+            raise ValueError(
+                "Bootstrap probabilities must be finite values in [0, 1]"
+            ) from exc
         raise ValueError(
             "Bootstrap probabilities must be numeric values in [0, 1]"
         ) from exc
@@ -261,14 +286,7 @@ def paired_block_accuracy_intervals(
         .sum()
         .to_numpy(dtype=float)
     )
-    draw_count = bootstrap_samples * len(blocks)
-    if draw_count > MAX_BOOTSTRAP_DRAW_CELLS:
-        raise ValueError(
-            "Bootstrap workload exceeds the allowed random-block selection budget "
-            f"({draw_count:,} > {MAX_BOOTSTRAP_DRAW_CELLS:,})"
-        )
-    if len(blocks) > MAX_BOOTSTRAP_BATCH_CELLS:
-        raise ValueError("Too many independent blocks for bounded bootstrap batches")
+    _validate_bootstrap_workload(len(blocks), bootstrap_samples)
     rng = np.random.default_rng(seed)
     samples = np.empty((bootstrap_samples, blocks.shape[1]), dtype=np.float64)
     batch_size = max(1, MAX_BOOTSTRAP_BATCH_CELLS // len(blocks))
@@ -345,11 +363,15 @@ def walk_forward_experiment(
     planned_holdout = pd.concat(
         [partition[-1] for partition in fold_partitions], ignore_index=True
     )
-    if len(np.unique(_market_date_block_ids(planned_holdout, block_sessions))) < 2:
+    planned_blocks = len(
+        np.unique(_market_date_block_ids(planned_holdout, block_sessions))
+    )
+    if planned_blocks < 2:
         raise ValueError(
             "Walk-forward holdout has too few independent trading-session "
             "blocks for bootstrap evaluation"
         )
+    _validate_bootstrap_workload(planned_blocks, bootstrap_samples)
     fold_reports = []
     scored_folds = []
     scored_row_indices: set[int] = set()

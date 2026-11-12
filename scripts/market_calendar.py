@@ -93,8 +93,21 @@ def _scheduled_sessions(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIn
     return pd.bdate_range(start, end, freq=CustomBusinessDay(holidays=closure_days))
 
 
+def _valid_daily_mask(dates: pd.DatetimeIndex) -> np.ndarray:
+    """Daily sessions are timezone-naive midnight dates, never intraday bars."""
+    if dates.tz is not None:
+        return np.zeros(len(dates), dtype=bool)
+    return ~pd.isna(dates) & (dates == dates.normalize())
+
+
 def nyse_open_mask(dates: pd.DatetimeIndex) -> np.ndarray:
     """Identify known NYSE sessions; pre-1971 dates require external ordinals."""
+    daily = _valid_daily_mask(dates)
+    if not daily.all():
+        result = np.zeros(len(dates), dtype=bool)
+        if daily.any():
+            result[daily] = nyse_open_mask(dates[daily])
+        return result
     modern = dates >= pd.Timestamp("1971-01-01")
     # Pre-1971 holiday schedules still require verified ordinals, but Sunday
     # was never a session, and Saturday trading stopped after May 24, 1952.
@@ -158,6 +171,16 @@ def exchange_open_mask(
     supplied ordinals retain the project’s existing partial calendar policy.
     """
     label = "NYSE" if exchange is None else exchange.strip().upper()
+    daily = _valid_daily_mask(dates)
+    if not daily.all():
+        result = np.zeros(len(dates), dtype=bool)
+        if daily.any():
+            result[daily] = exchange_open_mask(
+                dates[daily],
+                exchange=exchange,
+                verified_session_ordinals=verified_session_ordinals,
+            )
+        return result
     if label in _US_EQUITY_EXCHANGES:
         return nyse_open_mask(dates)
     if label in (_LONDON_EXCHANGES | _TORONTO_EXCHANGES):

@@ -5,6 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+if __package__:
+    from .numeric_validation import real_float_or_nan
+else:
+    from numeric_validation import real_float_or_nan
+
 
 PRICE_COLUMNS = ("Open", "High", "Low", "Close")
 
@@ -19,16 +24,9 @@ def valid_price_bars(frame: pd.DataFrame, *, require_volume: bool = False) -> pd
     missing = set(required) - set(frame.columns)
     if missing:
         raise ValueError(f"Missing required price columns: {sorted(missing)}")
-    numeric = frame[list(required)].apply(pd.to_numeric, errors="coerce")
-    # Python booleans are subclasses of integers, but ``True`` is not a
-    # legitimate OHLC price or trading volume. Do not turn it into 1.0.
-    booleans = (
-        frame[list(required)]
-        .apply(
-            lambda column: column.map(lambda value: isinstance(value, (bool, np.bool_)))
-        )
-        .any(axis=1)
-    )
+    # Reject complex (including 10+0j) before NumPy can drop imaginary
+    # components, while preserving real numeric-string support.
+    numeric = frame[list(required)].apply(lambda column: column.map(real_float_or_nan))
     finite = pd.Series(
         np.isfinite(numeric.to_numpy(dtype=float)).all(axis=1), index=frame.index
     )
@@ -38,4 +36,4 @@ def valid_price_bars(frame: pd.DataFrame, *, require_volume: bool = False) -> pd
     ].le(numeric[list(PRICE_COLUMNS)].min(axis=1))
     if require_volume:
         positive &= numeric["Volume"].ge(0)
-    return finite & positive & coherent & ~booleans
+    return finite & positive & coherent

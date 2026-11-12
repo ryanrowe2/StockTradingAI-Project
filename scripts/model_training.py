@@ -44,6 +44,7 @@ if __package__:
         validate_exchange_open_dates,
     )
     from .session_validation import validate_session_positions
+    from .numeric_validation import real_float_array
 else:
     from data_processing import (
         DEFAULT_RAW_DATA,
@@ -59,6 +60,7 @@ else:
         validate_exchange_open_dates,
     )
     from session_validation import validate_session_positions
+    from numeric_validation import real_float_array
 
 
 BASELINE_FEATURES = ("Return", "Intraday_Return", "Daily_Range")
@@ -206,7 +208,7 @@ class QuantileBinner:
     def fit(self, df: pd.DataFrame, features: tuple[str, ...]) -> "QuantileBinner":
         new_edges = {}
         for feature in features:
-            values = df[feature].to_numpy(dtype=float)
+            values = real_float_array(df[feature], context=f"Feature {feature}")
             if not len(values) or not np.isfinite(values).all():
                 raise ValueError(f"Feature {feature} contains missing/nonfinite values")
             quantiles = np.linspace(0, 1, self.num_bins + 1)[1:-1]
@@ -228,7 +230,7 @@ class QuantileBinner:
         for feature in features:
             if feature not in self.edges:
                 raise RuntimeError(f"Binner not fitted for {feature}")
-            values = df[feature].to_numpy(dtype=float)
+            values = real_float_array(df[feature], context=f"Feature {feature}")
             if not np.isfinite(values).all():
                 raise ValueError(f"Feature {feature} contains missing/nonfinite values")
             result[feature] = np.searchsorted(self.edges[feature], values, side="right")
@@ -296,7 +298,7 @@ def classification_metrics(
     if not np.isin(supplied_labels, (0, 1)).all():
         raise ValueError("Classification labels must be binary (0 or 1)")
     actual = supplied_labels.astype(int)
-    probabilities = np.asarray(probabilities, dtype=float)
+    probabilities = real_float_array(probabilities, context="Probabilities")
     if (
         probabilities.shape != actual.shape
         or not np.isfinite(probabilities).all()
