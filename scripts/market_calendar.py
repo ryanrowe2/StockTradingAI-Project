@@ -170,9 +170,7 @@ def exchange_open_mask(
     arbitrary international exchange. Historical pre-1971 sessions with
     supplied ordinals retain the project’s existing partial calendar policy.
     """
-    if exchange is not None and (
-        not isinstance(exchange, str) or not exchange.strip()
-    ):
+    if exchange is not None and (not isinstance(exchange, str) or not exchange.strip()):
         raise ValueError("Exchange must be a nonempty identifier")
     label = "NYSE" if exchange is None else exchange.strip().upper()
     if label not in _KNOWN_EXCHANGES and not verified_session_ordinals:

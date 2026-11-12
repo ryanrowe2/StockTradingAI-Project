@@ -15,7 +15,9 @@ def binary_label_array(values, *, context: str) -> np.ndarray:
     supplied = np.asarray(values)
     if np.iscomplexobj(supplied) or (
         supplied.dtype.kind == "O"
-        and any(isinstance(value, (complex, np.complexfloating)) for value in supplied.flat)
+        and any(
+            isinstance(value, (complex, np.complexfloating)) for value in supplied.flat
+        )
     ):
         raise ValueError(f"{context} must be real binary (0 or 1), not complex")
     if not np.isin(supplied, (0, 1)).all():

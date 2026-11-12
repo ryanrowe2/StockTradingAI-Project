@@ -167,7 +167,12 @@ def _market_date_block_ids(
     # inconsistent session numbers for a single canonical market/date.
     if "Session_Number" in metadata:
         identities = ["Date", "Exchange"] if exchanges is not None else ["Date"]
-        if metadata.groupby(identities, dropna=False)["Session_Number"].nunique().gt(1).any():
+        if (
+            metadata.groupby(identities, dropna=False)["Session_Number"]
+            .nunique()
+            .gt(1)
+            .any()
+        ):
             raise ValueError("Conflicting session ordinals for the same market date")
     metadata = metadata.drop_duplicates().copy()
     mark_verified_daily_dates(metadata)

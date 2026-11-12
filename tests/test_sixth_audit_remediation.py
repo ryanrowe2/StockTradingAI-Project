@@ -79,9 +79,7 @@ def test_standalone_trading_environment_rejects_complex_prices(bad_price):
 
 
 def test_trading_environment_keeps_numeric_string_prices():
-    bars = pd.DataFrame(
-        {"Open": ["100", "101"], "Close": ["100.5", "101.5"]}
-    )
+    bars = pd.DataFrame({"Open": ["100", "101"], "Close": ["100.5", "101.5"]})
     env = SimpleTradingEnv(bars)
     assert env.get_state() == (0,)
 
