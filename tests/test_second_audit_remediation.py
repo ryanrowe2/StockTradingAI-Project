@@ -54,7 +54,6 @@ def test_next_session_date_is_required_in_direct_split():
 
 
 def test_split_rejects_incorrect_target_ordinal_for_custom_market():
-    dates = ["2024-01-04", "2024-01-07", "2024-01-08"] * 16
     days = pd.date_range("2024-01-01", periods=48, freq="D").strftime("%Y-%m-%d")
     frame = pd.DataFrame(
         {
@@ -66,7 +65,6 @@ def test_split_rejects_incorrect_target_ordinal_for_custom_market():
             "Target_Session": np.arange(1, 48, dtype=np.int64),
         }
     )
-    del dates
     edited = frame.copy()
     edited.loc[4, "Target_Session"] = 999
     with pytest.raises(ValueError, match="next market session"):
@@ -134,12 +132,16 @@ def test_bootstrap_rejects_unverified_custom_market():
 
 
 def test_bootstrap_session_blocks_respect_missing_calendar_sessions():
-    # Twenty observations, each separated by a full week, cannot comprise two
-    # contiguous 10-session resampling blocks.
+    # Every observation is separated by a missing actual market session, so
+    # blocks of ten must be equivalent to independent single-session blocks.
     dates = _sessions(45)[::2]
     scored = _scored(dates)
-    with pytest.raises(ValueError, match="at least two chronological date blocks"):
-        paired_block_accuracy_intervals(scored, block_sessions=10, bootstrap_samples=100)
+    scored["baseline_prob"] = [0.9 if i % 3 else 0.1 for i in range(len(scored))]
+    assert paired_block_accuracy_intervals(
+        scored, block_sessions=10, bootstrap_samples=100, seed=17
+    ) == paired_block_accuracy_intervals(
+        scored, block_sessions=1, bootstrap_samples=100, seed=17
+    )
 
 
 @pytest.mark.parametrize(
