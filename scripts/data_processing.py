@@ -367,7 +367,7 @@ def prepare_features(
             "No usable feature observations remain for ticker(s) "
             f"{', '.join(missing_tickers)}; provide longer price histories"
         )
-    return prepared
+    return mark_verified_daily_dates(prepared)
 
 
 def prepare_indicator_history(

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [Milestone3]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -15,6 +18,8 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -26,6 +31,41 @@ jobs:
           else
             python -m pip install -r requirements-dev.txt
           fi
+      - name: Generate preliminary version-specific hash lock
+        if: matrix.python-version != '3.12'
+        run: |
+          python -m pip freeze > /tmp/installed-requirements.txt
+          mkdir -p /tmp/locked-wheels
+          python -m pip download --only-binary=:all: --no-deps -r /tmp/installed-requirements.txt -d /tmp/locked-wheels
+          python - <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          from packaging.utils import canonicalize_name, parse_wheel_filename
+
+          wheels = {}
+          for wheel in Path("/tmp/locked-wheels").glob("*.whl"):
+              name, version, _, _ = parse_wheel_filename(wheel.name)
+              key = (canonicalize_name(name), str(version))
+              wheels[key] = hashlib.sha256(wheel.read_bytes()).hexdigest()
+          lines = [
+              "# Verified Python 3.%d / Ubuntu 24.04 (Linux x86_64) wheels."
+              % sys.version_info.minor,
+              "# Exact versions and SHA256 distribution hashes.",
+          ]
+          for requirement in Path("/tmp/installed-requirements.txt").read_text().splitlines():
+              if not requirement or requirement.startswith("#"):
+                  continue
+              name, version = requirement.split("==", 1)
+              key = (canonicalize_name(name), version)
+              if key not in wheels:
+                  raise ValueError("Missing wheel for " + requirement)
+              lines.append(f"{name}=={version} --hash=sha256:{wheels[key]}")
+          lock = "\n".join(lines) + "\n"
+          print("STOCK_LOCK_PY%d_JSON=%s" % (sys.version_info.minor, json.dumps(lock)))
+          PY
       - name: Run regression tests with coverage
         run: |
           python -m coverage run --source=scripts -m pytest tests -q
