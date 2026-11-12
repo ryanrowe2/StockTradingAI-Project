@@ -167,8 +167,7 @@ class SimpleTradingEnv:
         # A mixed price/state row may be coerced to float64 by pandas,
         # corrupting exact int64 / uint64 state values above 2**53.
         return tuple(
-            int(self.data[column].iloc[self.index])
-            for column in self.state_columns
+            int(self.data[column].iloc[self.index]) for column in self.state_columns
         ) + (self.position,)
 
     def step(self, action: str) -> tuple[tuple[int, ...], float, bool, dict]:
