@@ -28,6 +28,7 @@ if __package__:
         validate_session_positions,
     )
     from .ticker_validation import normalize_ticker_symbols
+    from .numeric_validation import real_float_array
 else:
     from date_validation import (
         mark_verified_daily_dates,
@@ -40,6 +41,7 @@ else:
         validate_session_positions,
     )
     from ticker_validation import normalize_ticker_symbols
+    from numeric_validation import real_float_array
 
 
 class SimpleTradingEnv:
@@ -121,8 +123,10 @@ class SimpleTradingEnv:
             .any()
         ):
             raise ValueError("Open/close prices must be numeric prices, not booleans")
-        prices = self.data[["Open", "Close"]].to_numpy(dtype=float)
-        if not np.isfinite(prices).all() or np.any(prices <= 0):
+        prices = real_float_array(
+            self.data[["Open", "Close"]], context="Open/close prices"
+        )
+        if np.any(prices <= 0):
             raise ValueError("Open/close prices must be finite and positive")
         if state_columns is None:
             provided = set(self.DEFAULT_STATE_COLUMNS).intersection(self.data.columns)

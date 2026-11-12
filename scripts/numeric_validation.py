@@ -10,6 +10,21 @@ from __future__ import annotations
 import numpy as np
 
 
+def binary_label_array(values, *, context: str) -> np.ndarray:
+    """Accept binary labels without silently converting complex values to int."""
+    supplied = np.asarray(values)
+    if np.iscomplexobj(supplied) or (
+        supplied.dtype.kind == "O"
+        and any(
+            isinstance(value, (complex, np.complexfloating)) for value in supplied.flat
+        )
+    ):
+        raise ValueError(f"{context} must be real binary (0 or 1), not complex")
+    if not np.isin(supplied, (0, 1)).all():
+        raise ValueError(f"{context} must be binary (0 or 1)")
+    return supplied.astype(int)
+
+
 def real_float_array(
     values, *, context: str, allow_missing: bool = False
 ) -> np.ndarray:

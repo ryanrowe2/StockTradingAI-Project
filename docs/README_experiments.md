@@ -92,10 +92,14 @@ calendar, including when `Exchange` is omitted. The aliases `LSE` and `XLON`
 use the London Stock Exchange session calendar, while `TSX` and `XTSE`
 use Toronto's calendar (including Boxing Day closures). Exchange aliases and
 ticker case/spacing are canonicalized before identifying duplicate records;
-aliases for the same market share the same bootstrap session timeline.
+aliases for the same market share the same bootstrap session timeline. The
+bootstrap canonicalizes exchange labels before deduplicating market/date
+metadata, preserving shared dates while rejecting conflicting ordinals.
 Observed dates outside any recognized market's actual calendar are rejected,
 with or without supplied ordinals. Unrecognized explicit exchange labels require verified `Session_Number`
-metadata; automatic inference is disabled for those markets.
+metadata even for weekdays. Standalone market-calendar helpers reject
+unverified unknown exchanges and blank identifiers; automatic inference is
+disabled for those markets.
 From 1971 onward, supplied ordinals for every recognized exchange must
 advance by the exact number of scheduled sessions between observations,
 preventing missing trading days from being concealed by compressed positions.
@@ -269,14 +273,15 @@ Python 3.12 environment. These descriptive
 intervals do not imply statistical independence across long market regimes or
 prove future trading profitability. Change the block length, fold count, or
 bootstrap sample count using `--block-sessions`, `--folds`, and
-`--bootstrap-samples`. The helper checks binary classification labels, finite
-prediction probabilities in [0, 1], and at least two distinct chronological
-date blocks. Intraday timestamps and timezone-bearing dates are rejected;
+`--bootstrap-samples`. The helper rejects complex-valued classification labels, checks finite real
+prediction probabilities in [0, 1], and requires at least two distinct
+chronological date blocks. Intraday timestamps and timezone-bearing dates are rejected;
 each observation must represent one daily market date. Fold feasibility is
 checked before fitting any Bayesian model, so a short holdout or oversized
 block setting fails explicitly instead of presenting a degenerate 95% interval.
 The same preflight rejects estimated resampling work exceeding the configured
-random-block draw budget before any model fitting begins.
+random-block draw budget before any model fitting begins. Random seeds
+must be nonnegative integers and are checked before source-data loading.
 
 ## 3. Gaussian HMM regime experiment
 

@@ -44,7 +44,7 @@ if __package__:
         validate_exchange_open_dates,
     )
     from .session_validation import validate_session_positions
-    from .numeric_validation import real_float_array
+    from .numeric_validation import binary_label_array, real_float_array
 else:
     from data_processing import (
         DEFAULT_RAW_DATA,
@@ -60,7 +60,7 @@ else:
         validate_exchange_open_dates,
     )
     from session_validation import validate_session_positions
-    from numeric_validation import real_float_array
+    from numeric_validation import binary_label_array, real_float_array
 
 
 BASELINE_FEATURES = ("Return", "Intraday_Return", "Daily_Range")
@@ -294,10 +294,7 @@ def predict_up_probability(
 def classification_metrics(
     labels: pd.Series, probabilities: np.ndarray
 ) -> dict[str, float]:
-    supplied_labels = labels.to_numpy()
-    if not np.isin(supplied_labels, (0, 1)).all():
-        raise ValueError("Classification labels must be binary (0 or 1)")
-    actual = supplied_labels.astype(int)
+    actual = binary_label_array(labels.to_numpy(), context="Classification labels")
     probabilities = real_float_array(probabilities, context="Probabilities")
     if (
         probabilities.shape != actual.shape

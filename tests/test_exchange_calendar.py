@@ -98,7 +98,13 @@ def test_custom_exchange_remains_available_with_verified_ordinals():
     source = _bars(["2024-01-12", "2024-01-15", "2024-01-16"], exchange="XTEST")
     source["Session_Number"] = [100, 101, 102]
     assert validate_bars(source)["Session_Number"].tolist() == [100, 101, 102]
-    assert exchange_open_mask(pd.DatetimeIndex(["2024-01-15"]), "XTEST").all()
+    with pytest.raises(ValueError, match="requires verified Session_Number"):
+        exchange_open_mask(pd.DatetimeIndex(["2024-01-15"]), "XTEST")
+    assert exchange_open_mask(
+        pd.DatetimeIndex(["2024-01-15"]),
+        "XTEST",
+        verified_session_ordinals=True,
+    ).all()
 
 
 def test_invalid_london_peer_holiday_is_not_calendar_evidence(tmp_path):
