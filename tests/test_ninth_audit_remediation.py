@@ -34,9 +34,7 @@ def test_verified_nyse_ordinal_cannot_attest_historic_closures(closed):
     dates = pd.DatetimeIndex([closed])
     assert not nyse_open_mask(dates, verified_session_ordinals=True).any()
     with pytest.raises(ValueError, match="closed-market date"):
-        validate_exchange_open_dates(
-            dates, "XNYS", verified_session_ordinals=True
-        )
+        validate_exchange_open_dates(dates, "XNYS", verified_session_ordinals=True)
 
 
 def test_historic_independence_day_friday_observed_from_1954():

@@ -364,9 +364,9 @@ def exchange_open_mask(
         result = nyse_open_mask(
             dates, verified_session_ordinals=verified_session_ordinals
         )
-        return (
-            result | dates.isin(_NASDAQ_OPEN_NYSE_CLOSED)
-        ) & (dates >= _NASDAQ_FIRST_SESSION)
+        return (result | dates.isin(_NASDAQ_OPEN_NYSE_CLOSED)) & (
+            dates >= _NASDAQ_FIRST_SESSION
+        )
     if label in _NYSE_EXCHANGES:
         return nyse_open_mask(
             dates, verified_session_ordinals=verified_session_ordinals
