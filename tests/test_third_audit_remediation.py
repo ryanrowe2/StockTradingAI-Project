@@ -75,7 +75,13 @@ def test_large_sample_count_rejected_before_allocation():
 
 
 def test_batched_bootstrap_remains_deterministic():
-    dates = pd.bdate_range("2024-01-02", periods=35).strftime("%Y-%m-%d").tolist()
+    from scripts.market_calendar import _scheduled_sessions
+
+    dates = (
+        _scheduled_sessions(pd.Timestamp("2024-01-02"), pd.Timestamp("2024-03-15"))[:35]
+        .strftime("%Y-%m-%d")
+        .tolist()
+    )
     frame = _scores(dates)
     one = paired_block_accuracy_intervals(
         frame, block_sessions=5, bootstrap_samples=150, seed=21
