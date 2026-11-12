@@ -44,6 +44,7 @@ if __package__:
         validate_exchange_open_dates,
     )
     from .session_validation import validate_session_positions
+    from .ticker_validation import normalize_ticker_symbols
     from .numeric_validation import binary_label_array, real_float_array
 else:
     from data_processing import (
@@ -60,6 +61,7 @@ else:
         validate_exchange_open_dates,
     )
     from session_validation import validate_session_positions
+    from ticker_validation import normalize_ticker_symbols
     from numeric_validation import binary_label_array, real_float_array
 
 
@@ -79,15 +81,26 @@ class ChronologicalSplit:
     validation_end: pd.Timestamp
 
 
-def chronological_split(
-    df: pd.DataFrame, train_fraction: float = 0.6, validation_fraction: float = 0.2
-) -> ChronologicalSplit:
-    """Split globally by observation date, purging cross-period target labels."""
-    if not 0 < train_fraction < 1 or not 0 < validation_fraction < 1 - train_fraction:
-        raise ValueError("Train and validation fractions must leave a test period")
+def _validated_supervised_dates(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Validate the exact next-session and market-identity contract for all APIs.
+
+    Used by both the ordinary splitter and independently constructed
+    ChronologicalSplit partitions. A split is never evidence that its dates,
+    labels, exchange membership or ordinal metadata are authentic.
+    """
     if df.empty or "Target_Date" not in df or "Date" not in df:
         raise ValueError("A nonempty, feature-prepared DataFrame is required")
     date = parse_daily_dates(df["Date"], context="Feature dates")
+    if "Name" in df:
+        identities = normalize_ticker_symbols(
+            df["Name"], context="Invalid supervised ticker identities"
+        )
+        if (
+            pd.DataFrame({"Name": identities.to_numpy(), "Date": date.to_numpy()})
+            .duplicated(["Name", "Date"])
+            .any()
+        ):
+            raise ValueError("Duplicate supervised ticker/date observations")
     target_date = parse_daily_dates(df["Target_Date"], context="Target dates")
     if (target_date <= date).any():
         raise ValueError("Every Target_Date must follow its observation Date")
@@ -161,6 +174,16 @@ def chronological_split(
         end_positions = sessions.get_indexer(destination_dates)
         if ((end_positions - start_positions) != 1).any():
             raise ValueError("Target_Date must be the next market session")
+    return date, target_date
+
+
+def chronological_split(
+    df: pd.DataFrame, train_fraction: float = 0.6, validation_fraction: float = 0.2
+) -> ChronologicalSplit:
+    """Split globally by observation date, purging cross-period target labels."""
+    if not 0 < train_fraction < 1 or not 0 < validation_fraction < 1 - train_fraction:
+        raise ValueError("Train and validation fractions must leave a test period")
+    date, target_date = _validated_supervised_dates(df)
     dates = pd.DatetimeIndex(date.unique()).sort_values()
     if len(dates) < 15:
         raise ValueError("At least 15 distinct trading dates are required")
@@ -256,6 +279,39 @@ def fit_network(
         or equivalent_sample_size <= 0
     ):
         raise ValueError("BDeu equivalent_sample_size must be a finite positive number")
+    if (
+        not isinstance(num_bins, Integral)
+        or isinstance(num_bins, (bool, np.bool_))
+        or not 2 <= num_bins <= 20
+    ):
+        raise ValueError("num_bins must be an integer between 2 and 20")
+    if (
+        not isinstance(features, (tuple, list))
+        or not features
+        or any(
+            not isinstance(name, str) or not name or name == "Trend"
+            for name in features
+        )
+        or len(set(features)) != len(features)
+    ):
+        raise ValueError("Bayesian features must be nonempty distinct column names")
+    if not set((*features, "Trend")).issubset(df.columns):
+        raise ValueError("Missing Bayesian-network training columns")
+    for feature in features:
+        if (
+            not df[feature]
+            .map(
+                lambda value: (
+                    isinstance(value, Integral)
+                    and not isinstance(value, (bool, np.bool_))
+                    and 0 <= value < num_bins
+                )
+            )
+            .all()
+        ):
+            raise ValueError(
+                f"Bayesian feature {feature} must have integer states in [0, num_bins)"
+            )
     validated = df[[*features, "Trend"]].copy()
     validated["Trend"] = binary_label_array(
         validated["Trend"].to_numpy(), context="Training labels"
@@ -353,6 +409,7 @@ def _validate_direct_model_split(split: ChronologicalSplit) -> None:
         or second != second.normalize()
     ):
         raise ValueError("Invalid chronological split boundaries")
+    ticker_universes: list[frozenset[str]] = []
     for label, part in (
         ("Training", split.train),
         ("Validation", split.validation),
@@ -363,21 +420,11 @@ def _validate_direct_model_split(split: ChronologicalSplit) -> None:
         missing = {"Name", "Date", "Target_Date", "Trend"} - set(part.columns)
         if missing:
             raise ValueError(f"{label} partition is missing {sorted(missing)}")
-        require_verified_daily_date_source(part)
-        require_verified_daily_date_source(part, column="Target_Date")
-        dates = parse_daily_dates(part["Date"], context=f"{label} feature dates")
-        targets = parse_daily_dates(
-            part["Target_Date"], context=f"{label} target dates"
+        dates, targets = _validated_supervised_dates(part)
+        normalized_symbols = normalize_ticker_symbols(
+            part["Name"], context=f"{label} partition has invalid ticker identities"
         )
-        if (targets <= dates).any():
-            raise ValueError(f"{label} labels must follow their feature dates")
-        normalized_symbols = part["Name"].astype("string").str.strip().str.upper()
-        if (
-            pd.DataFrame({"Name": normalized_symbols, "Date": dates})
-            .duplicated(["Name", "Date"])
-            .any()
-        ):
-            raise ValueError(f"{label} partition has duplicate observations")
+        ticker_universes.append(frozenset(normalized_symbols))
         if label == "Training" and ((dates > first).any() or (targets > first).any()):
             raise ValueError("Training partition crosses its chronological boundary")
         if label == "Validation" and (
@@ -386,6 +433,10 @@ def _validate_direct_model_split(split: ChronologicalSplit) -> None:
             raise ValueError("Validation partition crosses its chronological boundary")
         if label == "Test" and (dates <= second).any():
             raise ValueError("Test partition overlaps earlier chronological periods")
+    if len(set(ticker_universes)) != 1:
+        raise ValueError(
+            "All chronological partitions must have identical ticker coverage"
+        )
 
 
 def train_and_select(

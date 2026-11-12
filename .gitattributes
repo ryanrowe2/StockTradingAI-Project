@@ -1,0 +1,4 @@
+# Preserve source-observation bytes across checkout operating systems.
+# SHA-256 manifests must never depend on automatic newline conversion.
+data/raw/*.csv -text
+notebooks/*.ipynb -text

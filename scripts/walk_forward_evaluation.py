@@ -8,6 +8,7 @@ market dates together, reducing false precision from cross-ticker correlation.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -135,6 +136,7 @@ def _market_date_block_ids(
     block_sessions: int,
     *,
     verified_datetime_dates: bool = False,
+    allow_unidentified_rows: bool = False,
 ) -> np.ndarray:
     """Return gap-aware, cross-ticker paired blocks for observed market dates.
 
@@ -161,11 +163,47 @@ def _market_date_block_ids(
         )
         if identities.duplicated(["Name", "Date"]).any():
             raise ValueError("Duplicate scored ticker/date observations")
+    elif dates.duplicated().any() and not allow_unidentified_rows:
+        raise ValueError(
+            "Date-only bootstrap scoring requires exactly one aggregate observation per date; "
+            "supply Name for multiple ticker observations"
+        )
     days = pd.DatetimeIndex(dates.unique()).sort_values()
     columns = ["Date"]
     if "Exchange" in frame:
         columns.append("Exchange")
-    if "Session_Number" in frame:
+    # Explicit market-level feeds (without per-ticker identity) must agree
+    # on the ordinal assigned to every canonical exchange/date. Ticker-level
+    # feeds may have different origins; their modern market clocks are instead
+    # reconstructed from the exchange's authoritative session calendar.
+    if "Session_Number" in frame and "Name" not in frame:
+        source_aliases = _normalized_exchange_labels(frame)
+        market_names = (
+            source_aliases
+            if source_aliases is not None
+            else pd.Series("NYSE", index=frame.index)
+        )
+        conflicts = pd.DataFrame(
+            {
+                "Exchange": market_names.to_numpy(),
+                "Date": dates.to_numpy(),
+                "Session_Number": frame["Session_Number"].to_numpy(),
+            }
+        )
+        if (
+            conflicts.groupby(["Exchange", "Date"])["Session_Number"]
+            .nunique()
+            .gt(1)
+            .any()
+        ):
+            raise ValueError("Conflicting session ordinals for the same market date")
+    # Modern official calendars supersede arbitrary offsets in per-ticker
+    # session ordinals. Older/custom markets retain verified source ordinals.
+    known_modern = (dates >= pd.Timestamp("1971-01-01")).all()
+    if "Exchange" in frame:
+        labels_for_calendar = _normalized_exchange_labels(frame)
+        known_modern = known_modern and labels_for_calendar.isin(_KNOWN_EXCHANGES).all()
+    if "Session_Number" in frame and not known_modern:
         columns.append("Session_Number")
     metadata = frame.loc[:, columns].copy()
     metadata["Date"] = parse_daily_dates(metadata["Date"], context="Bootstrap dates")
@@ -262,6 +300,7 @@ def paired_block_accuracy_intervals(
     bootstrap_samples: int = 1000,
     seed: int = 42,
     verified_datetime_dates: bool = False,
+    allow_unidentified_rows: bool = False,
 ) -> dict[str, list[float]]:
     """Bootstrap *paired accuracy differences* over chronological market-date blocks.
 
@@ -305,7 +344,10 @@ def paired_block_accuracy_intervals(
     ):
         raise ValueError("Bootstrap probabilities must be finite values in [0, 1]")
     block_id = _market_date_block_ids(
-        scored, block_sessions, verified_datetime_dates=verified_datetime_dates
+        scored,
+        block_sessions,
+        verified_datetime_dates=verified_datetime_dates,
+        allow_unidentified_rows=allow_unidentified_rows,
     )
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")
@@ -457,6 +499,22 @@ def walk_forward_experiment(
                 },
             }
         )
+        # A canonical fingerprint makes every fold's scored predictions
+        # independently certifiable in addition to the aggregate metrics.
+        fingerprint = hashlib.sha256()
+        for name, day, actual, base_prob, extra_prob in zip(
+            test["Name"],
+            test["Date"],
+            test["Trend"],
+            baseline["test_probabilities"],
+            enhanced["test_probabilities"],
+            strict=True,
+        ):
+            fingerprint.update(
+                f"{name}|{pd.Timestamp(day).date().isoformat()}|{int(actual)}|"
+                f"{float(base_prob):.12f}|{float(extra_prob):.12f}\n".encode("utf-8")
+            )
+        fold_reports[-1]["predictions_sha256"] = fingerprint.hexdigest()
         scored_folds.append(
             pd.DataFrame(
                 {

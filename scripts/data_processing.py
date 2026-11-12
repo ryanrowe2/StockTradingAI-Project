@@ -263,6 +263,9 @@ def validate_bars(
     attested_columns = ("Date",)
     if "Target_Date" in df:
         require_verified_daily_date_source(df, column="Target_Date")
+        # A raw ISO target may be unambiguous, but it is not validated until
+        # the calendar-date parser has rejected malformed timestamps.
+        parse_daily_dates(df["Target_Date"], context="Existing Target_Date")
         attested_columns = ("Date", "Target_Date")
     df = df.copy()
     df["Date"] = parse_daily_dates(df["Date"], context="Every Date")

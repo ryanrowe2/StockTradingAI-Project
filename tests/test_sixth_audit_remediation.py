@@ -42,11 +42,13 @@ def _london_scores():
 
 def test_london_aliases_with_same_date_are_one_bootstrap_market():
     scored = _london_scores()
-    blocks = _market_date_block_ids(scored, block_sessions=10)
+    blocks = _market_date_block_ids(
+        scored, block_sessions=10, allow_unidentified_rows=True
+    )
     assert blocks[:20].tolist() == [0] * 20
     assert len(np.unique(blocks)) == 3
     result = paired_block_accuracy_intervals(
-        scored, block_sessions=10, bootstrap_samples=100
+        scored, block_sessions=10, bootstrap_samples=100, allow_unidentified_rows=True
     )
     assert set(result) == {"baseline", "enhanced"}
 
@@ -54,7 +56,9 @@ def test_london_aliases_with_same_date_are_one_bootstrap_market():
 def test_same_market_aliases_with_equal_ordinals_are_deduplicated():
     scored = _london_scores()
     scored["Session_Number"] = np.repeat(np.arange(24), 2)
-    blocks = _market_date_block_ids(scored, block_sessions=10)
+    blocks = _market_date_block_ids(
+        scored, block_sessions=10, allow_unidentified_rows=True
+    )
     assert len(np.unique(blocks)) == 3
 
 
@@ -63,7 +67,7 @@ def test_conflicting_alias_session_ordinals_are_rejected():
     scored["Session_Number"] = np.repeat(np.arange(24), 2)
     scored.loc[1, "Session_Number"] += 5
     with pytest.raises(ValueError, match="Conflicting session ordinals"):
-        _market_date_block_ids(scored, block_sessions=10)
+        _market_date_block_ids(scored, block_sessions=10, allow_unidentified_rows=True)
 
 
 @pytest.mark.parametrize("bad_price", [100 + 1j, 100 + 0j])
@@ -137,6 +141,10 @@ def test_invalid_seed_rejected_before_loading_or_fitting(monkeypatch, seed):
 
 def test_valid_seed_reproduces_identical_bootstrap_results():
     scored = _london_scores()
-    one = paired_block_accuracy_intervals(scored, seed=17, bootstrap_samples=100)
-    two = paired_block_accuracy_intervals(scored, seed=17, bootstrap_samples=100)
+    one = paired_block_accuracy_intervals(
+        scored, seed=17, bootstrap_samples=100, allow_unidentified_rows=True
+    )
+    two = paired_block_accuracy_intervals(
+        scored, seed=17, bootstrap_samples=100, allow_unidentified_rows=True
+    )
     assert one == two

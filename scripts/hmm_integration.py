@@ -136,10 +136,11 @@ def infer_filtered_regimes(
     )
     positions = session_positions(ordered)
     output = rows.copy()
-    if "Date" in output:
-        mark_verified_daily_dates(output, columns=("Date",))
     if "Name" in output:
         output["Name"] = ordered["Name"]
+    if "Date" in output:
+        output["Date"] = ordered["Date"].reindex(output.index)
+        mark_verified_daily_dates(output, columns=("Date",))
     output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
     complete = ordered[list(indicators)].notna().all(axis=1)
     if not complete.any():

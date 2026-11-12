@@ -284,8 +284,11 @@ ten consecutive **actual market sessions**: a missing session starts a new
 block, and all tickers observed on the same date stay together. Block
 resampling partially accounts for serial and cross-sectional dependence.
 The full five-fold results for both targets are checked in CI against
-[`expected_walk_forward.json`](expected_walk_forward.json) using the pinned
-Python 3.12 environment. These descriptive
+[`expected_walk_forward.json`](expected_walk_forward.json), while
+[`expected_walk_forward_folds.json`](expected_walk_forward_folds.json) freezes
+each fold's date boundaries, observation counts, selected BDeu priors and
+SHA-256 fingerprints of canonical ticker/date labels and both model
+probabilities. The pinned Python 3.12 environment reproduces both checks. These descriptive
 intervals do not imply statistical independence across long market regimes or
 prove future trading profitability. Change the block length, fold count, or
 bootstrap sample count using `--block-sessions`, `--folds`, and

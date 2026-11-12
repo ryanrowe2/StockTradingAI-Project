@@ -1,0 +1,336 @@
+{
+  "close_to_close": [
+    {
+      "baseline": {
+        "accuracy": 0.5181375203031944,
+        "balanced_accuracy": 0.5104770842949629,
+        "f1": 0.6390916463909164,
+        "precision": 0.5182164934894121,
+        "recall": 0.8335096255553205,
+        "roc_auc": 0.5170481539623326
+      },
+      "enhanced": {
+        "accuracy": 0.5187872225230102,
+        "balanced_accuracy": 0.5144055773540549,
+        "f1": 0.5979735842229057,
+        "precision": 0.5223644697328907,
+        "recall": 0.6991749524011001,
+        "roc_auc": 0.5192503597956876
+      },
+      "fold": 1,
+      "majority_accuracy": 0.5118570655116405,
+      "observations": {
+        "test": 9235,
+        "train": 36657,
+        "validation": 9248
+      },
+      "predictions_sha256": "cc43322e3973e9f03e59d0da0fcd0c67d2d1311876d64b6d436a69b73dcfbfdb",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2013-03-28",
+      "train_end": "2010-11-08",
+      "validation_end": "2012-01-18"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.526691932864104,
+        "balanced_accuracy": 0.5145129038804841,
+        "f1": 0.626122658455222,
+        "precision": 0.5351659599356631,
+        "recall": 0.754328112118714,
+        "roc_auc": 0.5183726697186293
+      },
+      "enhanced": {
+        "accuracy": 0.5265836491608012,
+        "balanced_accuracy": 0.5165049508339855,
+        "f1": 0.6134394341290893,
+        "precision": 0.5371632084236606,
+        "recall": 0.7149629018961253,
+        "roc_auc": 0.5273962119249991
+      },
+      "fold": 2,
+      "majority_accuracy": 0.5253925284244721,
+      "observations": {
+        "test": 9235,
+        "train": 45936,
+        "validation": 9235
+      },
+      "predictions_sha256": "a50ecf9854bc9d7200c32ef90e4aab49c64fd1a135f3e9f9128c9d7835745c7c",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2014-06-05",
+      "train_end": "2012-01-18",
+      "validation_end": "2013-03-28"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.5157667386609072,
+        "balanced_accuracy": 0.5145612027682239,
+        "f1": 0.6145116918844566,
+        "precision": 0.5120343839541547,
+        "recall": 0.7682717110920034,
+        "roc_auc": 0.513650929334456
+      },
+      "enhanced": {
+        "accuracy": 0.5142548596112311,
+        "balanced_accuracy": 0.513334598470192,
+        "f1": 0.5938967136150235,
+        "precision": 0.511986301369863,
+        "recall": 0.7070077386070507,
+        "roc_auc": 0.5166381591027157
+      },
+      "fold": 3,
+      "majority_accuracy": 0.5023758099352051,
+      "observations": {
+        "test": 9260,
+        "train": 55202,
+        "validation": 9235
+      },
+      "predictions_sha256": "44502d6a8bfc8db3202c07514a87ffb2db508d1cb9c6582d4d9578e1ff03aca5",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2015-08-13",
+      "train_end": "2013-03-28",
+      "validation_end": "2014-06-05"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.5152138603140227,
+        "balanced_accuracy": 0.5106943659030487,
+        "f1": 0.5953177257525084,
+        "precision": 0.5199747355123954,
+        "recall": 0.6961945031712473,
+        "roc_auc": 0.519598238274128
+      },
+      "enhanced": {
+        "accuracy": 0.5139144558743909,
+        "balanced_accuracy": 0.5114743308468627,
+        "f1": 0.5631143552311435,
+        "precision": 0.521731289449955,
+        "recall": 0.6116279069767442,
+        "roc_auc": 0.5151782492086547
+      },
+      "fold": 4,
+      "majority_accuracy": 0.5121819166215484,
+      "observations": {
+        "test": 9235,
+        "train": 64468,
+        "validation": 9260
+      },
+      "predictions_sha256": "18d4c62d231ce56efb2cefd4c76915b99b49e2ae1d7a72680701dbad53e29e88",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2016-10-19",
+      "train_end": "2014-06-05",
+      "validation_end": "2015-08-13"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.522018049363923,
+        "balanced_accuracy": 0.5047957550437463,
+        "f1": 0.6333611342785654,
+        "precision": 0.5347887323943662,
+        "recall": 0.7764826175869121,
+        "roc_auc": 0.506942638202992
+      },
+      "enhanced": {
+        "accuracy": 0.5108187452430141,
+        "balanced_accuracy": 0.503675663767026,
+        "f1": 0.5726227795193313,
+        "precision": 0.5346815682100408,
+        "recall": 0.616359918200409,
+        "roc_auc": 0.49940373852809167
+      },
+      "fold": 5,
+      "majority_accuracy": 0.5316951179732522,
+      "observations": {
+        "test": 9197,
+        "train": 73759,
+        "validation": 9235
+      },
+      "predictions_sha256": "13dd2bc38e72c2d34d680db335a826c9a361e26da5a5895800bae1bcc7b67072",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2017-12-28",
+      "train_end": "2015-08-13",
+      "validation_end": "2016-10-19"
+    }
+  ],
+  "next_open_to_close": [
+    {
+      "baseline": {
+        "accuracy": 0.5378451543042772,
+        "balanced_accuracy": 0.5228192408515441,
+        "f1": 0.6511361778649665,
+        "precision": 0.539409534127844,
+        "recall": 0.8212371134020618,
+        "roc_auc": 0.5268891605637777
+      },
+      "enhanced": {
+        "accuracy": 0.5376285868976719,
+        "balanced_accuracy": 0.5279589509692132,
+        "f1": 0.6205793495645993,
+        "precision": 0.5452841973766396,
+        "recall": 0.72,
+        "roc_auc": 0.5254312616816936
+      },
+      "fold": 1,
+      "majority_accuracy": 0.5251759610178668,
+      "observations": {
+        "test": 9235,
+        "train": 36657,
+        "validation": 9248
+      },
+      "predictions_sha256": "bd4adc1e013f90bb2f7e1fd2450cc6984d9268ac55637e31f7aa6355278152e8",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2013-03-28",
+      "train_end": "2010-11-08",
+      "validation_end": "2012-01-18"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.518570655116405,
+        "balanced_accuracy": 0.5110851751412387,
+        "f1": 0.6374164084162454,
+        "precision": 0.5186463171864631,
+        "recall": 0.8267400042310133,
+        "roc_auc": 0.508543047557228
+      },
+      "enhanced": {
+        "accuracy": 0.5092582566323768,
+        "balanced_accuracy": 0.503905193390534,
+        "f1": 0.6034995625546806,
+        "precision": 0.5145457257944204,
+        "recall": 0.7296382483604823,
+        "roc_auc": 0.5121957926758419
+      },
+      "fold": 2,
+      "majority_accuracy": 0.5118570655116405,
+      "observations": {
+        "test": 9235,
+        "train": 45936,
+        "validation": 9235
+      },
+      "predictions_sha256": "e5abd36dc7dc3c3caac661937dc6e78b6c4fe2252a723cfd4dd6e11de8dce691",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2014-06-05",
+      "train_end": "2012-01-18",
+      "validation_end": "2013-03-28"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.500755939524838,
+        "balanced_accuracy": 0.5029743684528661,
+        "f1": 0.6182178544883971,
+        "precision": 0.49826943556975506,
+        "recall": 0.814226669567109,
+        "roc_auc": 0.49674360349603747
+      },
+      "enhanced": {
+        "accuracy": 0.5009719222462203,
+        "balanced_accuracy": 0.5022928453698345,
+        "f1": 0.577720917481495,
+        "precision": 0.4981090450677592,
+        "recall": 0.6876223624102675,
+        "roc_auc": 0.5045725818351356
+      },
+      "fold": 3,
+      "majority_accuracy": 0.49643628509719223,
+      "observations": {
+        "test": 9260,
+        "train": 55202,
+        "validation": 9235
+      },
+      "predictions_sha256": "1ce41bdc4752ecc3a821a158f85ad2490e3bc1fa0ead667585b749a6f73f459e",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2015-08-13",
+      "train_end": "2013-03-28",
+      "validation_end": "2014-06-05"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.5167298321602599,
+        "balanced_accuracy": 0.5067683932619451,
+        "f1": 0.6031124944419742,
+        "precision": 0.5309221856896822,
+        "recall": 0.6980238781391519,
+        "roc_auc": 0.5009533252951329
+      },
+      "enhanced": {
+        "accuracy": 0.5140227395776935,
+        "balanced_accuracy": 0.5071925950360116,
+        "f1": 0.5801683816651075,
+        "precision": 0.531721536351166,
+        "recall": 0.638328530259366,
+        "roc_auc": 0.5103395890397173
+      },
+      "fold": 4,
+      "majority_accuracy": 0.526042230644288,
+      "observations": {
+        "test": 9235,
+        "train": 64468,
+        "validation": 9260
+      },
+      "predictions_sha256": "c9723a5381bcac55f2ace65963d8d07563313e1afea01e75161385abf5392b1a",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2016-10-19",
+      "train_end": "2014-06-05",
+      "validation_end": "2015-08-13"
+    },
+    {
+      "baseline": {
+        "accuracy": 0.5098401652712841,
+        "balanced_accuracy": 0.5037575773919436,
+        "f1": 0.6230769230769231,
+        "precision": 0.512869924294563,
+        "recall": 0.7936102236421725,
+        "roc_auc": 0.5017797083676927
+      },
+      "enhanced": {
+        "accuracy": 0.5032075676851148,
+        "balanced_accuracy": 0.49907836488717117,
+        "f1": 0.5884895974061065,
+        "precision": 0.5098314606741573,
+        "recall": 0.6958466453674121,
+        "roc_auc": 0.49881616926615036
+      },
+      "fold": 5,
+      "majority_accuracy": 0.510492551919104,
+      "observations": {
+        "test": 9197,
+        "train": 73759,
+        "validation": 9235
+      },
+      "predictions_sha256": "f4096d188b46839df8d66817f9b59c6a3e5ad071eb03e8cf7fe3acad5094264c",
+      "selected_prior": {
+        "baseline": 5,
+        "enhanced": 5
+      },
+      "test_end": "2017-12-28",
+      "train_end": "2015-08-13",
+      "validation_end": "2016-10-19"
+    }
+  ]
+}
