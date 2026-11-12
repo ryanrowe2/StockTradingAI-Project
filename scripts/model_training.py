@@ -95,9 +95,11 @@ def _validated_supervised_dates(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]
         identities = normalize_ticker_symbols(
             df["Name"], context="Invalid supervised ticker identities"
         )
-        if pd.DataFrame(
-            {"Name": identities.to_numpy(), "Date": date.to_numpy()}
-        ).duplicated(["Name", "Date"]).any():
+        if (
+            pd.DataFrame({"Name": identities.to_numpy(), "Date": date.to_numpy()})
+            .duplicated(["Name", "Date"])
+            .any()
+        ):
             raise ValueError("Duplicate supervised ticker/date observations")
     target_date = parse_daily_dates(df["Target_Date"], context="Target dates")
     if (target_date <= date).any():
@@ -286,18 +288,27 @@ def fit_network(
     if (
         not isinstance(features, (tuple, list))
         or not features
-        or any(not isinstance(name, str) or not name or name == "Trend" for name in features)
+        or any(
+            not isinstance(name, str) or not name or name == "Trend"
+            for name in features
+        )
         or len(set(features)) != len(features)
     ):
         raise ValueError("Bayesian features must be nonempty distinct column names")
     if not set((*features, "Trend")).issubset(df.columns):
         raise ValueError("Missing Bayesian-network training columns")
     for feature in features:
-        if not df[feature].map(
-            lambda value: isinstance(value, Integral)
-            and not isinstance(value, (bool, np.bool_))
-            and 0 <= value < num_bins
-        ).all():
+        if (
+            not df[feature]
+            .map(
+                lambda value: (
+                    isinstance(value, Integral)
+                    and not isinstance(value, (bool, np.bool_))
+                    and 0 <= value < num_bins
+                )
+            )
+            .all()
+        ):
             raise ValueError(
                 f"Bayesian feature {feature} must have integer states in [0, num_bins)"
             )
@@ -423,7 +434,9 @@ def _validate_direct_model_split(split: ChronologicalSplit) -> None:
         if label == "Test" and (dates <= second).any():
             raise ValueError("Test partition overlaps earlier chronological periods")
     if len(set(ticker_universes)) != 1:
-        raise ValueError("All chronological partitions must have identical ticker coverage")
+        raise ValueError(
+            "All chronological partitions must have identical ticker coverage"
+        )
 
 
 def train_and_select(
