@@ -316,13 +316,18 @@ python -m pip install -r requirements-dev.txt
 python -m pytest tests -q
 python -m ruff check scripts tests --isolated --select E4,E7,E9,F,B
 python -m scripts.verify_source_data
+python -m scripts.verify_upstream_source
 ```
 
 The published source-data integrity snapshot is
 [`docs/source_data_manifest.json`](docs/source_data_manifest.json): SHA-256
 digests for all 33 CSVs, with exact row reconciliation between the combined
-source, 31 ticker files, and 2017 subset. This establishes release-internal
-byte integrity; the upstream license evidence is recorded separately in
+source, 31 ticker files, and 2017 subset. In addition,
+[`docs/upstream_source_manifest.json`](docs/upstream_source_manifest.json)
+records the original publisher's immutable Git commit and all 31 source blobs.
+`python -m scripts.verify_upstream_source` verifies canonical CSV content
+against those upstream object IDs (allowing only CRLF/LF normalization).
+Publisher identity and license evidence are recorded in
 [`data/raw/README.md`](data/raw/README.md). CI checks branch-aware coverage
 and risk-weighted module thresholds, as well as fixed per-fold experimental
 snapshots. Windows/macOS runs use flexible dependencies as portability smoke
