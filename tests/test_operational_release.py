@@ -89,7 +89,6 @@ def test_superseded_pr_only_matches_verified_head() -> None:
     assert "superseded" in cleanup.eligible(branch(name, sha), {})
 
 
-
 def test_transient_delete_502_rechecks_matching_sha(monkeypatch) -> None:
     events: list[str] = []
 
