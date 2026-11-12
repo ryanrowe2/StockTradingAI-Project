@@ -8,6 +8,7 @@ market dates together, reducing false precision from cross-ticker correlation.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -161,11 +162,22 @@ def _market_date_block_ids(
         )
         if identities.duplicated(["Name", "Date"]).any():
             raise ValueError("Duplicate scored ticker/date observations")
+    elif dates.duplicated().any():
+        raise ValueError(
+            "Date-only bootstrap scoring requires exactly one aggregate observation per date; "
+            "supply Name for multiple ticker observations"
+        )
     days = pd.DatetimeIndex(dates.unique()).sort_values()
     columns = ["Date"]
     if "Exchange" in frame:
         columns.append("Exchange")
-    if "Session_Number" in frame:
+    # Modern official calendars supersede arbitrary offsets in per-ticker
+    # session ordinals. Older/custom markets retain verified source ordinals.
+    known_modern = (dates >= pd.Timestamp("1971-01-01")).all()
+    if "Exchange" in frame:
+        labels_for_calendar = _normalized_exchange_labels(frame)
+        known_modern = known_modern and labels_for_calendar.isin(_KNOWN_EXCHANGES).all()
+    if "Session_Number" in frame and not known_modern:
         columns.append("Session_Number")
     metadata = frame.loc[:, columns].copy()
     metadata["Date"] = parse_daily_dates(metadata["Date"], context="Bootstrap dates")
@@ -457,6 +469,22 @@ def walk_forward_experiment(
                 },
             }
         )
+        # A canonical fingerprint makes every fold's scored predictions
+        # independently certifiable in addition to the aggregate metrics.
+        fingerprint = hashlib.sha256()
+        for name, day, actual, base_prob, extra_prob in zip(
+            test["Name"],
+            test["Date"],
+            test["Trend"],
+            baseline["test_probabilities"],
+            enhanced["test_probabilities"],
+            strict=True,
+        ):
+            fingerprint.update(
+                f"{name}|{pd.Timestamp(day).date().isoformat()}|{int(actual)}|"
+                f"{float(base_prob):.12f}|{float(extra_prob):.12f}\n".encode("utf-8")
+            )
+        fold_reports[-1]["predictions_sha256"] = fingerprint.hexdigest()
         scored_folds.append(
             pd.DataFrame(
                 {
