@@ -102,7 +102,9 @@ def session_positions(
         sessions = inferred_equity_sessions(dates, start=start, end=end)
         indices = sessions.get_indexer(dates)
         if (indices < 0).any():
-            raise ValueError("Observed trading dates are absent from the requested calendar")
+            raise ValueError(
+                "Observed trading dates are absent from the requested calendar"
+            )
         return pd.Series(indices, index=frame.index, dtype=np.int64)
     # Use a source-wide date range for comparable NYSE ordinals. Additional
     # observed weekdays are shared within a declared exchange, or only within
@@ -121,7 +123,9 @@ def session_positions(
         )
         inferred = sessions.get_indexer(symbol_dates)
         if (inferred < 0).any():
-            raise ValueError("Observed trading dates are absent from the requested calendar")
+            raise ValueError(
+                "Observed trading dates are absent from the requested calendar"
+            )
         positions[indices] = inferred
     return pd.Series(positions, index=frame.index, dtype=np.int64)
 
