@@ -130,9 +130,8 @@ def _cached_bundled_session_calendar(
     # The bundled universe spans two exchanges. Verify the source ticker's
     # own market before letting its date contribute a reference session.
     nasdaq = names.isin(_BUNDLED_NASDAQ_SYMBOLS).to_numpy()
-    valid = (
-        (~nasdaq & exchange_open_mask(observed, "NYSE"))
-        | (nasdaq & exchange_open_mask(observed, "NASDAQ"))
+    valid = (~nasdaq & exchange_open_mask(observed, "NYSE")) | (
+        nasdaq & exchange_open_mask(observed, "NASDAQ")
     )
     return pd.DatetimeIndex(dates.loc[valid].unique()).sort_values()
 
