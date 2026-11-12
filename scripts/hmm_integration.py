@@ -97,7 +97,7 @@ def _validated_indicators(
         ordered["Name"] = normalized
     if "Date" in ordered:
         ordered["Date"] = parse_daily_dates(ordered["Date"], context="HMM dates")
-        mark_verified_daily_dates(ordered)
+        mark_verified_daily_dates(ordered, columns=("Date",))
         ordered = ordered.sort_values("Date", kind="stable")
     if "Date" in ordered and ordered["Date"].duplicated().any():
         raise ValueError("Duplicate dates for a single ticker")
@@ -137,7 +137,7 @@ def infer_filtered_regimes(
     positions = session_positions(ordered)
     output = rows.copy()
     if "Date" in output:
-        mark_verified_daily_dates(output)
+        mark_verified_daily_dates(output, columns=("Date",))
     if "Name" in output:
         output["Name"] = ordered["Name"]
     output["Market_Regime"] = pd.Series(pd.NA, index=output.index, dtype="Int64")
@@ -201,6 +201,20 @@ def fit_hmm_on_indicators(
     Holdout observations must be supplied only to ``infer_filtered_regimes``
     using the fitted training-period model, never to this fitting function.
     """
+    if (
+        not isinstance(n_components, (int, np.integer))
+        or isinstance(n_components, (bool, np.bool_))
+        or n_components < 1
+    ):
+        raise ValueError("HMM n_components must be a positive integer")
+    if (
+        not isinstance(random_state, (int, np.integer))
+        or isinstance(random_state, (bool, np.bool_))
+        or not 0 <= random_state <= np.iinfo(np.uint32).max
+    ):
+        raise ValueError("HMM random_state must be a supported deterministic seed")
+    n_components = int(n_components)
+    random_state = int(random_state)
     indicators = tuple(indicators)
     clean = _validated_indicators(
         df,
