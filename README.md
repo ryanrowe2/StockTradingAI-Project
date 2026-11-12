@@ -51,19 +51,27 @@ supplied. An optional `Exchange` column groups stocks on the same market:
 `NYSE`, `XNYS`, `NASDAQ`, and `XNAS` use the U.S. calendar;
 `LSE` and `XLON` use the London Stock Exchange calendar, including Boxing Day.
 Other explicitly named exchanges require independently verified
-`Session_Number` metadata; their sessions are not inferred from U.S. weekdays. A peer's fabricated closed-market observation
-cannot contaminate a selected stock's inferred calendar. When `Exchange` is
+`Session_Number` metadata; their sessions are not inferred from U.S. weekdays.
+A peer's fabricated closed-market observation cannot contaminate a selected
+stock's inferred calendar. When `Exchange` is
 omitted, U.S. equity market rules apply rather than accepting arbitrary
 observed holiday weekdays. Callers can supply verified `Session_Number`
 metadata, required for pre-1971 NYSE dates where automatic inference cannot
 safely reconstruct the historical schedule. Close-to-close daily
 returns, RSI changes, and prediction targets do not bridge missing sessions.
-For `NYSE`/`XNYS` observations from 1971 onward, supplied ordinals must have
+For recognized exchanges from 1971 onward, supplied ordinals must have
 the same spacing as actual scheduled market sessions, so an omitted Tuesday
 cannot be disguised as the next session after Monday. Verified session ordinals
 also support historical NYSE Saturday trading through
 its last Saturday session on May 24, 1952; later weekends are rejected.
-Direct session utilities require daily dates. For raw NumPy date scalars, use
+Direct session utilities require daily dates. The standalone
+`session_positions()` and `validate_session_positions()` helpers reject
+previously coerced pandas datetime columns unless the caller verifies original
+day-level precision and passes `verified_datetime_dates=True`, or supplies a
+frame already marked by the validated pipeline. Explicit `calendar_start` and
+`calendar_end` bounds must include every observed date; out-of-range bounds
+are rejected instead of returning negative session indices.
+For raw NumPy date scalars, use
 `validate_raw_bar_records(records)` **before constructing a pandas DataFrame**:
 it rejects year-, month-, or week-precision dates rather than inventing a day.
 It also rejects finer-than-day NumPy timestamps and Python midnight datetime
@@ -241,9 +249,9 @@ An additional `Session_Number` column preserves market-session positions through
 this exclusion. The bundled individual stock files use the complete dataset's
 observed-session calendar. Other CSVs, including new files inside `data/raw/`,
 use the recognized exchange's actual holiday calendar (defaulting to the
-U.S. market when `Exchange` is omitted). Unknown explicitly declared exchanges
-retain observed weekdays and require verified ordinals for exact adjacency. Full-source dates anchor inferred ordinals even when loading a
-ticker subset. Supplied session positions are checked for chronological
+U.S. market when `Exchange` is omitted). Unknown explicitly declared exchanges require verified ordinals; automatic
+calendar inference is disabled for them. Full-source dates anchor inferred
+ordinals even when loading a ticker subset. Supplied session positions are checked for chronological
 uniqueness within each ticker or declared exchange and for valid daily dates,
 including historically verified Saturday trading before summer 1952;
 large unsigned positions are compared as exact integers, without float loss.
@@ -352,11 +360,11 @@ TSX/XTSE observations use their corresponding trading calendars; inferred and
 supplied `Session_Number` values must preserve actual session gaps. Unknown
 explicit exchange identifiers must provide independently verified
 `Session_Number` values, rather than inheriting fictional sessions from the
-U.S. calendar. Unlabeled equity records use the U.S. calendar. Direct
+U.S. calendar. Unlabeled equity records use the U.S. calendar. Direct `session_positions`, `validate_session_positions`,
 `add_technical_indicators`, `SimpleTradingEnv`,
-`contiguous_trading_segments`, and HMM entry points now require an explicit
+`contiguous_trading_segments`, and HMM entry points require an explicit
 `verified_datetime_dates=True` attestation when supplied already-coerced
-pandas timestamps. Results of `validate_bars` carry their verified-date marker
+pandas timestamps without an existing validated-date marker. Results of `validate_bars` carry their verified-date marker
 through normal pandas frame operations; raw ISO date strings remain supported.
 Do not attest to converted month/year-only dates without inspecting the
 original source precision.
