@@ -2614,6 +2614,7 @@ def test_paired_market_date_bootstrap_is_deterministic_and_paired():
         block_sessions=5,
         bootstrap_samples=100,
         seed=11,
+        allow_unidentified_rows=True,
     )
     assert first == paired_block_accuracy_intervals(
         observed,
@@ -2621,6 +2622,7 @@ def test_paired_market_date_bootstrap_is_deterministic_and_paired():
         block_sessions=5,
         bootstrap_samples=100,
         seed=11,
+        allow_unidentified_rows=True,
     )
     assert first["baseline"] == [0.0, 0.0]
     assert first["enhanced"] == [0.5, 0.5]

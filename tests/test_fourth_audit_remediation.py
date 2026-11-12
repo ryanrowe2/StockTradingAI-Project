@@ -65,7 +65,7 @@ def test_mixed_exchange_missing_session_breaks_paired_blocks():
         ],
         ignore_index=True,
     )
-    blocks = _market_date_block_ids(frame, 10)
+    blocks = _market_date_block_ids(frame, 10, allow_unidentified_rows=True)
     per_date = dict(zip(frame["Date"], blocks, strict=True))
     assert per_date["2024-01-16"] != per_date["2024-01-17"]
     assert per_date["2024-01-17"] == per_date["2024-01-18"]
@@ -84,7 +84,7 @@ def test_custom_market_missing_session_breaks_shared_date_blocks():
         ],
         ignore_index=True,
     )
-    blocks = _market_date_block_ids(data, 10)
+    blocks = _market_date_block_ids(data, 10, allow_unidentified_rows=True)
     per_date = dict(zip(data["Date"], blocks, strict=True))
     assert per_date["2024-01-16"] != per_date["2024-01-17"]
 

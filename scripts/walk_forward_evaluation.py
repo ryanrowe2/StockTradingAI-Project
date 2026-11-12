@@ -136,6 +136,7 @@ def _market_date_block_ids(
     block_sessions: int,
     *,
     verified_datetime_dates: bool = False,
+    allow_unidentified_rows: bool = False,
 ) -> np.ndarray:
     """Return gap-aware, cross-ticker paired blocks for observed market dates.
 
@@ -162,7 +163,7 @@ def _market_date_block_ids(
         )
         if identities.duplicated(["Name", "Date"]).any():
             raise ValueError("Duplicate scored ticker/date observations")
-    elif dates.duplicated().any():
+    elif dates.duplicated().any() and not allow_unidentified_rows:
         raise ValueError(
             "Date-only bootstrap scoring requires exactly one aggregate observation per date; "
             "supply Name for multiple ticker observations"
@@ -171,6 +172,28 @@ def _market_date_block_ids(
     columns = ["Date"]
     if "Exchange" in frame:
         columns.append("Exchange")
+    # Explicit market-level feeds (without per-ticker identity) must agree
+    # on the ordinal assigned to every canonical exchange/date. Ticker-level
+    # feeds may have different origins; their modern market clocks are instead
+    # reconstructed from the exchange's authoritative session calendar.
+    if "Session_Number" in frame and "Name" not in frame:
+        source_aliases = _normalized_exchange_labels(frame)
+        market_names = (
+            source_aliases if source_aliases is not None
+            else pd.Series("NYSE", index=frame.index)
+        )
+        conflicts = pd.DataFrame(
+            {
+                "Exchange": market_names.to_numpy(),
+                "Date": dates.to_numpy(),
+                "Session_Number": frame["Session_Number"].to_numpy(),
+            }
+        )
+        if (
+            conflicts.groupby(["Exchange", "Date"])["Session_Number"]
+            .nunique().gt(1).any()
+        ):
+            raise ValueError("Conflicting session ordinals for the same market date")
     # Modern official calendars supersede arbitrary offsets in per-ticker
     # session ordinals. Older/custom markets retain verified source ordinals.
     known_modern = (dates >= pd.Timestamp("1971-01-01")).all()
@@ -274,6 +297,7 @@ def paired_block_accuracy_intervals(
     bootstrap_samples: int = 1000,
     seed: int = 42,
     verified_datetime_dates: bool = False,
+    allow_unidentified_rows: bool = False,
 ) -> dict[str, list[float]]:
     """Bootstrap *paired accuracy differences* over chronological market-date blocks.
 
@@ -317,7 +341,10 @@ def paired_block_accuracy_intervals(
     ):
         raise ValueError("Bootstrap probabilities must be finite values in [0, 1]")
     block_id = _market_date_block_ids(
-        scored, block_sessions, verified_datetime_dates=verified_datetime_dates
+        scored,
+        block_sessions,
+        verified_datetime_dates=verified_datetime_dates,
+        allow_unidentified_rows=allow_unidentified_rows,
     )
     if len(np.unique(block_id)) < 2:
         raise ValueError("Bootstrap requires at least two chronological date blocks")

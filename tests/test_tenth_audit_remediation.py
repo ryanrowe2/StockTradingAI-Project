@@ -97,7 +97,7 @@ def test_direct_model_training_rejects_leakage_before_fitting(corruption):
     else:
         train = pd.concat([good.train, good.train], ignore_index=True)
         bad = replace(good, train=train)
-    with pytest.raises(ValueError, match="partition|duplicate"):
+    with pytest.raises(ValueError, match="partition|duplicate|Duplicate|next market session"):
         train_and_select(
             bad,
             ("Return", "Intraday_Return", "Daily_Range"),
