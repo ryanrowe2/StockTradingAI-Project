@@ -479,7 +479,9 @@ def walk_forward_experiment(
                 }
             )
         )
-    scored = mark_verified_daily_dates(pd.concat(scored_folds, ignore_index=True), columns=("Date",))
+    scored = mark_verified_daily_dates(
+        pd.concat(scored_folds, ignore_index=True), columns=("Date",)
+    )
     intervals = paired_block_accuracy_intervals(
         scored,
         block_sessions=block_sessions,
