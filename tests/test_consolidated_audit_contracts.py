@@ -116,9 +116,7 @@ def test_hmm_output_dates_remain_attested_after_normalizing_ticker():
             "MACD": np.linspace(-0.3, 0.3, len(days)),
         }
     )
-    _, regimes = fit_hmm_on_indicators(
-        frame, n_components=1, random_state=42
-    )
+    _, regimes = fit_hmm_on_indicators(frame, n_components=1, random_state=42)
     assert regimes["Name"].eq("AAPL").all()
     require_verified_daily_date_source(regimes)
 
@@ -132,15 +130,11 @@ def test_bootstrap_accepts_independent_modern_session_ordinal_origins():
             "Session_Number": list(range(5)) + list(range(100, 105)),
         }
     )
-    block_ids = _market_date_block_ids(
-        scored, 2, verified_datetime_dates=True
-    )
+    block_ids = _market_date_block_ids(scored, 2, verified_datetime_dates=True)
     assert block_ids[:5].tolist() == block_ids[5:].tolist()
 
 
 def test_bootstrap_rejects_duplicate_unidentified_date_only_observations():
-    scored = pd.DataFrame(
-        {"Date": ["2024-04-01", "2024-04-01", "2024-04-02"]}
-    )
+    scored = pd.DataFrame({"Date": ["2024-04-01", "2024-04-01", "2024-04-02"]})
     with pytest.raises(ValueError, match="Date-only bootstrap"):
         _market_date_block_ids(scored, 2)
