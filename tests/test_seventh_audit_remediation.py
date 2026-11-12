@@ -116,8 +116,9 @@ def test_valid_multi_ticker_market_date_remains_supported():
 def test_historical_nyse_special_closures_are_not_sessions(closed):
     date = pd.DatetimeIndex([closed])
     assert not nyse_open_mask(date).any()
+    assert not nyse_open_mask(date, verified_session_ordinals=True).any()
     with pytest.raises(ValueError, match="closed-market date"):
-        validate_nyse_open_dates(date)
+        validate_nyse_open_dates(date, verified_session_ordinals=True)
 
 
 def test_historical_nearby_nyse_open_days_and_saturday_preserved():
