@@ -23,7 +23,11 @@ def _synthetic_bundle(root):
     for number in range(31):
         ticker = f"S{number:02d}"
         row = dict(
-            zip(fields, ["2017-01-03", ticker, "10", "11", "9", "10", "100"], strict=True)
+            zip(
+                fields,
+                ["2017-01-03", ticker, "10", "11", "9", "10", "100"],
+                strict=True,
+            )
         )
         rows.append(row)
         path = root / f"{ticker}_2006-01-01_to_2018-01-01.csv"
@@ -57,9 +61,7 @@ def test_reconciliation_rejects_modified_combined_prices(tmp_path):
     _synthetic_bundle(tmp_path)
     file = tmp_path / "all_stocks_2006-01-01_to_2018-01-01.csv"
     file.write_text(
-        file.read_text(encoding="utf-8").replace(
-            ",10,11,9,10,100", ",12,13,9,10,100"
-        ),
+        file.read_text(encoding="utf-8").replace(",10,11,9,10,100", ",12,13,9,10,100"),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="Combined source differs"):
