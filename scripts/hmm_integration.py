@@ -202,7 +202,9 @@ def fit_hmm_on_indicators(
     """
     indicators = tuple(indicators)
     clean = _validated_indicators(
-        df, indicators, keep_missing=True,
+        df,
+        indicators,
+        keep_missing=True,
         verified_datetime_dates=verified_datetime_dates,
     )
     # Fitting cannot directly accept missing-emission rows. Instead, break
