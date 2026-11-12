@@ -248,7 +248,9 @@ def paired_block_accuracy_intervals(
         )
     except (TypeError, ValueError) as exc:
         if "complex" in str(exc):
-            raise ValueError("Bootstrap probabilities cannot contain complex values") from exc
+            raise ValueError(
+                "Bootstrap probabilities cannot contain complex values"
+            ) from exc
         if "finite" in str(exc):
             raise ValueError(
                 "Bootstrap probabilities must be finite values in [0, 1]"
