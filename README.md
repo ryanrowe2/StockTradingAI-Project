@@ -1,5 +1,11 @@
 # Probabilistic Stock Trading Agent
 
+**Research question:** Can probabilistic models and a reinforcement-learning trading simulator be evaluated reproducibly on historical market data without leaking future information into training?
+
+**What I want reviewers to notice:** The project combines Bayesian networks, hidden Markov models, and Q-learning under chronological evaluation. The [historical research results](#historical-research-results) and [reproduction instructions](#reproduce-the-experiments) are the best starting points; benchmark comparisons and limitations matter as much as test counts.
+
+**Scope:** Historical research software, not evidence of a profitable live trading system.
+
 **Bayesian Networks · Hidden Markov Models · Q-Learning · Quantitative Research**
 
 A reproducible Python research system for analyzing historical equity markets, predicting next-session price direction, identifying latent market regimes, and evaluating experimental trading decisions.
