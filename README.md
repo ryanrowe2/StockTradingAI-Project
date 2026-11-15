@@ -59,21 +59,9 @@ All components share validated market-session handling and causal feature prepar
 
 ## Historical Research Results
 
-### Bayesian-network holdout evaluation
+**Main finding:** Neither Bayesian-network model exceeded the majority-class benchmark in the reported holdout evaluation. In the separate AAPL experiment, the frozen Q-learning policy also underperformed the buy-and-hold comparator. These findings support the rigor of the evaluation workflow, not a claim of trading advantage.
 
-| Model | Test Accuracy |
-|---|---:|
-| Majority-class benchmark | 52.09% |
-| Baseline Bayesian network | 51.72% |
-| Enhanced Bayesian network | 50.96% |
-
-Neither model outperformed the majority-class benchmark in the reported holdout evaluation.
-
-Five-fold expanding-window experiments additionally evaluated close-to-close and next-open-to-close predictions. Accuracy improvements over the majority benchmark were small, with reported 95% bootstrap intervals spanning zero.
-
-In the separate historical AAPL trading experiment, the Q-learning policy generated **+$29.10** in one-share holdout profit, compared with **+$53.07** for the buy-and-hold comparator.
-
-These experiments demonstrate reproducible modeling and evaluation. They do not establish a statistically reliable trading advantage or real-world profitability. The historical universe is not point-in-time investable and may contain selection or survivorship bias.
+**Inspect the full evidence:** [Historical evaluation results](#historical-evaluation-results) includes model accuracy, ROC AUC, the trading comparison, expanding-window experiments, uncertainty and dataset limitations.
 
 ## Engineering and Reproducibility
 
